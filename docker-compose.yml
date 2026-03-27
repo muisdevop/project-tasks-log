@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "file:/data/dev.db"
+      APP_USERNAME: "admin"
+      APP_PASSWORD: "admin123"
+      SESSION_SECRET: "change-this-in-production"
+    volumes:
+      - tasklogger-data:/data
+
+volumes:
+  tasklogger-data:
+

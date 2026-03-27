@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Project Tasks Log
 
-## Getting Started
+Single-user web app for:
+- Login
+- Create/select projects
+- Create/select tasks
+- Auto time logging using configured working hours and work days
+- Complete/cancel/resume task flow
 
-First, run the development server:
+## Tech Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Next.js (App Router) + TypeScript
+- Prisma + SQLite
+- Cookie session auth with `jose`
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Install dependencies:
+   - `npm install`
+2. Configure environment variables (copy `.env.example` to `.env` if needed):
+   - `DATABASE_URL`
+   - `APP_USERNAME`
+   - `APP_PASSWORD`
+   - `SESSION_SECRET`
+3. Run migration:
+   - `npm run db:migrate`
+4. Seed default settings:
+   - `npm run db:seed`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Run
 
-## Learn More
+- Development: `npm run dev`
+- Lint: `npm run lint`
+- Tests: `npm run test`
 
-To learn more about Next.js, take a look at the following resources:
+## Task Time Rules
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- New task starts in `in_progress`.
+- On complete/cancel, elapsed time is calculated with working-window overlap only.
+- Non-working hours are excluded.
+- Cross-day handling works with settings:
+  - Example: start 1h before day end and complete next day after 3h from day start -> total 4h.
+- Cancelled tasks can be resumed; prior elapsed time is preserved.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Password behavior
 
-## Deploy on Vercel
+- Login checks DB password hash first (`UserSettings.passwordHash`).
+- If no DB password hash exists yet, it falls back to `.env` `APP_PASSWORD`.
+- You can change password from the `Settings` page; this updates the DB hash without redeploying.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploy (standalone build)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+After `npm run build`, upload the folder:
+- `.next/standalone`
+
+Run on the target machine:
+- `node server.js`
+
+The standalone folder already includes `dev.db` and `.env` for the defaults (you can edit `.env` in that folder for real deployments).
+
+## Docker / Coolify
+
+This project includes a production `Dockerfile` and `docker-compose.yml`.
+
+### Local (Docker)
+- `docker compose up --build`
+- Open: `http://localhost:3000`
+
+### Environment variables
+The container uses SQLite at `file:/data/dev.db` (stored in a Docker volume).
+At minimum, set:
+- `APP_USERNAME`
+- `APP_PASSWORD` (initial password; after that, password is stored in DB and can be changed from Settings)
+- `SESSION_SECRET`
+
+Coolify can build/run using the `Dockerfile` automatically.

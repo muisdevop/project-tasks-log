@@ -1,0 +1,69 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum TaskStatus {
+  in_progress
+  completed
+  cancelled
+}
+
+enum TaskEventType {
+  created
+  completed
+  cancelled
+  resumed
+}
+
+model UserSettings {
+  id           Int      @id @default(1)
+  workStart    String   @default("09:00")
+  workEnd      String   @default("17:00")
+  workDays     Json
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Project {
+  id        Int      @id @default(autoincrement())
+  name      String
+  nameKey   String   @unique
+  isArchived Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
+}
+
+model Task {
+  id             Int        @id @default(autoincrement())
+  projectId      Int
+  title          String
+  description    String?
+  status         TaskStatus @default(in_progress)
+  startedAt      DateTime
+  endedAt        DateTime?
+  elapsedSeconds Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  events         TaskEvent[]
+}
+
+model TaskEvent {
+  id        Int           @id @default(autoincrement())
+  taskId    Int
+  eventType TaskEventType
+  eventAt   DateTime      @default(now())
+  meta      Json?
+  task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
