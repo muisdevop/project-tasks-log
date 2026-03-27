@@ -145,6 +145,8 @@ export async function PATCH(request: Request) {
     }
 
     if (parsed.data.action === "log-notes") {
+      console.log("Log-notes action received:", parsed.data);
+      
       if (task.status !== "in_progress") {
         return NextResponse.json(
           { error: "Only in-progress tasks can have log notes added." },

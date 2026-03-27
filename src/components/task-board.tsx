@@ -174,6 +174,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as { error?: string };
+      console.error("Log notes error:", data);
       setError(data.error ?? "Failed to save notes.");
     }
     
