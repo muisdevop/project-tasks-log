@@ -215,15 +215,37 @@ function generatePDFHTML(tasks: any[], today: Date): string {
         .task-output {
           margin-top: 10px;
           padding: 8px;
-          background: #e8f5e8;
-          border-left: 3px solid #4CAF50;
+          background-color: #f0f8f0;
+          border-left: 4px solid #28a745;
           font-size: 11px;
+        }
+        .task-subtasks {
+          margin-top: 10px;
+          padding: 8px;
+          background-color: #f8f9fa;
+          border-left: 4px solid #6c757d;
+          font-size: 11px;
+        }
+        .task-subtasks ul {
+          margin: 5px 0;
+          padding-left: 20px;
+        }
+        .task-subtasks li {
+          margin: 3px 0;
+          padding: 2px 0;
+        }
+        .task-subtasks li.completed {
+          color: #28a745;
+          text-decoration: line-through;
+        }
+        .task-subtasks li.pending {
+          color: #6c757d;
         }
         .task-reason {
           margin-top: 10px;
           padding: 8px;
           background: #ffe8e8;
-          border-left: 3px solid #f44336;
+          border-left: 4px solid #f44336;
           font-size: 11px;
         }
         .summary {
@@ -276,6 +298,18 @@ function generatePDFHTML(tasks: any[], today: Date): string {
             <div class="task-meta">Project: ${task.project.name} | Started: ${formatTime(task.startedAt)} | Elapsed: ${formatDuration(task.elapsedSeconds)}</div>
             ${task.description ? `<div class="task-description">${stripHTML(task.description)}</div>` : ''}
             ${task.logNotes ? `<div class="task-notes"><strong>Progress Notes:</strong><br>${stripHTML(task.logNotes)}</div>` : ''}
+            ${task.subtasks && task.subtasks.length > 0 ? `
+              <div class="task-subtasks">
+                <strong>Subtasks (${task.subtasks.filter((st: any) => st.isCompleted).length}/${task.subtasks.length}):</strong>
+                <ul>
+                  ${task.subtasks.map((subtask: any) => `
+                    <li class="${subtask.isCompleted ? 'completed' : 'pending'}">
+                      ${subtask.isCompleted ? '✓' : '○'} ${subtask.title}
+                    </li>
+                  `).join('')}
+                </ul>
+              </div>
+            ` : ''}
           </div>
         `).join('')}
       </div>
@@ -291,6 +325,18 @@ function generatePDFHTML(tasks: any[], today: Date): string {
             ${task.description ? `<div class="task-description">${stripHTML(task.description)}</div>` : ''}
             ${task.logNotes ? `<div class="task-notes"><strong>Progress Notes:</strong><br>${stripHTML(task.logNotes)}</div>` : ''}
             ${task.completionOutput ? `<div class="task-output"><strong>Work Output:</strong><br>${stripHTML(task.completionOutput)}</div>` : ''}
+            ${task.subtasks && task.subtasks.length > 0 ? `
+              <div class="task-subtasks">
+                <strong>Subtasks (${task.subtasks.filter((st: any) => st.isCompleted).length}/${task.subtasks.length}):</strong>
+                <ul>
+                  ${task.subtasks.map((subtask: any) => `
+                    <li class="${subtask.isCompleted ? 'completed' : 'pending'}">
+                      ${subtask.isCompleted ? '✓' : '○'} ${subtask.title}
+                    </li>
+                  `).join('')}
+                </ul>
+              </div>
+            ` : ''}
           </div>
         `).join('')}
       </div>
@@ -306,6 +352,18 @@ function generatePDFHTML(tasks: any[], today: Date): string {
             ${task.description ? `<div class="task-description">${stripHTML(task.description)}</div>` : ''}
             ${task.logNotes ? `<div class="task-notes"><strong>Progress Notes:</strong><br>${stripHTML(task.logNotes)}</div>` : ''}
             ${task.cancellationReason ? `<div class="task-reason"><strong>Cancellation Reason:</strong><br>${stripHTML(task.cancellationReason)}</div>` : ''}
+            ${task.subtasks && task.subtasks.length > 0 ? `
+              <div class="task-subtasks">
+                <strong>Subtasks (${task.subtasks.filter((st: any) => st.isCompleted).length}/${task.subtasks.length}):</strong>
+                <ul>
+                  ${task.subtasks.map((subtask: any) => `
+                    <li class="${subtask.isCompleted ? 'completed' : 'pending'}">
+                      ${subtask.isCompleted ? '✓' : '○'} ${subtask.title}
+                    </li>
+                  `).join('')}
+                </ul>
+              </div>
+            ` : ''}
           </div>
         `).join('')}
       </div>
