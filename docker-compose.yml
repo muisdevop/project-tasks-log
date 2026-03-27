@@ -6,12 +6,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      DATABASE_URL: "file:/data/dev.db"
-      APP_USERNAME: "admin"
-      APP_PASSWORD: "admin123"
-      SESSION_SECRET: "change-this-in-production"
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DATABASE_URL:-file:/data/dev.db}
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-admin123}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
     volumes:
       - tasklogger-data:/data
 

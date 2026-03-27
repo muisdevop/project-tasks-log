@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
-import { workingTimeDiffSeconds } from "@/lib/business-time";
+import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
 import { taskActionSchema, taskCreateSchema } from "@/lib/validators";
 
 const defaultDays = [1, 2, 3, 4, 5];
@@ -45,6 +45,7 @@ export async function GET(request: Request) {
         status: true,
         elapsedSeconds: true,
         startedAt: true,
+        endedAt: true,
       },
     });
 
@@ -59,7 +60,14 @@ export async function GET(request: Request) {
         workDays,
       });
 
-      return { ...task, elapsedSeconds: task.elapsedSeconds + extraSeconds };
+      const totalElapsed = task.elapsedSeconds + extraSeconds;
+      
+      // If working time is 0, use total elapsed time for display
+      const displayElapsed = totalElapsed === 0 
+        ? totalElapsedSeconds(task.startedAt, now)
+        : totalElapsed;
+
+      return { ...task, elapsedSeconds: displayElapsed };
     });
 
     return NextResponse.json({ tasks: tasksWithCurrentElapsed });

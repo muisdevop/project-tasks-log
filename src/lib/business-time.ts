@@ -94,4 +94,9 @@ export function formatElapsed(seconds: number): string {
   return `${h}:${m}:${s}`;
 }
 
+export function totalElapsedSeconds(startedAt: Date, endedAt: Date | null = null): number {
+  const end = endedAt || new Date();
+  return Math.floor((end.getTime() - startedAt.getTime()) / 1000);
+}
+
 export type { WorkSettings };

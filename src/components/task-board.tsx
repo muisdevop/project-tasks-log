@@ -4,12 +4,18 @@ import { formatElapsed } from "@/lib/business-time";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+function formatDateTime(dateString: string): string {
+  return new Date(dateString).toLocaleString();
+}
+
 type Task = {
   id: number;
   title: string;
   description: string | null;
   status: "in_progress" | "completed" | "cancelled";
   elapsedSeconds: number;
+  startedAt: string;
+  endedAt: string | null;
 };
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
@@ -99,7 +105,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                 {task.description ? (
                   <p className="text-sm text-zinc-600 dark:text-zinc-300">{task.description}</p>
                 ) : null}
-                <p className="mt-1 text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
+                <p className="mt-1 text-sm">Started: {formatDateTime(task.startedAt)}</p>
+                <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
                 <div className="mt-2 flex gap-2">
                   <button
                     onClick={() => runAction(task.id, "complete")}
@@ -134,6 +141,10 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
               <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
                 <p className="font-medium">{task.title}</p>
                 <p className="text-sm">Status: {task.status}</p>
+                <p className="text-sm">Started: {formatDateTime(task.startedAt)}</p>
+                {task.endedAt ? (
+                  <p className="text-sm">Ended: {formatDateTime(task.endedAt)}</p>
+                ) : null}
                 <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
                 {task.status === "cancelled" ? (
                   <button
