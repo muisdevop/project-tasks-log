@@ -2,6 +2,42 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 
+type JobStat = {
+  jobId: number;
+  jobName: string;
+  projectCount: number;
+  taskCount: number;
+  completedTasks: number;
+  totalSeconds: number;
+  totalHours: string;
+  projectBreakdown: ProjectBreakdown[];
+};
+
+type ProjectBreakdown = {
+  projectId: number;
+  projectName: string;
+  taskCount: number;
+  completedTasks: number;
+  totalSeconds: number;
+  totalHours: string;
+};
+
+type TimeStat = {
+  jobId: number;
+  jobName: string;
+  totalSeconds: number;
+  totalHours: string;
+};
+
+type ProjectTimeStat = {
+  projectId: number;
+  projectName: string;
+  jobId: number;
+  jobName: string;
+  totalSeconds: number;
+  totalHours: string;
+};
+
 export async function GET() {
   try {
     await requireAuth();
@@ -26,8 +62,8 @@ export async function GET() {
 
     // Calculate statistics
     const stats = {
-      jobStats: [] as any[],
-      projectStats: [] as any[],
+      jobStats: [] as JobStat[],
+      projectStats: [] as unknown[],
       taskStats: {
         total: 0,
         completed: 0,
@@ -38,8 +74,8 @@ export async function GET() {
       },
       timeStats: {
         totalHours: 0,
-        byJob: [] as any[],
-        byProject: [] as any[],
+        byJob: [] as TimeStat[],
+        byProject: [] as ProjectTimeStat[],
       },
     };
 
@@ -51,12 +87,12 @@ export async function GET() {
       let jobCompletedTasks = 0;
       let jobTotalTasks = 0;
 
-      const projectStats = [] as any[];
+      const projectStats: ProjectBreakdown[] = [];
 
       // Process projects and tasks in this job
       for (const project of job.projects) {
         let projectTotalSeconds = 0;
-        let projectCompletedTasks = 0;
+        const projectCompletedTasks = 0;
 
         for (const task of project.tasks) {
           jobTotalTasks++;

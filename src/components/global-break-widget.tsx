@@ -203,7 +203,7 @@ export function GlobalBreakWidget() {
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/80 px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white/95 hover:shadow-xl dark:border-white/10 dark:bg-slate-900/80 dark:text-zinc-200 dark:hover:bg-slate-900/95"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-orange-500 to-amber-500 text-white">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -230,7 +230,7 @@ export function GlobalBreakWidget() {
               <button
                 onClick={startBreak}
                 disabled={!selectedBreak || loading}
-                className="w-full rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
+                className="w-full rounded-xl bg-linear-to-r from-orange-500 to-amber-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
               >
                 {loading ? "Starting..." : "Start Break"}
               </button>

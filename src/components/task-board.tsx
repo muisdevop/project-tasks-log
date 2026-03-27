@@ -198,14 +198,14 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
 
     return (
       <section className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-purple-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-linear-to-br from-violet-500/5 to-purple-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         
         <div className="relative">
           <div className="mb-4 flex items-center gap-3">
             <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg ${
               title.includes("Progress") 
-                ? "bg-gradient-to-br from-blue-500 to-indigo-600" 
-                : "bg-gradient-to-br from-emerald-500 to-teal-600"
+                ? "bg-linear-to-br from-blue-500 to-indigo-600"
+                : "bg-linear-to-br from-emerald-500 to-teal-600"
             }`}>
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {title.includes("Progress") ? (
@@ -216,7 +216,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
               </svg>
             </div>
             <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">{title}</h2>
-            <span className="rounded-full bg-gradient-to-r from-violet-100 to-purple-100 px-3 py-1 text-xs font-medium text-violet-700 dark:from-violet-900/30 dark:to-purple-900/30 dark:text-violet-300">
+            <span className="rounded-full bg-linear-to-r from-violet-100 to-purple-100 px-3 py-1 text-xs font-medium text-violet-700 dark:from-violet-900/30 dark:to-purple-900/30 dark:text-violet-300">
               {tasks.length} tasks
             </span>
           </div>
@@ -230,7 +230,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                 <div key={date} className="overflow-hidden rounded-xl border border-zinc-200/50 bg-white/50 backdrop-blur-sm dark:border-zinc-700/50 dark:bg-zinc-800/30">
                   <button
                     onClick={() => toggleDateCollapse(date, isFinished)}
-                    className="w-full px-4 py-3 flex items-center justify-between bg-gradient-to-r from-zinc-50/80 to-zinc-100/80 hover:from-zinc-100/80 hover:to-zinc-200/80 dark:from-zinc-800/50 dark:to-zinc-900/50 dark:hover:from-zinc-800/80 dark:hover:to-zinc-900/80 transition-all"
+                    className="w-full px-4 py-3 flex items-center justify-between bg-linear-to-r from-zinc-50/80 to-zinc-100/80 hover:from-zinc-100/80 hover:to-zinc-200/80 dark:from-zinc-800/50 dark:to-zinc-900/50 dark:hover:from-zinc-800/80 dark:hover:to-zinc-900/80 transition-all"
                   >
                     <span className="font-medium text-sm text-zinc-800 dark:text-zinc-200">
                       {new Date(date).toLocaleDateString('en-US', { 
@@ -285,7 +285,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               <button
                                 onClick={() => runAction(task.id, "complete")}
                                 disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/40 disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -295,7 +295,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               <button
                                 onClick={() => runAction(task.id, "cancel")}
                                 disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -305,7 +305,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               <button
                                 onClick={() => setLogNotesTask({ taskId: task.id, notes: task.logNotes || "" })}
                                 disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -368,11 +368,11 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         onSubmit={createTask}
         className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70"
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-linear-to-br from-blue-500/10 to-indigo-500/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         
         <div className="relative">
           <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
@@ -398,7 +398,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             <button
               type="submit"
               disabled={!title.trim()}
-              className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+              className="rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
             >
               Create Task
             </button>

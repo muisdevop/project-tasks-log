@@ -2,25 +2,29 @@
 
 import { useEffect, useState } from "react";
 
+type ProjectBreakdown = {
+  projectId: number;
+  projectName: string;
+  taskCount: number;
+  completedTasks: number;
+  totalSeconds: number;
+  totalHours: string;
+};
+
+type JobStat = {
+  jobId: number;
+  jobName: string;
+  projectCount: number;
+  taskCount: number;
+  completedTasks: number;
+  totalSeconds: number;
+  totalHours: string;
+  projectBreakdown: ProjectBreakdown[];
+};
+
 type Stats = {
-  jobStats: Array<{
-    jobId: number;
-    jobName: string;
-    projectCount: number;
-    taskCount: number;
-    completedTasks: number;
-    totalSeconds: number;
-    totalHours: string;
-    projectBreakdown: Array<{
-      projectId: number;
-      projectName: string;
-      taskCount: number;
-      completedTasks: number;
-      totalSeconds: number;
-      totalHours: string;
-    }>;
-  }>;
-  projectStats: any[];
+  jobStats: JobStat[];
+  projectStats: unknown[];
   taskStats: {
     total: number;
     completed: number;

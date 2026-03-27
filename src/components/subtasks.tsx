@@ -125,7 +125,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
     <div className="mt-3 space-y-3 rounded-xl border border-violet-200/50 bg-violet-50/30 p-4 backdrop-blur-sm dark:border-violet-800/30 dark:bg-violet-900/20">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-sm">
+          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-linear-to-br from-violet-500 to-purple-600 text-white shadow-sm">
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
             </svg>
@@ -136,7 +136,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
         </div>
         <div className="h-1.5 w-16 overflow-hidden rounded-full bg-violet-200/50 dark:bg-violet-800/30">
           <div 
-            className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300"
+            className="h-full rounded-full bg-linear-to-r from-violet-500 to-purple-500 transition-all duration-300"
             style={{ width: totalCount > 0 ? `${(completedCount / totalCount) * 100}%` : '0%' }}
           />
         </div>
@@ -190,7 +190,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
         <button
           type="submit"
           disabled={loading || !newSubtaskTitle.trim()}
-          className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-violet-500 to-purple-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-violet-500/30 transition-all hover:shadow-lg hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+          className="inline-flex items-center gap-1 rounded-lg bg-linear-to-r from-violet-500 to-purple-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-violet-500/30 transition-all hover:shadow-lg hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
         >
           {loading ? (
             <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">

@@ -36,14 +36,14 @@ export function TaskActionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/20 bg-white/80 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 opacity-50" />
+        <div className="absolute inset-0 bg-linear-to-br from-blue-500/10 to-indigo-500/10 opacity-50" />
         
         <div className="relative max-h-[90vh] overflow-y-auto p-6">
           <div className="mb-6 flex items-center gap-3">
             <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg ${
               confirmText === "Complete" 
-                ? "bg-gradient-to-br from-emerald-500 to-green-600"
-                : "bg-gradient-to-br from-red-500 to-rose-600"
+                ? "bg-linear-to-br from-emerald-500 to-green-600"
+                : "bg-linear-to-br from-red-500 to-rose-600"
             }`}>
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {confirmText === "Complete" ? (
@@ -84,8 +84,8 @@ export function TaskActionModal({
                 disabled={loading}
                 className={`rounded-xl px-5 py-2.5 text-sm font-medium text-white shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 ${
                   confirmText === "Complete"
-                    ? "bg-gradient-to-r from-emerald-500 to-green-500 shadow-emerald-500/30 hover:shadow-emerald-500/40"
-                    : "bg-gradient-to-r from-red-500 to-rose-500 shadow-red-500/30 hover:shadow-red-500/40"
+                    ? "bg-linear-to-r from-emerald-500 to-green-500 shadow-emerald-500/30 hover:shadow-emerald-500/40"
+                    : "bg-linear-to-r from-red-500 to-rose-500 shadow-red-500/30 hover:shadow-red-500/40"
                 }`}
               >
                 {loading ? (

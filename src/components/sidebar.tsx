@@ -48,7 +48,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       {/* Logo Section */}
       <div className="flex h-16 items-center border-b border-white/10 px-6">
         <Link href="/projects" className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
@@ -101,7 +101,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
         {username ? (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-purple-600 text-white text-sm font-medium shadow-lg">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-purple-600 text-white text-sm font-medium shadow-lg">
                 {username.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col">
@@ -152,7 +152,7 @@ export function SidebarLayout({
       <Sidebar username={username} projectName={projectName} />
       <GlobalBreakWidget />
       <main className="flex-1 pl-64">
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-8 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10">
+        <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-8 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10">
           {children}
         </div>
       </main>

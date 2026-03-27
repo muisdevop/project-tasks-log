@@ -133,7 +133,7 @@ export default async function TasksPage({ params }: Props) {
             </svg>
             Back to projects
           </Link>
-          <h1 className="mt-4 text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
+          <h1 className="mt-4 text-3xl font-bold bg-linear-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
             {project.name}
           </h1>
           <p className="mt-2 text-zinc-600 dark:text-zinc-400">

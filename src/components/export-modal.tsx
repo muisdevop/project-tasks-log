@@ -45,7 +45,7 @@ export function ExportModal({ onClose }: { onClose: () => void }) {
         const data = await projRes.json();
         setProjects(data.projects || []);
       }
-    } catch (err) {
+    } catch {
       setError("Failed to load jobs and projects");
     } finally {
       setLoading(false);
@@ -155,7 +155,7 @@ export function ExportModal({ onClose }: { onClose: () => void }) {
               />
               <div className="flex-1">
                 <h3 className="font-medium text-gray-900 dark:text-white">
-                  Today's Activity
+                  Today&apos;s Activity
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Export tasks created or updated today

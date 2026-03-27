@@ -119,11 +119,11 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
 
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
-      <div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 to-pink-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <div className="absolute inset-0 bg-linear-to-br from-rose-500/5 to-pink-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
       
       <div className="relative space-y-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 text-white shadow-lg">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-rose-500 to-pink-600 text-white shadow-lg">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -205,7 +205,7 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
           <div className="flex gap-3 pt-2">
             <button
               type="submit"
-              className="rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-rose-500/30 transition-all hover:shadow-xl hover:shadow-rose-500/40"
+              className="rounded-xl bg-linear-to-r from-rose-500 to-pink-500 px-6 py-2.5 text-sm font-medium text-white shadow-lg shadow-rose-500/30 transition-all hover:shadow-xl hover:shadow-rose-500/40"
             >
               {editingId ? "Update Break" : "Add Break"}
             </button>
@@ -233,7 +233,7 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
         <div>
           <h4 className="mb-4 flex items-center gap-2 text-lg font-semibold text-zinc-800 dark:text-zinc-100">
             <span>Configured Breaks</span>
-            <span className="rounded-full bg-gradient-to-r from-rose-100 to-pink-100 px-2.5 py-0.5 text-xs font-medium text-rose-700 dark:from-rose-900/30 dark:to-pink-900/30 dark:text-rose-300">
+            <span className="rounded-full bg-linear-to-r from-rose-100 to-pink-100 px-2.5 py-0.5 text-xs font-medium text-rose-700 dark:from-rose-900/30 dark:to-pink-900/30 dark:text-rose-300">
               {breaks.length}
             </span>
           </h4>
@@ -289,7 +289,7 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
                     </button>
                     <button
                       onClick={() => handleDelete(breakType.id)}
-                      className="rounded-lg bg-gradient-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40"
+                      className="rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40"
                     >
                       Delete
                     </button>
