@@ -11,6 +11,7 @@ interface SidebarProps {
 
 const navigation = [
   { name: "Projects", href: "/projects", icon: ProjectsIcon },
+  { name: "Jobs", href: "/jobs", icon: JobsIcon },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
@@ -18,6 +19,14 @@ function ProjectsIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+    </svg>
+  );
+}
+
+function JobsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m0 0l8 4m-8-4v10l8 4m0-10l8 4m-8-4v10M7 12l8 4m0 0l8-4" />
     </svg>
   );
 }
@@ -59,41 +68,59 @@ export function Sidebar({ username, projectName }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 p-4">
-        {/* Projects Link */}
-        <Link
-          href="/projects"
-          className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-            pathname === "/projects"
-              ? "bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30"
-              : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-          }`}
-        >
-          <ProjectsIcon className={`h-5 w-5 transition-colors ${pathname === "/projects" ? "text-blue-400" : "text-slate-400 group-hover:text-slate-300"}`} />
-          Projects
-        </Link>
+        {/* Main Navigation */}
+        <div className="space-y-1">
+          {/* Projects Link */}
+          <Link
+            href="/projects"
+            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+              pathname === "/projects"
+                ? "bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            <ProjectsIcon className={`h-5 w-5 transition-colors ${pathname === "/projects" ? "text-blue-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+            Projects
+          </Link>
 
-        {/* Tasks Link (shown when on tasks page) */}
+          {/* Jobs Link */}
+          <Link
+            href="/jobs"
+            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+              pathname === "/jobs"
+                ? "bg-purple-500/20 text-purple-400 ring-1 ring-purple-500/30"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            <JobsIcon className={`h-5 w-5 transition-colors ${pathname === "/jobs" ? "text-purple-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+            Jobs
+          </Link>
+        </div>
+
+        {/* Current Page Info (shown when on tasks page) */}
         {isTasksPage && (
-          <div className="ml-4">
+          <div className="mt-4 border-t border-slate-700/30 pt-4">
             <div className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-blue-400">
               <div className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-              {projectName || "Current Tasks"}
+              <span className="truncate">{projectName || "Current Project"}</span>
             </div>
           </div>
         )}
 
         {/* Settings Link */}
-        <Link
-          href="/settings"
-          className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-            pathname === "/settings"
-              ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
-              : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-          }`}
-        >
-          <SettingsIcon className={`h-5 w-5 transition-colors ${pathname === "/settings" ? "text-emerald-400" : "text-slate-400 group-hover:text-slate-300"}`} />
-          Settings
-        </Link>
+        <div className="mt-auto border-t border-slate-700/30 pt-4">
+          <Link
+            href="/settings"
+            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+              pathname === "/settings"
+                ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            <SettingsIcon className={`h-5 w-5 transition-colors ${pathname === "/settings" ? "text-emerald-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+            Settings
+          </Link>
+        </div>
       </nav>
 
       {/* User Section */}
