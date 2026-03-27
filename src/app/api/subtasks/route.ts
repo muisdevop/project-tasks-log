@@ -30,9 +30,14 @@ export async function POST(request: Request) {
     await requireAuth();
     
     const json = await request.json();
+    console.log("Subtask POST request data:", json);
+    
     const parsed = subtaskSchema.safeParse(json);
+    console.log("Subtask validation result:", parsed);
+    
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid subtask data." }, { status: 400 });
+      console.error("Subtask validation error:", parsed.error);
+      return NextResponse.json({ error: "Invalid subtask data.", details: parsed.error }, { status: 400 });
     }
 
     // Verify the task exists and is in progress

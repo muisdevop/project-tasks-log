@@ -53,7 +53,7 @@ export const breakSchema = z.object({
 
 export const subtaskSchema = z.object({
   taskId: z.number().int().positive(),
-  title: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(2000),
   isCompleted: z.boolean().default(false),
 });
 

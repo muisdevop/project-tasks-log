@@ -45,7 +45,19 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
 
   async function addSubtask(e: React.FormEvent) {
     e.preventDefault();
-    if (!newSubtaskTitle.trim()) return;
+    const trimmedTitle = newSubtaskTitle.trim();
+    
+    if (!trimmedTitle) {
+      setError("Subtask title cannot be empty");
+      return;
+    }
+    
+    if (trimmedTitle.length > 2000) {
+      setError("Subtask title is too long (max 2000 characters)");
+      return;
+    }
+
+    console.log("Adding subtask:", { taskId, title: trimmedTitle });
 
     setLoading(true);
     setError(null);
@@ -56,12 +68,13 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           taskId,
-          title: newSubtaskTitle.trim(),
+          title: trimmedTitle,
         }),
       });
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
+        console.error("Subtask creation error:", data);
         setError(data.error || "Failed to add subtask");
         return;
       }
@@ -69,6 +82,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
       setNewSubtaskTitle("");
       fetchSubtasks();
     } catch (err) {
+      console.error("Subtask creation exception:", err);
       setError("Failed to add subtask");
     } finally {
       setLoading(false);
@@ -170,8 +184,8 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
       </form>
 
       {error && (
-        <div className="text-sm text-red-600 dark:text-red-400">
-          {error}
+        <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+          <strong>Error:</strong> {error}
         </div>
       )}
     </div>
