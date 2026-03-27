@@ -46,6 +46,8 @@ export async function GET(request: Request) {
         elapsedSeconds: true,
         startedAt: true,
         endedAt: true,
+        completionOutput: true,
+        cancellationReason: true,
       },
     });
 
@@ -152,6 +154,12 @@ export async function PATCH(request: Request) {
         startedAt: change.startedAt,
         endedAt: change.endedAt,
         elapsedSeconds: change.elapsedSeconds,
+        ...(parsed.data.action === "complete" && parsed.data.details
+          ? { completionOutput: parsed.data.details }
+          : {}),
+        ...(parsed.data.action === "cancel" && parsed.data.details
+          ? { cancellationReason: parsed.data.details }
+          : {}),
         events: {
           create: {
             eventType:
@@ -161,6 +169,7 @@ export async function PATCH(request: Request) {
                   ? "cancelled"
                   : "resumed",
             eventAt: now,
+            ...(parsed.data.details ? { meta: { details: parsed.data.details } } : {}),
           },
         },
       },

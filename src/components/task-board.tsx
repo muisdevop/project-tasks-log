@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { RichTextEditor } from "./rich-text-editor";
 import { RichTextDisplay } from "./rich-text-display";
+import { TaskActionModal } from "./task-action-modal";
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -18,6 +19,8 @@ type Task = {
   elapsedSeconds: number;
   startedAt: string;
   endedAt: string | null;
+  completionOutput: string | null;
+  cancellationReason: string | null;
 };
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
@@ -26,6 +29,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
+  const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
+  const [modalLoading, setModalLoading] = useState(false);
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,18 +51,48 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   }
 
   async function runAction(taskId: number, action: "complete" | "cancel" | "resume") {
-    setBusyTaskId(taskId);
+    if (action === "resume") {
+      setBusyTaskId(taskId);
+      setError(null);
+      const response = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, action }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "Failed to update task.");
+      }
+      setBusyTaskId(null);
+      router.refresh();
+    } else {
+      setModalAction({ type: action, taskId });
+    }
+  }
+
+  async function handleModalConfirm(details: string) {
+    if (!modalAction) return;
+
+    setModalLoading(true);
     setError(null);
+    
     const response = await fetch("/api/tasks", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taskId, action }),
+      body: JSON.stringify({ 
+        taskId: modalAction.taskId, 
+        action: modalAction.type,
+        details: details 
+      }),
     });
+    
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       setError(data.error ?? "Failed to update task.");
     }
-    setBusyTaskId(null);
+    
+    setModalLoading(false);
+    setModalAction(null);
     router.refresh();
   }
 
@@ -146,6 +181,18 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                   <p className="text-sm">Ended: {formatDateTime(task.endedAt)}</p>
                 ) : null}
                 <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
+                {task.completionOutput ? (
+                  <div className="mt-2">
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Work Output:</p>
+                    <RichTextDisplay content={task.completionOutput} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                  </div>
+                ) : null}
+                {task.cancellationReason ? (
+                  <div className="mt-2">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Cancellation Reason:</p>
+                    <RichTextDisplay content={task.cancellationReason} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                  </div>
+                ) : null}
                 {task.status === "cancelled" ? (
                   <button
                     onClick={() => runAction(task.id, "resume")}
@@ -160,6 +207,19 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           )}
         </div>
       </section>
+      
+      <TaskActionModal
+        isOpen={modalAction !== null}
+        onClose={() => setModalAction(null)}
+        onConfirm={handleModalConfirm}
+        title={modalAction?.type === "complete" ? "Complete Task" : "Cancel Task"}
+        placeholder={modalAction?.type === "complete" 
+          ? "Describe the work performed and any outputs..." 
+          : "Reason for cancelling this task..."
+        }
+        confirmText={modalAction?.type === "complete" ? "Complete" : "Cancel"}
+        loading={modalLoading}
+      />
     </div>
   );
 }
