@@ -32,6 +32,7 @@ model UserSettings {
   passwordHash String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  breaks       BreakType[]
 }
 
 model Project {
@@ -60,6 +61,19 @@ model Task {
   updatedAt         DateTime   @updatedAt
   project           Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   events            TaskEvent[]
+}
+
+model BreakType {
+  id          Int    @id @default(autoincrement())
+  name        String
+  type        String // "Prayer", "Meal", "Washroom", "Custom", etc.
+  time        String // HH:MM format
+  isOneTime   Boolean @default(false)
+  isActive    Boolean @default(true)
+  settingsId  Int    @default(1)
+  settings    UserSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model TaskEvent {

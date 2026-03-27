@@ -1,5 +1,6 @@
 import { AppNav } from "@/components/app-nav";
 import { SettingsForm } from "@/components/settings-form";
+import { BreaksConfig } from "@/components/breaks-config";
 import { prisma } from "@/lib/prisma";
 import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -26,7 +27,7 @@ export default async function SettingsPage() {
   return (
     <main className="min-h-screen bg-white text-zinc-900 dark:bg-black dark:text-zinc-50">
       <AppNav />
-      <div className="mx-auto w-full max-w-5xl px-4 py-6">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 space-y-8">
         <SettingsForm
           initial={{
             workStart: settings.workStart,
@@ -36,6 +37,7 @@ export default async function SettingsPage() {
               : defaultDays,
           }}
         />
+        <BreaksConfig />
       </div>
     </main>
   );

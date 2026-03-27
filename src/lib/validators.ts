@@ -43,6 +43,14 @@ export const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
+export const breakSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  type: z.string().trim().min(1).max(50),
+  time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/),
+  isOneTime: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+});
+
 export function toNameKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
