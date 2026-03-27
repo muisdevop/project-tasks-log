@@ -172,6 +172,12 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       }),
     });
     
+    console.log("Log notes request payload:", {
+      taskId: logNotesTask.taskId, 
+      action: "log-notes",
+      notes: notes.substring(0, 100) + (notes.length > 100 ? "..." : "")
+    });
+    
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       console.error("Log notes error:", data);

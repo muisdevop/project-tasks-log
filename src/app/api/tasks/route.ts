@@ -135,8 +135,12 @@ export async function PATCH(request: Request) {
     await requireAuth();
     const json = await request.json();
     const parsed = taskActionSchema.safeParse(json);
+    console.log("Request JSON:", JSON.stringify(json, null, 2));
+    console.log("Validation result:", parsed);
+    
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid action payload." }, { status: 400 });
+      console.error("Validation error:", parsed.error);
+      return NextResponse.json({ error: "Invalid action payload.", details: parsed.error.issues }, { status: 400 });
     }
 
     const task = await prisma.task.findUnique({ where: { id: parsed.data.taskId } });
