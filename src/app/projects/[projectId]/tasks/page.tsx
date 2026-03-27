@@ -9,6 +9,19 @@ type Props = {
   params: Promise<{ projectId: string }>;
 };
 
+async function getTasks(projectId: number) {
+  const response = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/tasks?projectId=${projectId}`, {
+    cache: 'no-store',
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch tasks');
+  }
+  
+  const data = await response.json();
+  return data.tasks;
+}
+
 export default async function TasksPage({ params }: Props) {
   const username = await getSessionUsername();
   if (!username) {
@@ -29,17 +42,7 @@ export default async function TasksPage({ params }: Props) {
     notFound();
   }
 
-  const tasks = await prisma.task.findMany({
-    where: { projectId },
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      status: true,
-      elapsedSeconds: true,
-    },
-  });
+  const tasks = await getTasks(projectId);
 
   return (
     <main className="min-h-screen bg-white text-zinc-900 dark:bg-black dark:text-zinc-50">

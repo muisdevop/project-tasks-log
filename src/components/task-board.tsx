@@ -3,6 +3,8 @@
 import { formatElapsed } from "@/lib/business-time";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { RichTextEditor } from "./rich-text-editor";
+import { RichTextDisplay } from "./rich-text-display";
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -76,11 +78,10 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             placeholder="Task title"
             className="w-full rounded border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           />
-          <textarea
+          <RichTextEditor
             value={description}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={setDescription}
             placeholder="Description (optional)"
-            className="w-full rounded border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           />
           <button
             type="submit"
@@ -102,9 +103,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             inProgress.map((task) => (
               <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
                 <p className="font-medium">{task.title}</p>
-                {task.description ? (
-                  <p className="text-sm text-zinc-600 dark:text-zinc-300">{task.description}</p>
-                ) : null}
+                <RichTextDisplay content={task.description} className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" />
                 <p className="mt-1 text-sm">Started: {formatDateTime(task.startedAt)}</p>
                 <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
                 <div className="mt-2 flex gap-2">
@@ -140,6 +139,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             finished.map((task) => (
               <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
                 <p className="font-medium">{task.title}</p>
+                <RichTextDisplay content={task.description} className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" />
                 <p className="text-sm">Status: {task.status}</p>
                 <p className="text-sm">Started: {formatDateTime(task.startedAt)}</p>
                 {task.endedAt ? (
