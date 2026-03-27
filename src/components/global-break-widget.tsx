@@ -201,7 +201,7 @@ export function GlobalBreakWidget() {
         <div className="relative">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/80 px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white hover:shadow-xl dark:border-white/10 dark:bg-slate-900/80 dark:text-zinc-200"
+            className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/80 px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white/95 hover:shadow-xl dark:border-white/10 dark:bg-slate-900/80 dark:text-zinc-200 dark:hover:bg-slate-900/95"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 text-white">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -212,30 +212,28 @@ export function GlobalBreakWidget() {
           </button>
 
           {isExpanded && (
-            <div className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/95">
-              <div className="p-4">
-                <h3 className="mb-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100">Select Break Type</h3>
-                <select
-                  value={selectedBreak || ""}
-                  onChange={(e) => setSelectedBreak(e.target.value ? Number(e.target.value) : null)}
-                  className="mb-3 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-                >
-                  <option value="">Choose a break...</option>
-                  {breaks.map((breakType) => (
-                    <option key={breakType.id} value={breakType.id}>
-                      {breakType.name}
-                      {breakType.duration && ` (${breakType.duration} min)`}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={startBreak}
-                  disabled={!selectedBreak || loading}
-                  className="w-full rounded-lg bg-gradient-to-r from-orange-500 to-amber-500 py-2 text-sm font-medium text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
-                >
-                  {loading ? "Starting..." : "Start Break"}
-                </button>
-              </div>
+            <div className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-white/20 bg-white/80 p-5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
+              <h3 className="mb-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100">Select Break Type</h3>
+              <select
+                value={selectedBreak || ""}
+                onChange={(e) => setSelectedBreak(e.target.value ? Number(e.target.value) : null)}
+                className="mb-3 w-full rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2.5 text-sm outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-orange-500 dark:focus:bg-zinc-800 dark:focus:ring-orange-900/30"
+              >
+                <option value="">Choose a break...</option>
+                {breaks.map((breakType) => (
+                  <option key={breakType.id} value={breakType.id}>
+                    {breakType.name}
+                    {breakType.duration && ` (${breakType.duration} min)`}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={startBreak}
+                disabled={!selectedBreak || loading}
+                className="w-full rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
+              >
+                {loading ? "Starting..." : "Start Break"}
+              </button>
             </div>
           )}
         </div>
