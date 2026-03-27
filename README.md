@@ -1,7 +1,7 @@
-# 📋 Task Management System
+# � GID Task Flow
 
 <div align="center">
-  <img src="./public/logo.svg" alt="Task Management System Logo" width="120" height="120">
+  <img src="./public/logo.svg" alt="GID Task Flow Logo" width="120" height="120">
   
   ![License](https://img.shields.io/badge/license-MIT-blue.svg)
   ![Node.js Version](https://img.shields.io/badge/node.js-20%2B-green.svg)
@@ -12,7 +12,7 @@
   ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4.0-38B2FF.svg)
 </div>
 
-A modern, feature-rich task management application built with Next.js, TypeScript, and Prisma. Track tasks, manage subtasks, configure breaks, and export professional reports.
+A modern, enterprise-grade task management application built with Next.js, TypeScript, and Prisma. Track tasks, manage subtasks, configure breaks, and export professional reports with a beautiful glassmorphism UI.
 
 ## ✨ Features
 

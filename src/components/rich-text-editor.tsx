@@ -4,6 +4,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
+import Underline from "@tiptap/extension-underline";
 import { useState, useEffect } from "react";
 
 interface RichTextEditorProps {
@@ -18,10 +19,35 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        heading: false,
+        heading: {
+          levels: [1, 2, 3, 4, 5, 6],
+          HTMLAttributes: {
+            class: "font-bold text-zinc-900 dark:text-zinc-100",
+          },
+        },
         paragraph: {
           HTMLAttributes: {
-            class: "text-sm leading-relaxed",
+            class: "text-sm leading-relaxed mb-2",
+          },
+        },
+        blockquote: {
+          HTMLAttributes: {
+            class: "border-l-4 border-zinc-300 dark:border-zinc-600 pl-4 italic text-zinc-600 dark:text-zinc-400 my-2",
+          },
+        },
+        codeBlock: {
+          HTMLAttributes: {
+            class: "bg-zinc-100 dark:bg-zinc-800 rounded-lg p-3 font-mono text-sm my-2 overflow-x-auto",
+          },
+        },
+        code: {
+          HTMLAttributes: {
+            class: "bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-sm font-mono",
+          },
+        },
+        horizontalRule: {
+          HTMLAttributes: {
+            class: "my-4 border-t border-zinc-300 dark:border-zinc-600",
           },
         },
       }),
@@ -33,7 +59,12 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
       }),
       Image.configure({
         HTMLAttributes: {
-          class: "max-w-full h-auto rounded-lg shadow-md",
+          class: "max-w-full h-auto rounded-lg shadow-md my-2",
+        },
+      }),
+      Underline.configure({
+        HTMLAttributes: {
+          class: "underline",
         },
       }),
     ],
@@ -43,7 +74,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
     },
     editorProps: {
       attributes: {
-        class: `prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[100px] p-4 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 transition-all duration-200 ${
+        class: `prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[150px] p-4 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 transition-all duration-200 ${
           isFocused ? "ring-2 ring-blue-500 border-transparent" : ""
         } hover:border-zinc-400 dark:hover:border-zinc-600`,
         placeholder: placeholder,
@@ -81,7 +112,9 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
 
   return (
     <div className="space-y-2">
+      {/* Toolbar - grouped like WordPress */}
       <div className="flex flex-wrap gap-1 p-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-800">
+        {/* Text Formatting */}
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -108,11 +141,75 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
         </button>
         <button
           type="button"
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+          className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
+            editor.isActive("underline") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
+          }`}
+          title="Underline (Ctrl+U)"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M7 3a1 1 0 011-1h4a1 1 0 110 2H8a1 1 0 01-1-1zM3 8a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM4 13a1 1 0 100 2h12a1 1 0 100-2H4z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleStrike().run()}
+          className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
+            editor.isActive("strike") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
+          }`}
+          title="Strikethrough"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleCode().run()}
+          className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
+            editor.isActive("code") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
+          }`}
+          title="Inline Code"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+          </svg>
+        </button>
+
+        <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-600 mx-1" />
+
+        {/* Headings */}
+        <select
+          onChange={(e) => {
+            const level = e.target.value;
+            if (level === "paragraph") {
+              editor.chain().focus().setParagraph().run();
+            } else if (level) {
+              editor.chain().focus().toggleHeading({ level: parseInt(level) as 1 | 2 | 3 | 4 | 5 | 6 }).run();
+            }
+          }}
+          value={editor.isActive("heading") ? editor.getAttributes("heading").level?.toString() || "paragraph" : "paragraph"}
+          className="h-8 px-2 text-sm rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200"
+        >
+          <option value="paragraph">Paragraph</option>
+          <option value="1">Heading 1</option>
+          <option value="2">Heading 2</option>
+          <option value="3">Heading 3</option>
+          <option value="4">Heading 4</option>
+          <option value="5">Heading 5</option>
+          <option value="6">Heading 6</option>
+        </select>
+
+        <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-600 mx-1" />
+
+        {/* Lists */}
+        <button
+          type="button"
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
             editor.isActive("bulletList") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
           }`}
-          title="Bullet List (Ctrl+Shift+8)"
+          title="Bullet List"
         >
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
@@ -124,14 +221,55 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
           className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
             editor.isActive("orderedList") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
           }`}
-          title="Numbered List (Ctrl+Shift+9)"
+          title="Numbered List"
         >
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M5 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm0 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm0 4a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clipRule="evenodd" />
             <path d="M2 4a1 1 0 100 2 1 1 0 000-2zm0 4a1 1 0 100 2 1 1 0 000-2zm0 4a1 1 0 100 2 1 1 0 000-2z" />
           </svg>
         </button>
+
         <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-600 mx-1" />
+
+        {/* Block Elements */}
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleBlockquote().run()}
+          className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
+            editor.isActive("blockquote") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
+          }`}
+          title="Blockquote"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+          className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
+            editor.isActive("codeBlock") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
+          }`}
+          title="Code Block"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().setHorizontalRule().run()}
+          className="p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors text-zinc-600 dark:text-zinc-400"
+          title="Horizontal Line"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+          </svg>
+        </button>
+
+        <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-600 mx-1" />
+
+        {/* Insert */}
         <button
           type="button"
           onClick={setLink}
@@ -155,6 +293,8 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
           </svg>
         </button>
       </div>
+
+      {/* Editor Content */}
       <div 
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
