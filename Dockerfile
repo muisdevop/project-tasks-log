@@ -36,6 +36,9 @@ ENV PORT=3000
 # SQLite DB location inside the container
 ENV DATABASE_URL="file:/data/dev.db"
 
+# Install curl for health checks
+RUN apk add --no-cache curl
+
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
