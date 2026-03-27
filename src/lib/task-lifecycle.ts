@@ -1,13 +1,19 @@
-import type { Task, UserSettings } from "@prisma/client";
+import type { Task } from "@prisma/client";
 import { workingTimeDiffSeconds } from "./business-time";
 
 type TransitionAction = "complete" | "cancel" | "resume" | "log-notes";
+
+type WorkSchedule = {
+  workStart: string;
+  workEnd: string;
+  workDays: unknown;
+};
 
 export function applyTaskTransition(
   task: Pick<Task, "status" | "startedAt" | "endedAt" | "elapsedSeconds">,
   action: TransitionAction,
   now: Date,
-  settings: Pick<UserSettings, "workStart" | "workEnd" | "workDays">,
+  settings: WorkSchedule,
 ): { status: "in_progress" | "completed" | "cancelled"; elapsedSeconds: number; startedAt: Date; endedAt: Date | null } {
   const workDays = Array.isArray(settings.workDays)
     ? (settings.workDays as number[])

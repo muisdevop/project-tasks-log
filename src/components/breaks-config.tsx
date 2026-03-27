@@ -22,7 +22,7 @@ const BREAK_TYPES = [
   "Custom"
 ];
 
-export function BreaksConfig() {
+export function BreaksConfig({ jobId }: { jobId: number }) {
   const [breaks, setBreaks] = useState<BreakType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,11 +37,11 @@ export function BreaksConfig() {
 
   useEffect(() => {
     fetchBreaks();
-  }, []);
+  }, [jobId]);
 
   async function fetchBreaks() {
     try {
-      const response = await fetch("/api/breaks");
+      const response = await fetch(`/api/breaks?jobId=${jobId}`);
       if (!response.ok) throw new Error("Failed to fetch breaks");
       const data = await response.json();
       setBreaks(data.breaks || []);
@@ -59,7 +59,9 @@ export function BreaksConfig() {
     try {
       const url = editingId ? "/api/breaks" : "/api/breaks";
       const method = editingId ? "PATCH" : "POST";
-      const body = editingId ? { ...formData, id: editingId } : formData;
+      const body = editingId 
+        ? { ...formData, id: editingId } 
+        : { ...formData, jobId };
 
       const response = await fetch(url, {
         method,

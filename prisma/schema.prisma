@@ -24,22 +24,46 @@ enum TaskEventType {
   resumed
 }
 
+// UserSettings now only stores authentication
 model UserSettings {
   id           Int      @id @default(1)
-  workStart    String   @default("09:00")
-  workEnd      String   @default("17:00")
-  workDays     Json
   passwordHash String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  breaks       BreakType[]
+}
+
+// Job is the top-level entity with its own work schedule
+model Job {
+  id          Int      @id @default(autoincrement())
+  name        String
+  nameKey     String   @unique
+  description String?
+  isArchived  Boolean  @default(false)
+  
+  // Work schedule settings (moved from UserSettings)
+  workStart   String   @default("09:00")
+  workEnd     String   @default("17:00")
+  workDays    Json     @default("[1, 2, 3, 4, 5]") // Mon-Fri
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  projects    Project[]
+  breaks      BreakType[]
 }
 
 model Project {
   id        Int      @id @default(autoincrement())
   name      String
   nameKey   String   @unique
+  description String?
   isArchived Boolean @default(false)
+  
+  // Foreign key to Job
+  jobId     Int
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tasks     Task[]
@@ -71,8 +95,11 @@ model BreakType {
   duration    Int?   // Duration in minutes (null for recurring breaks)
   isOneTime   Boolean @default(false)
   isActive    Boolean @default(true)
-  settingsId  Int    @default(1)
-  settings    UserSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+  
+  // Foreign key to Job (moved from UserSettings)
+  jobId       Int
+  job         Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

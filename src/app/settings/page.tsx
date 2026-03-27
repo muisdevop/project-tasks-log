@@ -1,6 +1,5 @@
 import { SidebarLayout } from "@/components/sidebar";
 import { SettingsForm } from "@/components/settings-form";
-import { BreaksConfig } from "@/components/breaks-config";
 import { prisma } from "@/lib/prisma";
 import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -13,14 +12,12 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  const settings = await prisma.userSettings.upsert({
+  // Ensure UserSettings record exists (for auth)
+  await prisma.userSettings.upsert({
     where: { id: 1 },
     update: {},
     create: {
       id: 1,
-      workStart: "09:00",
-      workEnd: "17:00",
-      workDays: defaultDays,
     },
   });
 
@@ -32,20 +29,18 @@ export default async function SettingsPage() {
             Settings
           </h1>
           <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            Configure your work schedule and break preferences
+            Configure your preferences and break settings
           </p>
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
           <SettingsForm
             initial={{
-              workStart: settings.workStart,
-              workEnd: settings.workEnd,
-              workDays: Array.isArray(settings.workDays)
-                ? (settings.workDays as number[])
-                : defaultDays,
+              workStart: "09:00",
+              workEnd: "17:00",
+              workDays: defaultDays,
             }}
           />
-          <BreaksConfig />
+          {/* Breaks are now managed per-job in the Jobs section */}
         </div>
       </div>
     </SidebarLayout>

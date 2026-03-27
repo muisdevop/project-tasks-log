@@ -8,6 +8,12 @@ export async function GET() {
     await requireAuth();
     const projects = await prisma.project.findMany({
       where: { isArchived: false },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        jobId: true,
+      },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json({ projects });
@@ -26,6 +32,8 @@ export async function POST(request: Request) {
     }
 
     const name = parsed.data.name.trim();
+    const description = (json.description || "").trim();
+    const jobId = json.jobId ? Number(json.jobId) : undefined;
     const nameKey = toNameKey(name);
 
     const exists = await prisma.project.findUnique({ where: { nameKey } });
@@ -34,7 +42,12 @@ export async function POST(request: Request) {
     }
 
     const project = await prisma.project.create({
-      data: { name, nameKey },
+      data: { 
+        name, 
+        nameKey,
+        description: description || undefined,
+        jobId: jobId || 1, // Default to first job or create logic
+      },
     });
     return NextResponse.json({ project }, { status: 201 });
   } catch {

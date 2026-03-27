@@ -13,21 +13,28 @@ type Props = {
 async function getTasksWithElapsed(projectId: number) {
   const defaultDays = [1, 2, 3, 4, 5];
   
-  // Get work settings
-  const settings = await prisma.userSettings.upsert({
-    where: { id: 1 },
-    update: {},
-    create: {
-      id: 1,
-      workStart: "09:00",
-      workEnd: "17:00",
-      workDays: defaultDays,
-    },
+  // Get the project and its job to access work schedule
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { jobId: true }
   });
 
+  if (!project) {
+    return null;
+  }
+
+  const job = await prisma.job.findUnique({
+    where: { id: project.jobId },
+    select: { workStart: true, workEnd: true, workDays: true }
+  });
+
+  if (!job) {
+    return null;
+  }
+
   const now = new Date();
-  const workDays = Array.isArray(settings.workDays) 
-    ? (settings.workDays as unknown as number[]) 
+  const workDays = Array.isArray(job.workDays) 
+    ? (job.workDays as unknown as number[]) 
     : defaultDays;
 
   const tasks = await prisma.task.findMany({
@@ -65,8 +72,8 @@ async function getTasksWithElapsed(projectId: number) {
     }
 
     const extraSeconds = workingTimeDiffSeconds(task.startedAt, now, {
-      workStart: settings.workStart,
-      workEnd: settings.workEnd,
+      workStart: job.workStart,
+      workEnd: job.workEnd,
       workDays,
     });
 
@@ -109,6 +116,9 @@ export default async function TasksPage({ params }: Props) {
   }
 
   const tasks = await getTasksWithElapsed(projectId);
+  if (!tasks) {
+    notFound();
+  }
 
   return (
     <SidebarLayout username={username} projectName={project.name}>

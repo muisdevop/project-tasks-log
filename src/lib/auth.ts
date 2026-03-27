@@ -77,9 +77,6 @@ export async function updateDbPassword(newPassword: string): Promise<void> {
     update: { passwordHash: newHash },
     create: {
       id: 1,
-      workStart: "09:00",
-      workEnd: "17:00",
-      workDays: [1, 2, 3, 4, 5],
       passwordHash: newHash,
     },
   });

@@ -6,21 +6,6 @@ import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
 import { taskActionSchema, taskCreateSchema } from "@/lib/validators";
 
-const defaultDays = [1, 2, 3, 4, 5];
-
-async function getSettings() {
-  return prisma.userSettings.upsert({
-    where: { id: 1 },
-    update: {},
-    create: {
-      id: 1,
-      workStart: "09:00",
-      workEnd: "17:00",
-      workDays: defaultDays,
-    },
-  });
-}
-
 export async function GET(request: Request) {
   try {
     await requireAuth();
@@ -30,10 +15,33 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Invalid projectId." }, { status: 400 });
     }
 
-    const settings = await getSettings();
+    // Get the project and its associated job for work schedule
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { jobId: true },
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    }
+
+    // Get job work schedule
+    const job = await prisma.job.findUnique({
+      where: { id: project.jobId },
+      select: {
+        workStart: true,
+        workEnd: true,
+        workDays: true,
+      },
+    });
+
+    if (!job) {
+      return NextResponse.json({ error: "Job not found." }, { status: 404 });
+    }
+
     const now = new Date();
     const workDays =
-      Array.isArray(settings.workDays) ? (settings.workDays as unknown as number[]) : defaultDays;
+      Array.isArray(job.workDays) ? (job.workDays as unknown as number[]) : [1, 2, 3, 4, 5];
 
     const tasks = await prisma.task.findMany({
       where: { projectId },
@@ -70,8 +78,8 @@ export async function GET(request: Request) {
       }
 
       const extraSeconds = workingTimeDiffSeconds(task.startedAt, now, {
-        workStart: settings.workStart,
-        workEnd: settings.workEnd,
+        workStart: job.workStart,
+        workEnd: job.workEnd,
         workDays,
       });
 
@@ -143,7 +151,10 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Invalid action payload.", details: parsed.error.issues }, { status: 400 });
     }
 
-    const task = await prisma.task.findUnique({ where: { id: parsed.data.taskId } });
+    const task = await prisma.task.findUnique({ 
+      where: { id: parsed.data.taskId },
+      include: { project: { select: { jobId: true } } }
+    });
     if (!task) {
       return NextResponse.json({ error: "Task not found." }, { status: 404 });
     }
@@ -189,7 +200,15 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const settings = await getSettings();
+    const settings = await prisma.job.findUnique({
+      where: { id: task.project.jobId },
+      select: { workStart: true, workEnd: true, workDays: true }
+    });
+    
+    if (!settings) {
+      return NextResponse.json({ error: "Job not found." }, { status: 404 });
+    }
+    
     const now = new Date();
     const change = applyTaskTransition(task, parsed.data.action, now, settings);
 

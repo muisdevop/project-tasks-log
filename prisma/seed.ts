@@ -12,14 +12,12 @@ const prisma = new PrismaClient({
 });
 
 async function main() {
+  // Create default user settings (no longer holds work schedule - that's per-job now)
   await prisma.userSettings.upsert({
     where: { id: 1 },
     update: {},
     create: {
       id: 1,
-      workStart: "09:00",
-      workEnd: "17:00",
-      workDays: [1, 2, 3, 4, 5],
     },
   });
 }

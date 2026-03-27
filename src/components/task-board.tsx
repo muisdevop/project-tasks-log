@@ -40,22 +40,42 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
-  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+  const [collapsedInProgressDates, setCollapsedInProgressDates] = useState<Set<string>>(new Set());
+  const [collapsedFinishedDates, setCollapsedFinishedDates] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // Component mounted
-  }, []);
-
-  function toggleDateCollapse(date: string) {
-    setCollapsedDates(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(date)) {
-        newSet.delete(date);
-      } else {
-        newSet.add(date);
-      }
-      return newSet;
+    // Initialize finished dates as collapsed by default
+    const finishedTasks = tasks.filter((task) => task.status !== "in_progress");
+    const finishedDates = new Set<string>();
+    finishedTasks.forEach((task) => {
+      const date = task.startedAt.split('T')[0];
+      finishedDates.add(date);
     });
+    setCollapsedFinishedDates(finishedDates);
+  }, [tasks]);
+
+  function toggleDateCollapse(date: string, isFinished: boolean) {
+    if (isFinished) {
+      setCollapsedFinishedDates(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(date)) {
+          newSet.delete(date);
+        } else {
+          newSet.add(date);
+        }
+        return newSet;
+      });
+    } else {
+      setCollapsedInProgressDates(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(date)) {
+          newSet.delete(date);
+        } else {
+          newSet.add(date);
+        }
+        return newSet;
+      });
+    }
   }
 
   function groupTasksByDate(tasks: Task[]): Record<string, Task[]> {
@@ -169,11 +189,12 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const inProgress = tasks.filter((task) => task.status === "in_progress");
   const finished = tasks.filter((task) => task.status !== "in_progress");
 
-  function renderTaskSection(title: string, tasks: Task[]) {
+  function renderTaskSection(title: string, tasks: Task[], isFinished: boolean) {
     if (tasks.length === 0) return null;
 
     const groupedTasks = groupTasksByDate(tasks);
     const sortedDates = Object.keys(groupedTasks).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    const collapsedDates = isFinished ? collapsedFinishedDates : collapsedInProgressDates;
 
     return (
       <section className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
@@ -208,7 +229,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
               return (
                 <div key={date} className="overflow-hidden rounded-xl border border-zinc-200/50 bg-white/50 backdrop-blur-sm dark:border-zinc-700/50 dark:bg-zinc-800/30">
                   <button
-                    onClick={() => toggleDateCollapse(date)}
+                    onClick={() => toggleDateCollapse(date, isFinished)}
                     className="w-full px-4 py-3 flex items-center justify-between bg-gradient-to-r from-zinc-50/80 to-zinc-100/80 hover:from-zinc-100/80 hover:to-zinc-200/80 dark:from-zinc-800/50 dark:to-zinc-900/50 dark:hover:from-zinc-800/80 dark:hover:to-zinc-900/80 transition-all"
                   >
                     <span className="font-medium text-sm text-zinc-800 dark:text-zinc-200">
@@ -394,8 +415,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         </div>
       ) : null}
 
-      {renderTaskSection("In Progress", inProgress)}
-      {renderTaskSection("Completed and Cancelled", finished)}
+      {renderTaskSection("In Progress", inProgress, false)}
+      {renderTaskSection("Completed and Cancelled", finished, true)}
       
       <TaskActionModal
         isOpen={modalAction !== null}

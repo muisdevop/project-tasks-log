@@ -3,12 +3,18 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { breakSchema } from "@/lib/validators";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await requireAuth();
+    const url = new URL(request.url);
+    const jobId = Number(url.searchParams.get("jobId"));
+    
+    if (!Number.isInteger(jobId) || jobId <= 0) {
+      return NextResponse.json({ error: "Invalid jobId." }, { status: 400 });
+    }
     
     const breaks = await prisma.breakType.findMany({
-      where: { settingsId: 1 },
+      where: { jobId },
       orderBy: [{ createdAt: "asc" }, { name: "asc" }],
     });
 
@@ -23,7 +29,13 @@ export async function POST(request: Request) {
     await requireAuth();
     
     const json = await request.json();
-    const parsed = breakSchema.safeParse(json);
+    const { jobId, ...breakData } = json;
+    
+    if (!jobId || typeof jobId !== "number") {
+      return NextResponse.json({ error: "Invalid or missing jobId." }, { status: 400 });
+    }
+    
+    const parsed = breakSchema.safeParse(breakData);
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid break data." }, { status: 400 });
     }
@@ -31,7 +43,7 @@ export async function POST(request: Request) {
     const breakType = await prisma.breakType.create({
       data: {
         ...parsed.data,
-        settingsId: 1,
+        jobId,
       },
     });
 
