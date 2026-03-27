@@ -1,33 +1,48 @@
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+"use client";
+
+import { useEffect, useState } from "react";
 import { JobSettingsForm } from "@/components/job-settings-form";
+import { JobCreateForm } from "@/components/job-create-form";
+import type { Job } from "@prisma/client";
 
-export default async function JobsPage() {
-  await requireAuth();
+export default function JobsPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const jobs = await prisma.job.findMany({
-    where: { isArchived: false },
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      workStart: true,
-      workEnd: true,
-      workDays: true,
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  useEffect(() => {
+    const fetchJobs = async () => {
+      try {
+        const response = await fetch("/api/jobs");
+        if (response.ok) {
+          const data = await response.json();
+          setJobs(data.jobs);
+        }
+      } catch (error) {
+        console.error("Failed to fetch jobs:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchJobs();
+  }, []);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Job Settings</h1>
-        <p className="mt-2 text-gray-600">Configure work schedules for each job</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Jobs</h1>
+        <p className="mt-2 text-gray-600">Create and manage jobs with custom work schedules</p>
       </div>
 
-      {jobs.length === 0 ? (
+      <JobCreateForm />
+
+      {isLoading ? (
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center text-gray-600">
-          No jobs found. Create a job from the Projects page.
+          Loading jobs...
+        </div>
+      ) : jobs.length === 0 ? (
+        <div className="rounded-lg border border-gray-200 bg-blue-50 p-4 text-center text-blue-600">
+          No jobs yet. Create one above to get started.
         </div>
       ) : (
         <div className="grid gap-6 auto-rows-max">
