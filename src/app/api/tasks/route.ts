@@ -48,6 +48,7 @@ export async function GET(request: Request) {
         endedAt: true,
         completionOutput: true,
         cancellationReason: true,
+        logNotes: true,
       },
     });
 
@@ -135,14 +136,36 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Task not found." }, { status: 404 });
     }
 
-    if (
-      parsed.data.action !== "resume" &&
-      task.status !== "in_progress"
-    ) {
-      return NextResponse.json(
-        { error: "Only in-progress tasks can be completed/cancelled." },
-        { status: 400 },
-      );
+    if (parsed.data.action === "log-notes") {
+      if (task.status !== "in_progress") {
+        return NextResponse.json(
+          { error: "Only in-progress tasks can have log notes added." },
+          { status: 400 },
+        );
+      }
+
+      const updated = await prisma.task.update({
+        where: { id: task.id },
+        data: { logNotes: parsed.data.notes || null } as any,
+      });
+
+      return NextResponse.json({ task: updated });
+    }
+
+    if (parsed.data.action === "resume") {
+      if (task.status !== "cancelled") {
+        return NextResponse.json(
+          { error: "Only cancelled tasks can be resumed." },
+          { status: 400 },
+        );
+      }
+    } else if (parsed.data.action === "complete" || parsed.data.action === "cancel") {
+      if (task.status !== "in_progress") {
+        return NextResponse.json(
+          { error: "Only in-progress tasks can be completed/cancelled." },
+          { status: 400 },
+        );
+      }
     }
 
     if (parsed.data.action === "resume" && task.status !== "cancelled") {

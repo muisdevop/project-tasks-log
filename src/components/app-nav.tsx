@@ -13,6 +13,34 @@ export function AppNav() {
     router.refresh();
   }
 
+  async function exportTodayActivity() {
+    try {
+      const response = await fetch("/api/export");
+      if (!response.ok) {
+        throw new Error('Export failed');
+      }
+      
+      // Get filename from response headers
+      const contentDisposition = response.headers.get('content-disposition');
+      const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
+      const filename = filenameMatch ? filenameMatch[1] : 'activity.json';
+      
+      // Download the file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Export failed. Please try again.');
+    }
+  }
+
   const itemClass = (href: string) =>
     `rounded px-3 py-2 text-sm ${
       pathname.startsWith(href)
@@ -30,6 +58,13 @@ export function AppNav() {
           <Link href="/settings" className={itemClass("/settings")}>
             Settings
           </Link>
+          <button
+            onClick={exportTodayActivity}
+            className="rounded px-3 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+            title="Export Today's Activity"
+          >
+            Export Today
+          </button>
         </nav>
         <button
           onClick={logout}

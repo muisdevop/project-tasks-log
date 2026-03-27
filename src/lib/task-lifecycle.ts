@@ -1,10 +1,10 @@
 import type { Task, UserSettings } from "@prisma/client";
 import { workingTimeDiffSeconds } from "./business-time";
 
-type TransitionAction = "complete" | "cancel" | "resume";
+type TransitionAction = "complete" | "cancel" | "resume" | "log-notes";
 
 export function applyTaskTransition(
-  task: Pick<Task, "status" | "startedAt" | "elapsedSeconds">,
+  task: Pick<Task, "status" | "startedAt" | "endedAt" | "elapsedSeconds">,
   action: TransitionAction,
   now: Date,
   settings: Pick<UserSettings, "workStart" | "workEnd" | "workDays">,
@@ -19,6 +19,15 @@ export function applyTaskTransition(
       elapsedSeconds: task.elapsedSeconds,
       startedAt: now,
       endedAt: null,
+    };
+  }
+
+  if (action === "log-notes") {
+    return {
+      status: task.status,
+      elapsedSeconds: task.elapsedSeconds,
+      startedAt: task.startedAt,
+      endedAt: task.endedAt,
     };
   }
 

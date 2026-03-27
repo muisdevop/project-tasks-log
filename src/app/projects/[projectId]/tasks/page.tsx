@@ -43,6 +43,7 @@ async function getTasksWithElapsed(projectId: number) {
       endedAt: true,
       completionOutput: true,
       cancellationReason: true,
+      logNotes: true,
     },
   });
 

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { RichTextEditor } from "./rich-text-editor";
 import { RichTextDisplay } from "./rich-text-display";
 import { TaskActionModal } from "./task-action-modal";
+import { LogNotesModal } from "./log-notes-modal";
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -21,6 +22,7 @@ type Task = {
   endedAt: string | null;
   completionOutput: string | null;
   cancellationReason: string | null;
+  logNotes: string | null;
 };
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
@@ -31,6 +33,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
+  const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -96,6 +99,32 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     router.refresh();
   }
 
+  async function handleLogNotes(notes: string) {
+    if (!logNotesTask) return;
+
+    setBusyTaskId(logNotesTask.taskId);
+    setError(null);
+    
+    const response = await fetch("/api/tasks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        taskId: logNotesTask.taskId, 
+        action: "log-notes",
+        notes: notes 
+      }),
+    });
+    
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to save notes.");
+    }
+    
+    setBusyTaskId(null);
+    setLogNotesTask(null);
+    router.refresh();
+  }
+
   const inProgress = tasks.filter((task) => task.status === "in_progress");
   const finished = tasks.filter((task) => task.status !== "in_progress");
 
@@ -114,6 +143,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             className="w-full rounded border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           />
           <RichTextEditor
+            key={`task-desc-${title}`}
             value={description}
             onChange={setDescription}
             placeholder="Description (optional)"
@@ -139,6 +169,12 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
               <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
                 <p className="font-medium">{task.title}</p>
                 <RichTextDisplay content={task.description} className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" />
+                {task.logNotes ? (
+                  <div className="mt-2">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Progress Notes:</p>
+                    <RichTextDisplay content={task.logNotes} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                  </div>
+                ) : null}
                 <p className="mt-1 text-sm">Started: {formatDateTime(task.startedAt)}</p>
                 <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
                 <div className="mt-2 flex gap-2">
@@ -155,6 +191,13 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                     className="rounded bg-red-700 px-3 py-1 text-sm text-white disabled:opacity-50"
                   >
                     Cancel
+                  </button>
+                  <button
+                    onClick={() => setLogNotesTask({ taskId: task.id, notes: task.logNotes || "" })}
+                    disabled={busyTaskId === task.id}
+                    className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+                  >
+                    Add Notes
                   </button>
                 </div>
               </article>
@@ -214,11 +257,19 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         onConfirm={handleModalConfirm}
         title={modalAction?.type === "complete" ? "Complete Task" : "Cancel Task"}
         placeholder={modalAction?.type === "complete" 
-          ? "Describe the work performed and any outputs..." 
+          ? "Describe work performed and any outputs..." 
           : "Reason for cancelling this task..."
         }
         confirmText={modalAction?.type === "complete" ? "Complete" : "Cancel"}
         loading={modalLoading}
+      />
+      
+      <LogNotesModal
+        isOpen={logNotesTask !== null}
+        onClose={() => setLogNotesTask(null)}
+        onConfirm={handleLogNotes}
+        initialNotes={logNotesTask?.notes || ""}
+        loading={busyTaskId === logNotesTask?.taskId}
       />
     </div>
   );

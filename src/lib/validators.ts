@@ -17,8 +17,9 @@ export const taskCreateSchema = z.object({
 
 export const taskActionSchema = z.object({
   taskId: z.number().int().positive(),
-  action: z.enum(["complete", "cancel", "resume"]),
+  action: z.enum(["complete", "cancel", "resume", "log-notes"]),
   details: z.string().trim().max(2000).optional(),
+  notes: z.string().trim().max(2000).optional(),
 });
 
 export const settingsSchema = z.object({
