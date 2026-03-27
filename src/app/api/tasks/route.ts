@@ -53,7 +53,11 @@ export async function GET(request: Request) {
 
     const tasksWithCurrentElapsed = tasks.map((task) => {
       if (task.status !== "in_progress") {
-        return task;
+        return {
+          ...task,
+          startedAt: task.startedAt.toISOString(),
+          endedAt: task.endedAt?.toISOString() || null,
+        };
       }
 
       const extraSeconds = workingTimeDiffSeconds(task.startedAt, now, {
@@ -69,7 +73,12 @@ export async function GET(request: Request) {
         ? totalElapsedSeconds(task.startedAt, now)
         : totalElapsed;
 
-      return { ...task, elapsedSeconds: displayElapsed };
+      return { 
+        ...task, 
+        elapsedSeconds: displayElapsed,
+        startedAt: task.startedAt.toISOString(),
+        endedAt: task.endedAt?.toISOString() || null,
+      };
     });
 
     return NextResponse.json({ tasks: tasksWithCurrentElapsed });
