@@ -122,41 +122,54 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
   const totalCount = subtasks.length;
 
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-3 space-y-3 rounded-xl border border-violet-200/50 bg-violet-50/30 p-4 backdrop-blur-sm dark:border-violet-800/30 dark:bg-violet-900/20">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Subtasks ({completedCount}/{totalCount})
-        </span>
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-sm">
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+          </div>
+          <span className="text-sm font-medium text-violet-700 dark:text-violet-300">
+            Subtasks ({completedCount}/{totalCount})
+          </span>
+        </div>
+        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-violet-200/50 dark:bg-violet-800/30">
+          <div 
+            className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300"
+            style={{ width: totalCount > 0 ? `${(completedCount / totalCount) * 100}%` : '0%' }}
+          />
+        </div>
       </div>
 
       {subtasks.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-2">
           {subtasks.map((subtask) => (
             <div
               key={subtask.id}
-              className="flex items-center gap-2 text-sm p-2 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900"
+              className="group flex items-center gap-2 rounded-lg border border-zinc-200/50 bg-white/50 p-2.5 text-sm backdrop-blur-sm transition-all hover:border-violet-300/50 hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/40 dark:hover:border-violet-500/30 dark:hover:bg-zinc-800/60"
             >
               <input
                 type="checkbox"
                 checked={subtask.isCompleted}
                 onChange={(e) => toggleSubtask(subtask.id, e.target.checked)}
-                className="rounded"
+                className="h-4 w-4 rounded border-violet-300 text-violet-500 focus:ring-violet-500 dark:border-violet-600"
               />
               <span
                 className={`flex-1 ${
                   subtask.isCompleted
-                    ? "line-through text-zinc-500 dark:text-zinc-500"
-                    : "text-zinc-900 dark:text-zinc-100"
+                    ? "line-through text-zinc-400 dark:text-zinc-500"
+                    : "text-zinc-700 dark:text-zinc-200"
                 }`}
               >
                 {subtask.title}
               </span>
               <button
                 onClick={() => deleteSubtask(subtask.id)}
-                className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                className="rounded p-1 text-red-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 title="Delete subtask"
               >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                 </svg>
               </button>
@@ -171,21 +184,34 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
           value={newSubtaskTitle}
           onChange={(e) => setNewSubtaskTitle(e.target.value)}
           placeholder="Add a subtask..."
-          className="flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          className="flex-1 rounded-lg border border-zinc-200/50 bg-white/50 px-3 py-1.5 text-sm text-zinc-700 outline-none transition-all placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500 dark:focus:bg-zinc-800 dark:focus:ring-violet-900/30"
           disabled={loading}
         />
         <button
           type="submit"
           disabled={loading || !newSubtaskTitle.trim()}
-          className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-violet-500 to-purple-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-violet-500/30 transition-all hover:shadow-lg hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
         >
-          {loading ? "Adding..." : "Add"}
+          {loading ? (
+            <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          ) : (
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          )}
+          Add
         </button>
       </form>
 
       {error && (
-        <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
-          <strong>Error:</strong> {error}
+        <div className="flex items-center gap-2 rounded-lg border border-red-200/50 bg-red-50/70 p-2 text-sm text-red-600 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          {error}
         </div>
       )}
     </div>

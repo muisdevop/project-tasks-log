@@ -70,7 +70,7 @@ A modern, feature-rich task management application built with Next.js, TypeScrip
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/project-tasks-log.git
+git clone https://github.com/muisdevop/project-tasks-log.git
 
 # Navigate to project directory
 cd project-tasks-log
@@ -387,13 +387,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For support and questions:
 
-- 📧 Email: support@project-tasks-log.com
-- 🐛 Issues: [GitHub Issues](https://github.com/your-username/project-tasks-log/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/your-username/project-tasks-log/discussions)
-- 📖 Documentation: [Project Wiki](https://github.com/your-username/project-tasks-log/wiki)
+- 📧 Email: support@gidstudio.com
+- 🐛 Issues: [GitHub Issues](https://github.com/muisdevop/project-tasks-log/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/muisdevop/project-tasks-log/discussions)
+- 📖 Documentation: [Project Wiki](https://github.com/muisdevop/project-tasks-log/wiki)
 
 ---
 
 <div align="center">
-  <strong>Built with ❤️ by the Task Management Team</strong>
+  <strong>Built with ❤️ by MUIS at GID Studio</strong>
 </div>
