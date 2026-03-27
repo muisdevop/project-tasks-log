@@ -7,6 +7,7 @@ import { RichTextEditor } from "./rich-text-editor";
 import { RichTextDisplay } from "./rich-text-display";
 import { TaskActionModal } from "./task-action-modal";
 import { LogNotesModal } from "./log-notes-modal";
+import { SubTasks } from "./subtasks";
 
 type BreakType = {
   id: number;
@@ -32,6 +33,11 @@ type Task = {
   completionOutput: string | null;
   cancellationReason: string | null;
   logNotes: string | null;
+  subtasks: {
+    id: number;
+    title: string;
+    isCompleted: boolean;
+  }[];
 };
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
@@ -45,10 +51,34 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
   const [breaks, setBreaks] = useState<BreakType[]>([]);
   const [selectedBreak, setSelectedBreak] = useState<number | null>(null);
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchBreaks();
   }, []);
+
+  function toggleDateCollapse(date: string) {
+    setCollapsedDates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(date)) {
+        newSet.delete(date);
+      } else {
+        newSet.add(date);
+      }
+      return newSet;
+    });
+  }
+
+  function groupTasksByDate(tasks: Task[]): Record<string, Task[]> {
+    return tasks.reduce((groups, task) => {
+      const date = task.startedAt.split('T')[0];
+      if (!groups[date]) {
+        groups[date] = [];
+      }
+      groups[date].push(task);
+      return groups;
+    }, {} as Record<string, Task[]>);
+  }
 
   async function fetchBreaks() {
     try {
@@ -209,6 +239,134 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const inProgress = tasks.filter((task) => task.status === "in_progress");
   const finished = tasks.filter((task) => task.status !== "in_progress");
 
+  function renderTaskSection(title: string, tasks: Task[]) {
+    if (tasks.length === 0) return null;
+
+    const groupedTasks = groupTasksByDate(tasks);
+    const sortedDates = Object.keys(groupedTasks).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
+    return (
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+        <h2 className="mb-3 text-lg font-semibold">{title}</h2>
+        <div className="space-y-4">
+          {sortedDates.map((date) => {
+            const isCollapsed = collapsedDates.has(date);
+            const dateTasks = groupedTasks[date];
+            
+            return (
+              <div key={date} className="border border-zinc-200 dark:border-zinc-700 rounded-lg">
+                <button
+                  onClick={() => toggleDateCollapse(date)}
+                  className="w-full px-4 py-2 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-t-lg transition-colors"
+                >
+                  <span className="font-medium text-sm">
+                    {new Date(date).toLocaleDateString('en-US', { 
+                      weekday: 'long', 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric' 
+                    })}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}
+                    </span>
+                    <svg 
+                      className={`w-4 h-4 text-zinc-500 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+                      fill="currentColor" 
+                      viewBox="0 0 20 20"
+                    >
+                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                </button>
+                
+                {!isCollapsed && (
+                  <div className="p-4 space-y-3">
+                    {dateTasks.map((task) => (
+                      <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
+                        <p className="font-medium">{task.title}</p>
+                        <RichTextDisplay content={task.description} className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" />
+                        
+                        {/* Subtasks - only for in-progress tasks */}
+                        <SubTasks taskId={task.id} taskStatus={task.status} />
+                        
+                        {task.logNotes ? (
+                          <div className="mt-2">
+                            <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Progress Notes:</p>
+                            <RichTextDisplay content={task.logNotes} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                          </div>
+                        ) : null}
+                        
+                        <p className="mt-1 text-sm">Started: {formatDateTime(task.startedAt)}</p>
+                        <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
+                        
+                        {task.status === "in_progress" ? (
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              onClick={() => runAction(task.id, "complete")}
+                              disabled={busyTaskId === task.id}
+                              className="rounded bg-green-700 px-3 py-1 text-sm text-white disabled:opacity-50"
+                            >
+                              Complete
+                            </button>
+                            <button
+                              onClick={() => runAction(task.id, "cancel")}
+                              disabled={busyTaskId === task.id}
+                              className="rounded bg-red-700 px-3 py-1 text-sm text-white disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => setLogNotesTask({ taskId: task.id, notes: task.logNotes || "" })}
+                              disabled={busyTaskId === task.id}
+                              className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50"
+                            >
+                              Add Notes
+                            </button>
+                          </div>
+                        ) : null}
+                        
+                        {task.status !== "in_progress" ? (
+                          <>
+                            {task.endedAt ? (
+                              <p className="text-sm">Ended: {formatDateTime(task.endedAt)}</p>
+                            ) : null}
+                            {task.completionOutput ? (
+                              <div className="mt-2">
+                                <p className="text-sm font-medium text-green-700 dark:text-green-400">Work Output:</p>
+                                <RichTextDisplay content={task.completionOutput} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                              </div>
+                            ) : null}
+                            {task.cancellationReason ? (
+                              <div className="mt-2">
+                                <p className="text-sm font-medium text-red-700 dark:text-red-400">Cancellation Reason:</p>
+                                <RichTextDisplay content={task.cancellationReason} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                              </div>
+                            ) : null}
+                            {task.status === "cancelled" ? (
+                              <button
+                                onClick={() => runAction(task.id, "resume")}
+                                disabled={busyTaskId === task.id}
+                                className="mt-2 rounded bg-zinc-900 px-3 py-1 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+                              >
+                                Resume
+                              </button>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <form
@@ -268,97 +426,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         </div>
       )}
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="mb-3 text-lg font-semibold">In Progress</h2>
-        <div className="space-y-3">
-          {inProgress.length === 0 ? (
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">No active tasks.</p>
-          ) : (
-            inProgress.map((task) => (
-              <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
-                <p className="font-medium">{task.title}</p>
-                <RichTextDisplay content={task.description} className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" />
-                {task.logNotes ? (
-                  <div className="mt-2">
-                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Progress Notes:</p>
-                    <RichTextDisplay content={task.logNotes} className="text-sm text-zinc-600 dark:text-zinc-300" />
-                  </div>
-                ) : null}
-                <p className="mt-1 text-sm">Started: {formatDateTime(task.startedAt)}</p>
-                <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => runAction(task.id, "complete")}
-                    disabled={busyTaskId === task.id}
-                    className="rounded bg-green-700 px-3 py-1 text-sm text-white disabled:opacity-50"
-                  >
-                    Complete
-                  </button>
-                  <button
-                    onClick={() => runAction(task.id, "cancel")}
-                    disabled={busyTaskId === task.id}
-                    className="rounded bg-red-700 px-3 py-1 text-sm text-white disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => setLogNotesTask({ taskId: task.id, notes: task.logNotes || "" })}
-                    disabled={busyTaskId === task.id}
-                    className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-50"
-                  >
-                    Add Notes
-                  </button>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="mb-3 text-lg font-semibold">Completed and Cancelled</h2>
-        <div className="space-y-3">
-          {finished.length === 0 ? (
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">
-              No completed/cancelled tasks.
-            </p>
-          ) : (
-            finished.map((task) => (
-              <article key={task.id} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
-                <p className="font-medium">{task.title}</p>
-                <RichTextDisplay content={task.description} className="mt-1 text-sm text-zinc-600 dark:text-zinc-300" />
-                <p className="text-sm">Status: {task.status}</p>
-                <p className="text-sm">Started: {formatDateTime(task.startedAt)}</p>
-                {task.endedAt ? (
-                  <p className="text-sm">Ended: {formatDateTime(task.endedAt)}</p>
-                ) : null}
-                <p className="text-sm">Elapsed: {formatElapsed(task.elapsedSeconds)}</p>
-                {task.completionOutput ? (
-                  <div className="mt-2">
-                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Work Output:</p>
-                    <RichTextDisplay content={task.completionOutput} className="text-sm text-zinc-600 dark:text-zinc-300" />
-                  </div>
-                ) : null}
-                {task.cancellationReason ? (
-                  <div className="mt-2">
-                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Cancellation Reason:</p>
-                    <RichTextDisplay content={task.cancellationReason} className="text-sm text-zinc-600 dark:text-zinc-300" />
-                  </div>
-                ) : null}
-                {task.status === "cancelled" ? (
-                  <button
-                    onClick={() => runAction(task.id, "resume")}
-                    disabled={busyTaskId === task.id}
-                    className="mt-2 rounded bg-zinc-900 px-3 py-1 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
-                  >
-                    Resume
-                  </button>
-                ) : null}
-              </article>
-            ))
-          )}
-        </div>
-      </section>
+      {renderTaskSection("In Progress", inProgress)}
+      {renderTaskSection("Completed and Cancelled", finished)}
       
       <TaskActionModal
         isOpen={modalAction !== null}

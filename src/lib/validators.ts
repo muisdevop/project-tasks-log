@@ -51,6 +51,12 @@ export const breakSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
+export const subtaskSchema = z.object({
+  taskId: z.number().int().positive(),
+  title: z.string().trim().min(1).max(200),
+  isCompleted: z.boolean().default(false),
+});
+
 export function toNameKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }

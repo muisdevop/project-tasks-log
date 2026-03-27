@@ -49,6 +49,14 @@ export async function GET(request: Request) {
         completionOutput: true,
         cancellationReason: true,
         logNotes: true,
+        subtasks: {
+          select: {
+            id: true,
+            title: true,
+            isCompleted: true,
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        },
       },
     });
 
