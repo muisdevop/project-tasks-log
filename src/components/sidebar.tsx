@@ -10,10 +10,19 @@ interface SidebarProps {
 }
 
 const navigation = [
+  { name: "Dashboard", href: "/dashboard", icon: DashboardIcon },
   { name: "Projects", href: "/projects", icon: ProjectsIcon },
   { name: "Jobs", href: "/jobs", icon: JobsIcon },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
+
+function DashboardIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-3m0 0l7-4 7 4M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9m-9 3l3 3m0 0l3-3m-3 3V7" />
+    </svg>
+  );
+}
 
 function ProjectsIcon({ className }: { className?: string }) {
   return (
@@ -56,7 +65,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-white/10 bg-slate-900/95 backdrop-blur-xl dark:bg-slate-950/95">
       {/* Logo Section */}
       <div className="flex h-16 items-center border-b border-white/10 px-6">
-        <Link href="/projects" className="flex items-center gap-3">
+        <Link href="/dashboard" className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -70,6 +79,19 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       <nav className="flex-1 space-y-1 p-4">
         {/* Main Navigation */}
         <div className="space-y-1">
+          {/* Dashboard Link */}
+          <Link
+            href="/dashboard"
+            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+              pathname === "/dashboard"
+                ? "bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-500/30"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            <DashboardIcon className={`h-5 w-5 transition-colors ${pathname === "/dashboard" ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+            Dashboard
+          </Link>
+
           {/* Projects Link */}
           <Link
             href="/projects"
