@@ -13,7 +13,7 @@ type BreakType = {
   id: number;
   name: string;
   type: string;
-  time: string;
+  duration: number | null; // Duration in minutes, null for recurring
   isOneTime: boolean;
   isActive: boolean;
 };
@@ -410,7 +410,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
               <option value="">Select a break type...</option>
               {breaks.map((breakType) => (
                 <option key={breakType.id} value={breakType.id}>
-                  {breakType.name} ({breakType.type}) - {breakType.time}
+                  {breakType.name} ({breakType.type})
+                  {breakType.duration && ` - ${breakType.duration} minutes`}
                   {breakType.isOneTime && " - One-time"}
                 </option>
               ))}

@@ -68,7 +68,7 @@ model BreakType {
   id          Int    @id @default(autoincrement())
   name        String
   type        String // "Prayer", "Meal", "Washroom", "Custom", etc.
-  time        String // HH:MM format
+  duration    Int?   // Duration in minutes (null for recurring breaks)
   isOneTime   Boolean @default(false)
   isActive    Boolean @default(true)
   settingsId  Int    @default(1)

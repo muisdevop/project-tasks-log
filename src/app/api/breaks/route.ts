@@ -9,7 +9,7 @@ export async function GET() {
     
     const breaks = await prisma.breakType.findMany({
       where: { settingsId: 1 },
-      orderBy: [{ time: "asc" }, { name: "asc" }],
+      orderBy: [{ createdAt: "asc" }, { name: "asc" }],
     });
 
     return NextResponse.json({ breaks });

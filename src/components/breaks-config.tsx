@@ -6,7 +6,7 @@ type BreakType = {
   id: number;
   name: string;
   type: string;
-  time: string;
+  duration: number | null; // Duration in minutes, null for recurring
   isOneTime: boolean;
   isActive: boolean;
 };
@@ -29,7 +29,7 @@ export function BreaksConfig() {
   const [formData, setFormData] = useState({
     name: "",
     type: "Custom",
-    time: "12:00",
+    duration: 15 as number | null, // Default 15 minutes
     isOneTime: false,
     isActive: true,
   });
@@ -69,7 +69,7 @@ export function BreaksConfig() {
 
       if (!response.ok) throw new Error("Failed to save break");
 
-      setFormData({ name: "", type: "Custom", time: "12:00", isOneTime: false, isActive: true });
+      setFormData({ name: "", type: "Custom", duration: 15 as number | null, isOneTime: false, isActive: true });
       setEditingId(null);
       fetchBreaks();
     } catch (err) {
@@ -93,7 +93,7 @@ export function BreaksConfig() {
     setFormData({
       name: breakType.name,
       type: breakType.type,
-      time: breakType.time,
+      duration: breakType.duration || 15, // Default to 15 minutes if null
       isOneTime: breakType.isOneTime,
       isActive: breakType.isActive,
     });
@@ -101,7 +101,7 @@ export function BreaksConfig() {
   }
 
   function handleCancel() {
-    setFormData({ name: "", type: "Custom", time: "12:00", isOneTime: false, isActive: true });
+    setFormData({ name: "", type: "Custom", duration: 15, isOneTime: false, isActive: true });
     setEditingId(null);
   }
 
@@ -147,14 +147,16 @@ export function BreaksConfig() {
             
             <div>
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                Time
+                Duration (minutes)
               </label>
               <input
-                type="time"
-                value={formData.time}
-                onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                type="number"
+                min="1"
+                max="480"
+                value={formData.duration || ""}
+                onChange={(e) => setFormData({ ...formData, duration: parseInt(e.target.value) || null })}
                 className="w-full rounded border border-zinc-300 bg-white px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-                required
+                placeholder={formData.isOneTime ? "Duration in minutes" : "Optional for recurring breaks"}
               />
             </div>
             
@@ -225,7 +227,8 @@ export function BreaksConfig() {
                 <div className="flex-1">
                   <div className="font-medium">{breakType.name}</div>
                   <div className="text-sm text-zinc-600 dark:text-zinc-400">
-                    {breakType.type} at {breakType.time}
+                    {breakType.type}
+                    {breakType.duration && ` • ${breakType.duration} minutes`}
                     {breakType.isOneTime && " • One-time"}
                     {!breakType.isActive && " • Inactive"}
                   </div>

@@ -46,7 +46,7 @@ export const changePasswordSchema = z
 export const breakSchema = z.object({
   name: z.string().trim().min(1).max(100),
   type: z.string().trim().min(1).max(50),
-  time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/),
+  duration: z.number().int().min(1).max(480).optional(), // Duration in minutes (max 8 hours), optional for recurring
   isOneTime: z.boolean().default(false),
   isActive: z.boolean().default(true),
 });
