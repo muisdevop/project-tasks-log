@@ -1,7 +1,7 @@
 # 📋 Task Management System
 
 <div align="center">
-  <img src="logo.svg" alt="Task Management System Logo" width="120" height="120">
+  <img src="./public/logo.svg" alt="Task Management System Logo" width="120" height="120">
   
   ![License](https://img.shields.io/badge/license-MIT-blue.svg)
   ![Node.js Version](https://img.shields.io/badge/node.js-20%2B-green.svg)
