@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Project Tasks Log",
-  description: "Single-user project and task time logger",
+  title: "GID Task Flow",
+  description: "Enterprise project and task management system",
 };
 
 export default function RootLayout({

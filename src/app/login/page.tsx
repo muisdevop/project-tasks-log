@@ -14,7 +14,7 @@ export default async function LoginPage() {
         <LoginForm />
         <div className="mt-8 text-center">
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Task Logger - Track your work efficiently
+            GID Task Flow - Track your work efficiently
           </p>
         </div>
       </div>

@@ -111,7 +111,7 @@ export default async function TasksPage({ params }: Props) {
   const tasks = await getTasksWithElapsed(projectId);
 
   return (
-    <SidebarLayout username={username}>
+    <SidebarLayout username={username} projectName={project.name}>
       <div className="mx-auto w-full max-w-5xl">
         <div className="mb-6">
           <Link 

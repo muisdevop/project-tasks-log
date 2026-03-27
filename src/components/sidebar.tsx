@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Image from "next/image";
 
 interface SidebarProps {
   username?: string | null;
+  projectName?: string | null;
 }
 
 const navigation = [
@@ -37,7 +39,7 @@ function LogoutIcon({ className }: { className?: string }) {
   );
 }
 
-export function Sidebar({ username }: SidebarProps) {
+export function Sidebar({ username, projectName }: SidebarProps) {
   const pathname = usePathname();
   const isTasksPage = pathname?.startsWith("/projects/") && pathname?.includes("/tasks");
 
@@ -51,7 +53,7 @@ export function Sidebar({ username }: SidebarProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
           </div>
-          <span className="text-lg font-bold text-white">TaskFlow</span>
+          <span className="text-lg font-bold text-white">GID Task Flow</span>
         </Link>
       </div>
 
@@ -75,7 +77,7 @@ export function Sidebar({ username }: SidebarProps) {
           <div className="ml-4">
             <div className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-blue-400">
               <div className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-              Current Tasks
+              {projectName || "Current Tasks"}
             </div>
           </div>
         )}
@@ -133,17 +135,22 @@ export function Sidebar({ username }: SidebarProps) {
   );
 }
 
+import { GlobalBreakWidget } from "./global-break-widget";
+
 // Layout wrapper component
 export function SidebarLayout({ 
   children, 
-  username 
+  username,
+  projectName
 }: { 
   children: React.ReactNode; 
   username?: string | null;
+  projectName?: string | null;
 }) {
   return (
     <div className="flex min-h-screen">
-      <Sidebar username={username} />
+      <Sidebar username={username} projectName={projectName} />
+      <GlobalBreakWidget />
       <main className="flex-1 pl-64">
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-8 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10">
           {children}

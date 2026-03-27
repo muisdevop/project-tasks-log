@@ -9,15 +9,6 @@ import { TaskActionModal } from "./task-action-modal";
 import { LogNotesModal } from "./log-notes-modal";
 import { SubTasks } from "./subtasks";
 
-type BreakType = {
-  id: number;
-  name: string;
-  type: string;
-  duration: number | null; // Duration in minutes, null for recurring
-  isOneTime: boolean;
-  isActive: boolean;
-};
-
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
 }
@@ -49,12 +40,10 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
-  const [breaks, setBreaks] = useState<BreakType[]>([]);
-  const [selectedBreak, setSelectedBreak] = useState<number | null>(null);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetchBreaks();
+    // Component mounted
   }, []);
 
   function toggleDateCollapse(date: string) {
@@ -78,18 +67,6 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       groups[date].push(task);
       return groups;
     }, {} as Record<string, Task[]>);
-  }
-
-  async function fetchBreaks() {
-    try {
-      const response = await fetch("/api/breaks");
-      if (response.ok) {
-        const data = await response.json();
-        setBreaks(data.breaks?.filter((b: BreakType) => b.isActive) || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch breaks:", err);
-    }
   }
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
@@ -187,60 +164,6 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     setBusyTaskId(null);
     setLogNotesTask(null);
     router.refresh();
-  }
-
-  async function handleBreak() {
-    if (!selectedBreak) return;
-
-    const breakType = breaks.find(b => b.id === selectedBreak);
-    if (!breakType) return;
-
-    setBusyTaskId(-1); // Use -1 for break operations
-    setError(null);
-    
-    try {
-      // Create a break task or log the break
-      const response = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          projectId, 
-          title: `${breakType.name} - ${breakType.type}`,
-          description: `Break taken at ${new Date().toLocaleTimeString()}`,
-        }),
-      });
-      
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "Failed to log break.");
-        return;
-      }
-
-      // Immediately complete the break task
-      const taskData = await response.json();
-      const completeResponse = await fetch("/api/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          taskId: taskData.task.id, 
-          action: "complete",
-          details: `Break completed: ${breakType.name}`,
-        }),
-      });
-
-      if (!completeResponse.ok) {
-        const data = (await completeResponse.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "Failed to complete break.");
-        return;
-      }
-
-      setSelectedBreak(null);
-      router.refresh();
-    } catch (err) {
-      setError("Failed to process break.");
-    } finally {
-      setBusyTaskId(null);
-    }
   }
 
   const inProgress = tasks.filter((task) => task.status === "in_progress");
@@ -470,57 +393,6 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           {error}
         </div>
       ) : null}
-
-      {breaks.length > 0 && (
-        <div className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
-          <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-amber-500/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-          
-          <div className="relative">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-lg">
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">Take a Break</h2>
-            </div>
-            
-            <div className="flex gap-3">
-              <select
-                value={selectedBreak || ""}
-                onChange={(e) => setSelectedBreak(e.target.value ? Number(e.target.value) : null)}
-                className="flex-1 rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-3 text-zinc-900 outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-orange-500 dark:focus:bg-zinc-800 dark:focus:ring-orange-900/30"
-              >
-                <option value="">Select a break type...</option>
-                {breaks.map((breakType) => (
-                  <option key={breakType.id} value={breakType.id}>
-                    {breakType.name} ({breakType.type})
-                    {breakType.duration && ` - ${breakType.duration} minutes`}
-                    {breakType.isOneTime && " - One-time"}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleBreak}
-                disabled={!selectedBreak || busyTaskId === -1}
-                className="rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-6 py-3 font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
-              >
-                {busyTaskId === -1 ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Processing...
-                  </span>
-                ) : (
-                  "Start Break"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {renderTaskSection("In Progress", inProgress)}
       {renderTaskSection("Completed and Cancelled", finished)}
