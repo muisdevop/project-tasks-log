@@ -9,21 +9,21 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchJobs = async () => {
-      try {
-        const response = await fetch("/api/jobs");
-        if (response.ok) {
-          const data = await response.json();
-          setJobs(data.jobs);
-        }
-      } catch (error) {
-        console.error("Failed to fetch jobs:", error);
-      } finally {
-        setIsLoading(false);
+  const fetchJobs = async () => {
+    try {
+      const response = await fetch("/api/jobs");
+      if (response.ok) {
+        const data = await response.json();
+        setJobs(data.jobs);
       }
-    };
+    } catch (error) {
+      console.error("Failed to fetch jobs:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchJobs();
   }, []);
 
@@ -34,7 +34,7 @@ export default function JobsPage() {
         <p className="mt-2 text-gray-600">Create and manage jobs with custom work schedules</p>
       </div>
 
-      <JobCreateForm />
+      <JobCreateForm onSuccess={fetchJobs} />
 
       {isLoading ? (
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-center text-gray-600">

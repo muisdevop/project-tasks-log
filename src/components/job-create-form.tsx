@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
-export function JobCreateForm() {
-  const router = useRouter();
+interface JobCreateFormProps {
+  onSuccess?: () => void;
+}
+
+export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +36,7 @@ export function JobCreateForm() {
 
       setName("");
       setDescription("");
-      router.refresh();
+      onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
       setLoading(false);
