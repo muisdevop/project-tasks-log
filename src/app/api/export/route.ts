@@ -37,38 +37,82 @@ export async function GET() {
     // Generate HTML content for PDF
     const htmlContent = generatePDFHTML(tasks, today);
     
-    // Launch Puppeteer
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    
+    // Try Puppeteer first, fallback to simple HTML response
     try {
-      const page = await browser.newPage();
-      await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-      
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: {
-          top: '20mm',
-          right: '20mm',
-          bottom: '20mm',
-          left: '20mm'
+      // Launch Puppeteer with environment-aware configuration
+      const puppeteerOptions: any = {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      };
+
+      // Only specify executablePath in development/local environment
+      if (process.env.NODE_ENV !== 'production') {
+        // Try to find Chrome in common locations for local development
+        const possibleChromePaths = [
+          'C:\\Users\\muis6\\.cache\\puppeteer\\chrome\\win64-146.0.7680.153\\chrome-win64\\chrome.exe',
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Users\\%USERNAME%\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'
+        ];
+
+        for (const chromePath of possibleChromePaths) {
+          try {
+            const fs = require('fs');
+            if (fs.existsSync(chromePath.replace('%USERNAME%', process.env.USERNAME || 'muis6'))) {
+              puppeteerOptions.executablePath = chromePath.replace('%USERNAME%', process.env.USERNAME || 'muis6');
+              break;
+            }
+          } catch {
+            // Continue to next path
+          }
         }
-      });
+      } else {
+        // In production (Docker), use the installed Chromium
+        puppeteerOptions.executablePath = '/usr/bin/chromium-browser';
+      }
+
+      const browser = await puppeteer.launch(puppeteerOptions);
       
-      const filename = `task-activity-${today.toISOString().split('T')[0]}.pdf`;
+      try {
+        const page = await browser.newPage();
+        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+        
+        const pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: {
+            top: '20mm',
+            right: '20mm',
+            bottom: '20mm',
+            left: '20mm'
+          }
+        });
+        
+        const filename = `task-activity-${today.toISOString().split('T')[0]}.pdf`;
+        
+        return new NextResponse(Buffer.from(pdfBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="${filename}"`
+          }
+        });
+      } finally {
+        await browser.close();
+      }
+    } catch (puppeteerError) {
+      console.error('Puppeteer PDF generation failed:', puppeteerError);
       
-      return new NextResponse(Buffer.from(pdfBuffer), {
+      // Fallback: Return HTML as downloadable file
+      const filename = `task-activity-${today.toISOString().split('T')[0]}.html`;
+      
+      return new NextResponse(htmlContent, {
         status: 200,
         headers: {
-          'Content-Type': 'application/pdf',
+          'Content-Type': 'text/html',
           'Content-Disposition': `attachment; filename="${filename}"`
         }
       });
-    } finally {
-      await browser.close();
     }
   } catch (error) {
     console.error('PDF generation error:', error);
