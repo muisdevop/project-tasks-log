@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { AppNav } from "@/components/app-nav";
+import { SidebarLayout } from "@/components/sidebar";
 import { TaskBoard } from "@/components/task-board";
 import { prisma } from "@/lib/prisma";
 import { getSessionUsername } from "@/lib/session";
@@ -111,9 +111,8 @@ export default async function TasksPage({ params }: Props) {
   const tasks = await getTasksWithElapsed(projectId);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 text-zinc-900 dark:from-slate-950 dark:via-blue-950/30 dark:to-indigo-950/20 dark:text-zinc-50">
-      <AppNav />
-      <div className="mx-auto w-full max-w-5xl px-4 py-8">
+    <SidebarLayout username={username}>
+      <div className="mx-auto w-full max-w-5xl">
         <div className="mb-6">
           <Link 
             href="/projects" 
@@ -133,6 +132,6 @@ export default async function TasksPage({ params }: Props) {
         </div>
         <TaskBoard projectId={project.id} tasks={tasks} />
       </div>
-    </main>
+    </SidebarLayout>
   );
 }

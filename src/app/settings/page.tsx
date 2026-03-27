@@ -1,4 +1,4 @@
-import { AppNav } from "@/components/app-nav";
+import { SidebarLayout } from "@/components/sidebar";
 import { SettingsForm } from "@/components/settings-form";
 import { BreaksConfig } from "@/components/breaks-config";
 import { prisma } from "@/lib/prisma";
@@ -25,9 +25,8 @@ export default async function SettingsPage() {
   });
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 text-zinc-900 dark:from-slate-950 dark:via-blue-950/30 dark:to-indigo-950/20 dark:text-zinc-50">
-      <AppNav />
-      <div className="mx-auto w-full max-w-5xl px-4 py-8">
+    <SidebarLayout username={username}>
+      <div className="mx-auto w-full max-w-5xl">
         <div className="mb-8">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
             Settings
@@ -49,6 +48,6 @@ export default async function SettingsPage() {
           <BreaksConfig />
         </div>
       </div>
-    </main>
+    </SidebarLayout>
   );
 }
