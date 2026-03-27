@@ -1,0 +1,11 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="20" fill="#3B82F6"/>
+  <path d="M30 40H90V80H30V40Z" fill="white"/>
+  <path d="M40 50H80V70H40V50Z" fill="#3B82F6"/>
+  <path d="M45 55H75V65H45V55Z" fill="white"/>
+  <circle cx="35" cy="90" r="3" fill="#10B981"/>
+  <circle cx="85" cy="90" r="3" fill="#10B981"/>
+  <path d="M25 30L95 30L95 25L25 25L25 30Z" fill="#1E40AF"/>
+  <path d="M25 95L95 95L95 100L25 100L25 95Z" fill="#1E40AF"/>
+  <text x="60" y="110" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="8" font-weight="bold">TASKS</text>
+</svg>
