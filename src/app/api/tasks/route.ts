@@ -134,12 +134,20 @@ export async function POST(request: Request) {
     }
 
     const now = new Date();
+    const activeTask = await prisma.task.findFirst({
+      where: {
+        projectId: parsed.data.projectId,
+        status: "in_progress",
+      },
+      select: { id: true },
+    });
+
     const task = await prisma.task.create({
       data: {
         projectId: parsed.data.projectId,
         title: parsed.data.title,
         description: parsed.data.description,
-        status: "in_progress",
+        status: activeTask ? "on_hold" : "in_progress",
         startedAt: now,
         events: {
           create: {
@@ -195,24 +203,31 @@ export async function PATCH(request: Request) {
     }
 
     if (parsed.data.action === "resume") {
-      if (task.status !== "cancelled") {
+      if (task.status !== "cancelled" && task.status !== "on_hold") {
         return NextResponse.json(
-          { error: "Only cancelled tasks can be resumed." },
+          { error: "Only cancelled or on-hold tasks can be resumed." },
           { status: 400 },
         );
       }
-    } else if (parsed.data.action === "complete" || parsed.data.action === "cancel") {
+    } else if (parsed.data.action === "complete") {
       if (task.status !== "in_progress") {
         return NextResponse.json(
-          { error: "Only in-progress tasks can be completed/cancelled." },
+          { error: "Only in-progress tasks can be completed." },
+          { status: 400 },
+        );
+      }
+    } else if (parsed.data.action === "cancel") {
+      if (task.status !== "in_progress" && task.status !== "on_hold") {
+        return NextResponse.json(
+          { error: "Only in-progress or on-hold tasks can be cancelled." },
           { status: 400 },
         );
       }
     }
 
-    if (parsed.data.action === "resume" && task.status !== "cancelled") {
+    if (parsed.data.action === "resume" && task.status !== "cancelled" && task.status !== "on_hold") {
       return NextResponse.json(
-        { error: "Only cancelled tasks can be resumed." },
+        { error: "Only cancelled or on-hold tasks can be resumed." },
         { status: 400 },
       );
     }
@@ -228,6 +243,17 @@ export async function PATCH(request: Request) {
     
     const now = new Date();
     const change = applyTaskTransition(task, parsed.data.action, now, settings);
+
+    if (parsed.data.action === "resume") {
+      await prisma.task.updateMany({
+        where: {
+          projectId: task.projectId,
+          status: "in_progress",
+          id: { not: task.id },
+        },
+        data: { status: "on_hold" },
+      });
+    }
 
     const updated = await prisma.task.update({
       where: { id: task.id },

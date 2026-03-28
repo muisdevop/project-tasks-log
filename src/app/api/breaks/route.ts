@@ -18,7 +18,36 @@ export async function GET(request: Request) {
       orderBy: [{ createdAt: "asc" }, { name: "asc" }],
     });
 
-    return NextResponse.json({ breaks });
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const todaysBreakTasks = await prisma.task.findMany({
+      where: {
+        project: { jobId },
+        status: { in: ["completed", "cancelled"] },
+        endedAt: { gte: startOfDay, lte: endOfDay },
+      },
+      select: { title: true },
+    });
+
+    const takenBreakNames = new Set(
+      todaysBreakTasks
+        .map((task) => task.title.trim())
+        .filter((title) => title.endsWith(" Break"))
+        .map((title) => title.slice(0, -6).trim().toLowerCase()),
+    );
+
+    const filteredBreaks = breaks.filter((breakType) => {
+      if (breakType.type.toLowerCase() !== "prayer") {
+        return true;
+      }
+
+      return !takenBreakNames.has(breakType.name.trim().toLowerCase());
+    });
+
+    return NextResponse.json({ breaks: filteredBreaks });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

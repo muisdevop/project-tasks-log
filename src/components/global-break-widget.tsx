@@ -160,13 +160,25 @@ export function GlobalBreakWidget() {
     // Calculate actual break duration
     const actualDuration = Math.floor((new Date().getTime() - activeBreak.startTime.getTime()) / 1000);
 
-    // Create a break task in the current project (if on tasks page)
+    // Create a break task in the current project; fallback to the first project in the job.
     const projectMatch = pathname?.match(/\/projects\/(\d+)\/tasks/);
-    if (projectMatch) {
-      const projectId = parseInt(projectMatch[1]);
+    let projectId: number | null = projectMatch ? parseInt(projectMatch[1]) : null;
 
+    if (!projectId && activeBreak.jobId) {
       try {
-        // Create break task
+        const projectsRes = await fetch("/api/projects");
+        if (projectsRes.ok) {
+          const data = await projectsRes.json();
+          const firstProject = (data.projects || []).find((project: { id: number; jobId: number }) => project.jobId === activeBreak.jobId);
+          projectId = firstProject?.id ?? null;
+        }
+      } catch (err) {
+        console.error("Failed to resolve project for break logging:", err);
+      }
+    }
+
+    if (projectId) {
+      try {
         const response = await fetch("/api/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -174,13 +186,11 @@ export function GlobalBreakWidget() {
             projectId,
             title: `${activeBreak.name} Break`,
             description: `Break duration: ${formatElapsed(actualDuration)}`,
-            isBreak: true,
           }),
         });
 
         if (response.ok) {
           const taskData = await response.json();
-          // Complete the break task immediately with actual duration
           await fetch("/api/tasks", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -189,7 +199,6 @@ export function GlobalBreakWidget() {
               action: "complete",
               details: `Break completed. Duration: ${formatElapsed(actualDuration)}`,
               elapsedSeconds: actualDuration,
-              isBreak: true,
             }),
           });
         }

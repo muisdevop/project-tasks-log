@@ -17,7 +17,7 @@ type Task = {
   id: number;
   title: string;
   description: string | null;
-  status: "in_progress" | "completed" | "cancelled";
+  status: "in_progress" | "on_hold" | "completed" | "cancelled";
   elapsedSeconds: number;
   startedAt: string;
   endedAt: string | null;
@@ -237,7 +237,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   }
 
   const inProgress = tasks.filter((task) => task.status === "in_progress");
-  const finished = tasks.filter((task) => task.status !== "in_progress");
+  const onHold = tasks.filter((task) => task.status === "on_hold");
+  const finished = tasks.filter((task) => task.status === "completed" || task.status === "cancelled");
 
   function renderTaskSection(title: string, tasks: Task[], isFinished: boolean) {
     if (tasks.length === 0) return null;
@@ -342,7 +343,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                           
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                             <span className="inline-flex items-center rounded-md bg-zinc-100/70 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-400">
-                              Started: {formatDateTime(task.startedAt)}
+                              {task.status === "on_hold" ? "Queued" : "Started"}: {formatDateTime(task.startedAt)}
                             </span>
                             <span className="inline-flex items-center rounded-md bg-zinc-100/70 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-400">
                               Elapsed: {formatElapsed(task.elapsedSeconds)}
@@ -380,6 +381,32 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                 </svg>
                                 Add Notes
+                              </button>
+                            </div>
+                          ) : null}
+
+                          {task.status === "on_hold" ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                onClick={() => runAction(task.id, "resume")}
+                                disabled={busyTaskId === task.id}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-indigo-500/30 transition-all hover:shadow-lg hover:shadow-indigo-500/40 disabled:opacity-50"
+                              >
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.868v4.264a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" className="hidden" />
+                                </svg>
+                                Start / Resume
+                              </button>
+                              <button
+                                onClick={() => runAction(task.id, "cancel")}
+                                disabled={busyTaskId === task.id}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
+                              >
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                Cancel
                               </button>
                             </div>
                           ) : null}
@@ -487,6 +514,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       ) : null}
 
       {renderTaskSection("In Progress", inProgress, false)}
+      {renderTaskSection("On Hold / In Review", onHold, false)}
       {renderTaskSection("Completed and Cancelled", finished, true)}
       
       <TaskActionModal

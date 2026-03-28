@@ -8,6 +8,7 @@ datasource db {
 
 enum TaskStatus {
   in_progress
+  on_hold
   completed
   cancelled
 }

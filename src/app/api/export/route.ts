@@ -1,7 +1,27 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import puppeteer from "puppeteer";
+
+type ExportTask = {
+  id: number;
+  title: string;
+  description: string | null;
+  status: "in_progress" | "on_hold" | "completed" | "cancelled";
+  startedAt: Date;
+  endedAt: Date | null;
+  elapsedSeconds: number;
+  completionOutput: string | null;
+  cancellationReason: string | null;
+  logNotes: string | null;
+  subtasks: { id: number; title: string; isCompleted: boolean }[];
+  project: {
+    id: number;
+    name: string;
+    job?: { id: number; name: string } | null;
+  };
+};
 
 export async function GET(request: Request) {
   try {
@@ -11,31 +31,89 @@ export async function GET(request: Request) {
     const exportType = url.searchParams.get("type") || "today";
     const jobId = url.searchParams.get("jobId");
     const projectIds = url.searchParams.get("projectIds")?.split(",").map(Number).filter(Boolean);
+    const date = url.searchParams.get("date");
+    const startDate = url.searchParams.get("startDate");
+    const endDate = url.searchParams.get("endDate");
+
+    if (exportType === "available-dates") {
+      const result = await prisma.task.findMany({
+        where: {
+          status: { in: ["completed", "cancelled"] },
+          endedAt: { not: null },
+        },
+        select: { endedAt: true },
+        orderBy: { endedAt: "desc" },
+      });
+
+      const dates = Array.from(
+        new Set(
+          result
+            .map((task) => task.endedAt)
+            .filter((endedAt): endedAt is Date => Boolean(endedAt))
+            .map((endedAt) => endedAt.toISOString().split("T")[0]),
+        ),
+      );
+
+      return NextResponse.json({ dates });
+    }
     
-    let whereClause: any = {};
-    let includeJobs = false;
+    let whereClause: Prisma.TaskWhereInput = {};
+    let includeJobs = true;
     let title = "Task Activity Report";
     let filenameBase = "activity-report";
     
-    if (exportType === "today") {
-      const today = new Date();
-      const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-      const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    if (exportType === "today" || exportType === "day") {
+      const baseDate =
+        exportType === "day" && date
+          ? new Date(`${date}T00:00:00`)
+          : new Date();
+
+      if (Number.isNaN(baseDate.getTime())) {
+        return NextResponse.json({ error: "Invalid date value." }, { status: 400 });
+      }
+
+      const dayLabel = baseDate.toDateString();
+      const startOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 0, 0, 0, 0);
+      const endOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 23, 59, 59, 999);
       whereClause = {
         OR: [
-          { createdAt: { gte: startOfDay, lte: endOfDay } },
-          { updatedAt: { gte: startOfDay, lte: endOfDay } }
-        ]
+          { status: { in: ["in_progress", "on_hold"] } },
+          {
+            status: { in: ["completed", "cancelled"] },
+            endedAt: { gte: startOfDay, lte: endOfDay },
+          },
+        ],
       };
-      title = `Daily Report - ${today.toDateString()}`;
-      filenameBase = `daily-report-${today.toISOString().split('T')[0]}`;
+      title = `Daily Report - ${dayLabel}`;
+      filenameBase = `daily-report-${startOfDay.toISOString().split('T')[0]}`;
+    } else if (exportType === "range") {
+      if (!startDate || !endDate) {
+        return NextResponse.json({ error: "startDate and endDate are required for range export." }, { status: 400 });
+      }
+
+      const start = new Date(`${startDate}T00:00:00`);
+      const end = new Date(`${endDate}T23:59:59.999`);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+        return NextResponse.json({ error: "Invalid date range." }, { status: 400 });
+      }
+
+      whereClause = {
+        OR: [
+          { status: { in: ["in_progress", "on_hold"] } },
+          {
+            status: { in: ["completed", "cancelled"] },
+            endedAt: { gte: start, lte: end },
+          },
+        ],
+      };
+      title = `Range Report - ${startDate} to ${endDate}`;
+      filenameBase = `range-report-${startDate}-to-${endDate}`;
     } else if (exportType === "job" && jobId) {
       whereClause = {
         project: {
           jobId: Number(jobId)
         }
       };
-      includeJobs = true;
       const job = await prisma.job.findUnique({ where: { id: Number(jobId) } });
       title = `Job Report - ${job?.name || 'Unknown Job'}`;
       filenameBase = `job-report-${job?.nameKey || 'unknown'}`;
@@ -43,12 +121,10 @@ export async function GET(request: Request) {
       whereClause = {
         projectId: { in: projectIds }
       };
-      includeJobs = true;
       title = "Selected Projects Report";
       filenameBase = `projects-report-${new Date().toISOString().split('T')[0]}`;
     } else if (exportType === "all") {
       whereClause = {};
-      includeJobs = true;
       title = "Complete Activity Report - All Jobs";
       filenameBase = `complete-report-${new Date().toISOString().split('T')[0]}`;
     }
@@ -78,7 +154,7 @@ export async function GET(request: Request) {
       ]
     });
 
-    const groupedTasks = groupTasksByHierarchy(tasks);
+    const groupedTasks = groupTasksByHierarchy(tasks as ExportTask[]);
     const htmlContent = generatePDFHTML(groupedTasks, title);
     
     try {
@@ -155,8 +231,17 @@ export async function GET(request: Request) {
   }
 }
 
-function groupTasksByHierarchy(tasks: any[]) {
-  const grouped: any = {};
+type GroupedTasks = Record<
+  string,
+  {
+    id: string | number;
+    name: string;
+    projects: Record<string, { id: string | number; name: string; tasks: ExportTask[] }>;
+  }
+>;
+
+function groupTasksByHierarchy(tasks: ExportTask[]): GroupedTasks {
+  const grouped: GroupedTasks = {};
   
   for (const task of tasks) {
     const jobId = task.project?.job?.id || 'no-job';
@@ -186,9 +271,9 @@ function groupTasksByHierarchy(tasks: any[]) {
   return grouped;
 }
 
-function generatePDFHTML(groupedTasks: any, title: string): string {
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
+  const formatTime = (dateValue: string | Date) => {
+    return new Date(dateValue).toLocaleString();
   };
 
   const formatDuration = (seconds: number) => {
@@ -200,12 +285,34 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
 
   const stripHTML = (html: string | null) => {
     if (!html) return '';
-    return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+    return html
+      .replace(/<hr\s*\/?>/gi, "\n---\n")
+      .replace(/<li[^>]*>/gi, "- ")
+      .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   };
 
-  const renderTask = (task: any) => {
-    const statusClass = task.status === 'completed' ? 'completed' : task.status === 'cancelled' ? 'cancelled' : 'in-progress';
-    const statusLabel = task.status === 'completed' ? 'Completed' : task.status === 'cancelled' ? 'Cancelled' : 'In Progress';
+  const renderTask = (task: ExportTask) => {
+    const statusClass =
+      task.status === "completed"
+        ? "completed"
+        : task.status === "cancelled"
+          ? "cancelled"
+          : task.status === "on_hold"
+            ? "on-hold"
+            : "in-progress";
+    const statusLabel =
+      task.status === "completed"
+        ? "Completed"
+        : task.status === "cancelled"
+          ? "Cancelled"
+          : task.status === "on_hold"
+            ? "On Hold/In Review"
+            : "In Progress";
     
     return `
       <div class="task ${statusClass}">
@@ -224,9 +331,9 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
         ${task.cancellationReason ? `<div class="task-reason"><strong>Cancellation Reason:</strong><br>${stripHTML(task.cancellationReason)}</div>` : ''}
         ${task.subtasks && task.subtasks.length > 0 ? `
           <div class="task-subtasks">
-            <strong>Subtasks (${task.subtasks.filter((st: any) => st.isCompleted).length}/${task.subtasks.length}):</strong>
+            <strong>Subtasks (${task.subtasks.filter((st) => st.isCompleted).length}/${task.subtasks.length}):</strong>
             <ul>
-              ${task.subtasks.map((subtask: any) => `
+              ${task.subtasks.map((subtask) => `
                 <li class="${subtask.isCompleted ? 'completed' : 'pending'}">
                   ${subtask.isCompleted ? '✓' : '○'} ${subtask.title}
                 </li>
@@ -240,16 +347,18 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
 
   let totalTasks = 0;
   let totalInProgress = 0;
+  let totalOnHold = 0;
   let totalCompleted = 0;
   let totalCancelled = 0;
   let totalElapsed = 0;
 
-  Object.values(groupedTasks).forEach((job: any) => {
-    Object.values(job.projects).forEach((project: any) => {
-      project.tasks.forEach((task: any) => {
+  Object.values(groupedTasks).forEach((job) => {
+    Object.values(job.projects).forEach((project) => {
+      project.tasks.forEach((task) => {
         totalTasks++;
         totalElapsed += task.elapsedSeconds;
         if (task.status === 'in_progress') totalInProgress++;
+        else if (task.status === 'on_hold') totalOnHold++;
         else if (task.status === 'completed') totalCompleted++;
         else if (task.status === 'cancelled') totalCancelled++;
       });
@@ -269,13 +378,13 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
           line-height: 1.4;
           color: #333;
           margin: 0;
-          padding: 20px;
+          padding: 0;
         }
         .header {
           text-align: center;
-          margin-bottom: 30px;
+          margin-bottom: 18px;
           border-bottom: 2px solid #333;
-          padding-bottom: 20px;
+          padding-bottom: 12px;
         }
         .header h1 {
           margin: 0;
@@ -288,17 +397,18 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
           color: #666;
         }
         .summary {
-          margin: 20px 0;
-          padding: 15px;
+          margin: 12px 0;
+          padding: 10px;
           background: #f0f0f0;
           border-radius: 5px;
           display: flex;
           justify-content: space-around;
           flex-wrap: wrap;
+          gap: 6px;
         }
         .summary-item {
           text-align: center;
-          margin: 5px 15px;
+          margin: 4px 10px;
         }
         .summary-label {
           font-weight: bold;
@@ -307,13 +417,13 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
           color: #666;
         }
         .summary-value {
-          font-size: 18px;
+          font-size: 16px;
           font-weight: bold;
           color: #333;
         }
         .job-section {
-          margin-bottom: 30px;
-          page-break-inside: avoid;
+          margin-bottom: 14px;
+          page-break-inside: auto;
         }
         .job-header {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -325,9 +435,9 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
           font-weight: bold;
         }
         .project-section {
-          margin-bottom: 20px;
-          margin-left: 15px;
-          page-break-inside: avoid;
+          margin-bottom: 10px;
+          margin-left: 8px;
+          page-break-inside: auto;
         }
         .project-header {
           background: #e3f2fd;
@@ -340,8 +450,8 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
           border-left: 4px solid #1976d2;
         }
         .task {
-          margin-bottom: 15px;
-          padding: 12px;
+          margin-bottom: 8px;
+          padding: 10px;
           border: 1px solid #ddd;
           border-radius: 5px;
           background: #f9f9f9;
@@ -360,9 +470,10 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
         .task-header {
           font-weight: bold;
           font-size: 13px;
-          margin-bottom: 8px;
+          margin-bottom: 6px;
           display: flex;
           align-items: center;
+          flex-wrap: wrap;
           gap: 8px;
         }
         .status-badge {
@@ -380,46 +491,54 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
           background: #ffc107;
           color: #333;
         }
+        .status-badge.on-hold {
+          background: #6f42c1;
+          color: white;
+        }
         .status-badge.cancelled {
           background: #dc3545;
           color: white;
         }
         .task-meta {
-          margin-bottom: 6px;
+          margin-bottom: 4px;
           font-size: 10px;
           color: #666;
         }
         .task-description {
-          margin-bottom: 6px;
+          margin-bottom: 4px;
           font-size: 11px;
           color: #555;
+          white-space: pre-line;
         }
         .task-notes {
-          margin-top: 8px;
+          margin-top: 6px;
           padding: 8px;
           background: #e8f4ff;
           border-left: 3px solid #2196F3;
           font-size: 11px;
           border-radius: 3px;
+          white-space: pre-line;
         }
         .task-output {
-          margin-top: 8px;
+          margin-top: 6px;
           padding: 8px;
           background-color: #f0f8f0;
           border-left: 3px solid #28a745;
           font-size: 11px;
           border-radius: 3px;
+          white-space: pre-line;
         }
         .task-reason {
-          margin-top: 8px;
+          margin-top: 6px;
           padding: 8px;
           background: #ffe8e8;
           border-left: 3px solid #f44336;
           font-size: 11px;
           border-radius: 3px;
+          white-space: pre-line;
         }
         .task-subtasks {
-          margin-top: 8px;
+          margin-top: 6px;
           padding: 8px;
           background-color: #f8f9fa;
           border-left: 3px solid #6c757d;
@@ -443,11 +562,11 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
         }
         .footer {
           text-align: center;
-          margin-top: 40px;
+          margin-top: 20px;
           font-size: 10px;
           color: #999;
           border-top: 1px solid #ddd;
-          padding-top: 20px;
+          padding-top: 10px;
         }
         @media print {
           body { margin: 0; }
@@ -471,6 +590,10 @@ function generatePDFHTML(groupedTasks: any, title: string): string {
         <div class="summary-item">
           <span class="summary-label">In Progress</span>
           <span class="summary-value">${totalInProgress}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">On Hold</span>
+          <span class="summary-value">${totalOnHold}</span>
         </div>
         <div class="summary-item">
           <span class="summary-label">Completed</span>

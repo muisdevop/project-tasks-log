@@ -15,7 +15,7 @@ export function applyTaskTransition(
   action: TransitionAction,
   now: Date,
   settings: WorkSchedule,
-): { status: "in_progress" | "completed" | "cancelled"; elapsedSeconds: number; startedAt: Date; endedAt: Date | null } {
+): { status: "in_progress" | "on_hold" | "completed" | "cancelled"; elapsedSeconds: number; startedAt: Date; endedAt: Date | null } {
   const workDays = Array.isArray(settings.workDays)
     ? (settings.workDays as number[])
     : [1, 2, 3, 4, 5];

@@ -13,7 +13,7 @@ type Project = {
   jobId: number;
 };
 
-type ExportType = "today" | "projects" | "job" | "all";
+type ExportType = "today" | "day" | "range" | "projects" | "job" | "all";
 
 export function ExportPageContent() {
   const [exportType, setExportType] = useState<ExportType>("today");
@@ -21,6 +21,10 @@ export function ExportPageContent() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedJobs, setSelectedJobs] = useState<number[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [rangeStart, setRangeStart] = useState<string>("");
+  const [rangeEnd, setRangeEnd] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +46,18 @@ export function ExportPageContent() {
       if (projRes.ok) {
         const data = await projRes.json();
         setProjects(data.projects || []);
+      }
+
+      const dateRes = await fetch("/api/export?type=available-dates");
+      if (dateRes.ok) {
+        const dateData = await dateRes.json();
+        const dates = dateData.dates || [];
+        setAvailableDates(dates);
+        if (dates.length > 0) {
+          setSelectedDate(dates[0]);
+          setRangeStart(dates[dates.length - 1]);
+          setRangeEnd(dates[0]);
+        }
       }
     } catch {
       setError("Failed to load jobs and projects");
@@ -72,6 +88,15 @@ export function ExportPageContent() {
         url += "type=today";
       } else if (exportType === "all") {
         url += "type=all";
+      } else if (exportType === "day" && selectedDate) {
+        url += `type=day&date=${selectedDate}`;
+      } else if (exportType === "range" && rangeStart && rangeEnd) {
+        if (new Date(rangeStart) > new Date(rangeEnd)) {
+          setError("Range start date cannot be after end date.");
+          setExporting(false);
+          return;
+        }
+        url += `type=range&startDate=${rangeStart}&endDate=${rangeEnd}`;
       } else if (exportType === "job" && selectedJobs.length > 0) {
         url += `type=job&jobId=${selectedJobs[0]}`;
       } else if (exportType === "projects" && selectedProjects.length > 0) {
@@ -149,7 +174,82 @@ export function ExportPageContent() {
             />
             <div className="flex-1">
               <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Today&apos;s Activity</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Export tasks created or updated today</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Export active tasks and today&apos;s completed/cancelled tasks</p>
+            </div>
+          </label>
+
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
+            <input
+              type="radio"
+              name="exportType"
+              value="day"
+              checked={exportType === "day"}
+              onChange={() => setExportType("day")}
+              className="mt-1 h-4 w-4 text-blue-600"
+            />
+            <div className="flex-1">
+              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Specific Day</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Pick a past date with task records</p>
+              {exportType === "day" && (
+                <div className="mt-3">
+                  {availableDates.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No historical task dates available.</p>
+                  ) : (
+                    <select
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+                    >
+                      {availableDates.map((date) => (
+                        <option key={date} value={date}>
+                          {new Date(`${date}T00:00:00`).toLocaleDateString()}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+            </div>
+          </label>
+
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
+            <input
+              type="radio"
+              name="exportType"
+              value="range"
+              checked={exportType === "range"}
+              onChange={() => setExportType("range")}
+              className="mt-1 h-4 w-4 text-blue-600"
+            />
+            <div className="flex-1">
+              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Date Range</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Select start and end dates with records</p>
+              {exportType === "range" && (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <select
+                    value={rangeStart}
+                    onChange={(e) => setRangeStart(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+                  >
+                    {availableDates.map((date) => (
+                      <option key={`start-${date}`} value={date}>
+                        Start: {new Date(`${date}T00:00:00`).toLocaleDateString()}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={rangeEnd}
+                    onChange={(e) => setRangeEnd(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+                  >
+                    {availableDates.map((date) => (
+                      <option key={`end-${date}`} value={date}>
+                        End: {new Date(`${date}T00:00:00`).toLocaleDateString()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </label>
 

