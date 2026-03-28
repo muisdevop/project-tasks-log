@@ -107,7 +107,9 @@ export function ExportPageContent() {
         return;
       }
 
-      const response = await fetch(url);
+      url += `&_t=${Date.now()}`;
+
+      const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error("Export failed");
 
       const blob = await response.blob();

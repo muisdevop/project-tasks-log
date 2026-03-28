@@ -5,6 +5,9 @@ import { requireAuth } from "@/lib/auth";
 import puppeteer from "puppeteer";
 import fs from "node:fs";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type ExportTask = {
   id: number;
   title: string;
@@ -77,13 +80,21 @@ export async function GET(request: Request) {
       const startOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 0, 0, 0, 0);
       const endOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 23, 59, 59, 999);
       whereClause = {
-        OR: [
-          { status: { in: ["in_progress", "on_hold"] } },
-          {
-            status: { in: ["completed", "cancelled"] },
-            endedAt: { gte: startOfDay, lte: endOfDay },
-          },
-        ],
+        OR:
+          exportType === "today"
+            ? [
+                { status: { in: ["in_progress", "on_hold"] } },
+                {
+                  status: { in: ["completed", "cancelled"] },
+                  endedAt: { gte: startOfDay, lte: endOfDay },
+                },
+              ]
+            : [
+                {
+                  status: { in: ["completed", "cancelled"] },
+                  endedAt: { gte: startOfDay, lte: endOfDay },
+                },
+              ],
       };
       title = `Daily Report - ${dayLabel}`;
       filenameBase = `daily-report-${startOfDay.toISOString().split('T')[0]}`;
@@ -100,7 +111,6 @@ export async function GET(request: Request) {
 
       whereClause = {
         OR: [
-          { status: { in: ["in_progress", "on_hold"] } },
           {
             status: { in: ["completed", "cancelled"] },
             endedAt: { gte: start, lte: end },
@@ -206,7 +216,10 @@ export async function GET(request: Request) {
           status: 200,
           headers: {
             'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="${filename}"`
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            Pragma: 'no-cache',
+            Expires: '0',
           }
         });
       } finally {
@@ -221,7 +234,10 @@ export async function GET(request: Request) {
         status: 200,
         headers: {
           'Content-Type': 'text/html',
-          'Content-Disposition': `attachment; filename="${filename}"`
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+          Pragma: 'no-cache',
+          Expires: '0',
         }
       });
     }
