@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  calculateTimePeriodDates,
+  calculateDurationPreset,
+  type TimePeriod,
+  type GroupByOption,
+} from "@/lib/export-helpers";
 
 type Job = {
   id: number;
@@ -13,18 +19,26 @@ type Project = {
   jobId: number;
 };
 
-type ExportType = "today" | "day" | "range" | "projects" | "job" | "all";
-
 export function ExportPageContent() {
-  const [exportType, setExportType] = useState<ExportType>("today");
+  // Time period controls
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>("day");
+  const [durationMode, setDurationMode] = useState<"preset" | "custom">("preset");
+  const [durationPreset, setDurationPreset] = useState<7 | 30 | 90>(7);
+  const [customRangeStart, setCustomRangeStart] = useState<string>("");
+  const [customRangeEnd, setCustomRangeEnd] = useState<string>("");
+
+  // Job and project filters
   const [jobs, setJobs] = useState<Job[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedJobs, setSelectedJobs] = useState<number[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
-  const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string>("");
-  const [rangeStart, setRangeStart] = useState<string>("");
-  const [rangeEnd, setRangeEnd] = useState<string>("");
+  const [allJobsSelected, setAllJobsSelected] = useState(false);
+  const [allProjectsSelected, setAllProjectsSelected] = useState(false);
+
+  // Grouping option
+  const [groupBy, setGroupBy] = useState<GroupByOption>("date");
+
+  // UI state
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,32 +46,38 @@ export function ExportPageContent() {
 
   useEffect(() => {
     fetchData();
+    // Set default date range based on today
+    const today = new Date().toISOString().split("T")[0];
+    setCustomRangeEnd(today);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+    setCustomRangeStart(sevenDaysAgo);
   }, []);
 
   async function fetchData() {
     try {
-      const [jobRes, projRes] = await Promise.all([fetch("/api/jobs"), fetch("/api/projects")]);
+      const [jobRes, projRes] = await Promise.all([
+        fetch("/api/jobs"),
+        fetch("/api/projects"),
+      ]);
 
       if (jobRes.ok) {
         const data = await jobRes.json();
-        setJobs(data.jobs || []);
+        const jobList = data.jobs || [];
+        setJobs(jobList);
+        // Default: select all jobs
+        setSelectedJobs(jobList.map((j: Job) => j.id));
+        setAllJobsSelected(true);
       }
 
       if (projRes.ok) {
         const data = await projRes.json();
-        setProjects(data.projects || []);
-      }
-
-      const dateRes = await fetch("/api/export?type=available-dates");
-      if (dateRes.ok) {
-        const dateData = await dateRes.json();
-        const dates = dateData.dates || [];
-        setAvailableDates(dates);
-        if (dates.length > 0) {
-          setSelectedDate(dates[0]);
-          setRangeStart(dates[dates.length - 1]);
-          setRangeEnd(dates[0]);
-        }
+        const projList = data.projects || [];
+        setProjects(projList);
+        // Default: select all projects
+        setSelectedProjects(projList.map((p: Project) => p.id));
+        setAllProjectsSelected(true);
       }
     } catch {
       setError("Failed to load jobs and projects");
@@ -67,13 +87,43 @@ export function ExportPageContent() {
   }
 
   function toggleJob(jobId: number) {
-    setSelectedJobs((prev) => (prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]));
+    setSelectedJobs((prev) =>
+      prev.includes(jobId)
+        ? prev.filter((id) => id !== jobId)
+        : [...prev, jobId]
+    );
+    setAllJobsSelected(false);
+  }
+
+  function toggleAllJobs() {
+    if (allJobsSelected) {
+      setSelectedJobs([]);
+      setAllJobsSelected(false);
+    } else {
+      const allIds = jobs.map((j) => j.id);
+      setSelectedJobs(allIds);
+      setAllJobsSelected(true);
+    }
   }
 
   function toggleProject(projectId: number) {
     setSelectedProjects((prev) =>
-      prev.includes(projectId) ? prev.filter((id) => id !== projectId) : [...prev, projectId],
+      prev.includes(projectId)
+        ? prev.filter((id) => id !== projectId)
+        : [...prev, projectId]
     );
+    setAllProjectsSelected(false);
+  }
+
+  function toggleAllProjects() {
+    if (allProjectsSelected) {
+      setSelectedProjects([]);
+      setAllProjectsSelected(false);
+    } else {
+      const allIds = projects.map((p) => p.id);
+      setSelectedProjects(allIds);
+      setAllProjectsSelected(true);
+    }
   }
 
   async function handleExport() {
@@ -82,40 +132,73 @@ export function ExportPageContent() {
     setSuccess(null);
 
     try {
-      let url = "/api/export?";
-
-      if (exportType === "today") {
-        url += "type=today";
-      } else if (exportType === "all") {
-        url += "type=all";
-      } else if (exportType === "day" && selectedDate) {
-        url += `type=day&date=${selectedDate}`;
-      } else if (exportType === "range" && rangeStart && rangeEnd) {
-        if (new Date(rangeStart) > new Date(rangeEnd)) {
-          setError("Range start date cannot be after end date.");
-          setExporting(false);
-          return;
-        }
-        url += `type=range&startDate=${rangeStart}&endDate=${rangeEnd}`;
-      } else if (exportType === "job" && selectedJobs.length > 0) {
-        url += `type=job&jobId=${selectedJobs[0]}`;
-      } else if (exportType === "projects" && selectedProjects.length > 0) {
-        url += `type=projects&projectIds=${selectedProjects.join(",")}`;
-      } else {
-        setError("Please select at least one item to export");
+      // Validate selections
+      if (selectedJobs.length === 0) {
+        setError("Please select at least one job to export");
         setExporting(false);
         return;
       }
 
-      url += `&_t=${Date.now()}`;
+      if (selectedProjects.length === 0) {
+        setError("Please select at least one project to export");
+        setExporting(false);
+        return;
+      }
 
+      // Calculate date range based on time period
+      let startDate: string;
+      let endDate: string;
+
+      if (timePeriod === "duration") {
+        if (durationMode === "preset") {
+          const preset = calculateDurationPreset(durationPreset);
+          startDate = preset.start;
+          endDate = preset.end;
+        } else {
+          startDate = customRangeStart;
+          endDate = customRangeEnd;
+          if (!startDate || !endDate) {
+            setError("Please select both start and end dates for custom duration");
+            setExporting(false);
+            return;
+          }
+          if (new Date(startDate) > new Date(endDate)) {
+            setError("Start date cannot be after end date");
+            setExporting(false);
+            return;
+          }
+        }
+      } else {
+        const dates = calculateTimePeriodDates(timePeriod);
+        startDate = dates.start;
+        endDate = dates.end;
+      }
+
+      // Build the export URL
+      const params = new URLSearchParams();
+      params.set("timePeriod", timePeriod === "duration" ? "range" : timePeriod);
+      params.set("startDate", startDate);
+      params.set("endDate", endDate);
+      params.set("jobIds", selectedJobs.join(","));
+      params.set("projectIds", selectedProjects.join(","));
+      params.set("groupBy", groupBy);
+      params.set("_t", Date.now().toString());
+
+      const url = `/api/export?${params.toString()}`;
       const response = await fetch(url, { cache: "no-store" });
-      if (!response.ok) throw new Error("Export failed");
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Export failed");
+      }
 
       const blob = await response.blob();
       const contentDisposition = response.headers.get("content-disposition");
       const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
-      const filename = filenameMatch ? filenameMatch[1] : "activity-report.pdf";
+      const filename =
+        filenameMatch && filenameMatch[1]
+          ? filenameMatch[1]
+          : "activity-report.pdf";
 
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -137,9 +220,11 @@ export function ExportPageContent() {
   return (
     <div className="rounded-3xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Export Activity Report</h1>
+        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+          Export Activity Report
+        </h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Choose what you want to export to PDF.
+          Customize your export with flexible time periods, job/project filters, and grouping options.
         </p>
       </div>
 
@@ -160,204 +245,290 @@ export function ExportPageContent() {
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-600" />
         </div>
       ) : (
-        <div className="space-y-4">
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
-            <input
-              type="radio"
-              name="exportType"
-              value="today"
-              checked={exportType === "today"}
-              onChange={() => {
-                setExportType("today");
-                setSelectedJobs([]);
-                setSelectedProjects([]);
-              }}
-              className="mt-1 h-4 w-4 text-blue-600"
-            />
-            <div className="flex-1">
-              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Today&apos;s Activity</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Export active tasks and today&apos;s completed/cancelled tasks</p>
-            </div>
-          </label>
+        <div className="space-y-6">
+          {/* TIME PERIOD SECTION */}
+          <div className="rounded-xl border-2 border-zinc-200/70 bg-white/40 p-5 dark:border-zinc-700/70 dark:bg-zinc-800/40">
+            <h2 className="mb-4 font-semibold text-zinc-900 dark:text-zinc-100">
+              Select Time Period
+            </h2>
+            <div className="space-y-3">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="radio"
+                  name="timePeriod"
+                  value="day"
+                  checked={timePeriod === "day"}
+                  onChange={() => setTimePeriod("day")}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Day (Today)
+                </span>
+              </label>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
-            <input
-              type="radio"
-              name="exportType"
-              value="day"
-              checked={exportType === "day"}
-              onChange={() => setExportType("day")}
-              className="mt-1 h-4 w-4 text-blue-600"
-            />
-            <div className="flex-1">
-              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Specific Day</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Pick a past date with task records</p>
-              {exportType === "day" && (
-                <div className="mt-3">
-                  {availableDates.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No historical task dates available.</p>
-                  ) : (
-                    <select
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
-                    >
-                      {availableDates.map((date) => (
-                        <option key={date} value={date}>
-                          {new Date(`${date}T00:00:00`).toLocaleDateString()}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              )}
-            </div>
-          </label>
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="radio"
+                  name="timePeriod"
+                  value="week"
+                  checked={timePeriod === "week"}
+                  onChange={() => setTimePeriod("week")}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Week (Current)
+                </span>
+              </label>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
-            <input
-              type="radio"
-              name="exportType"
-              value="range"
-              checked={exportType === "range"}
-              onChange={() => setExportType("range")}
-              className="mt-1 h-4 w-4 text-blue-600"
-            />
-            <div className="flex-1">
-              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Date Range</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Select start and end dates with records</p>
-              {exportType === "range" && (
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <select
-                    value={rangeStart}
-                    onChange={(e) => setRangeStart(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
-                  >
-                    {availableDates.map((date) => (
-                      <option key={`start-${date}`} value={date}>
-                        Start: {new Date(`${date}T00:00:00`).toLocaleDateString()}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={rangeEnd}
-                    onChange={(e) => setRangeEnd(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
-                  >
-                    {availableDates.map((date) => (
-                      <option key={`end-${date}`} value={date}>
-                        End: {new Date(`${date}T00:00:00`).toLocaleDateString()}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          </label>
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="radio"
+                  name="timePeriod"
+                  value="month"
+                  checked={timePeriod === "month"}
+                  onChange={() => setTimePeriod("month")}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Month (Current)
+                </span>
+              </label>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
-            <input
-              type="radio"
-              name="exportType"
-              value="all"
-              checked={exportType === "all"}
-              onChange={() => {
-                setExportType("all");
-                setSelectedJobs([]);
-                setSelectedProjects([]);
-              }}
-              className="mt-1 h-4 w-4 text-blue-600"
-            />
-            <div className="flex-1">
-              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">All Jobs & Projects</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                Export all tasks from all jobs and their projects
-              </p>
-            </div>
-          </label>
+              <div className="pl-7">
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="radio"
+                    name="timePeriod"
+                    value="duration"
+                    checked={timePeriod === "duration"}
+                    onChange={() => setTimePeriod("duration")}
+                    className="h-4 w-4 text-blue-600"
+                  />
+                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Custom Duration
+                  </span>
+                </label>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
-            <input
-              type="radio"
-              name="exportType"
-              value="job"
-              checked={exportType === "job"}
-              onChange={() => setExportType("job")}
-              className="mt-1 h-4 w-4 text-blue-600"
-            />
-            <div className="flex-1">
-              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Single Job (with all projects)</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Export all tasks from a specific job</p>
-              {exportType === "job" && (
-                <div className="mt-3 space-y-2">
-                  {jobs.map((job) => (
-                    <label key={job.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedJobs.includes(job.id)}
-                        onChange={() => {
-                          toggleJob(job.id);
-                          const jobProjects = projects.filter((p) => p.jobId === job.id);
-                          if (selectedJobs.includes(job.id)) {
-                            setSelectedProjects(
-                              selectedProjects.filter((pid) => !jobProjects.some((p) => p.id === pid)),
-                            );
-                          } else {
-                            setSelectedProjects([...selectedProjects, ...jobProjects.map((p) => p.id)]);
-                          }
-                        }}
-                        className="h-4 w-4 text-blue-600"
-                      />
-                      <span className="text-zinc-700 dark:text-zinc-300">{job.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          </label>
-
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border-2 border-zinc-200/70 bg-white/40 p-4 hover:border-blue-300 dark:border-zinc-700/70 dark:bg-zinc-800/40 dark:hover:border-blue-500">
-            <input
-              type="radio"
-              name="exportType"
-              value="projects"
-              checked={exportType === "projects"}
-              onChange={() => setExportType("projects")}
-              className="mt-1 h-4 w-4 text-blue-600"
-            />
-            <div className="flex-1">
-              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Specific Projects</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Export tasks from selected projects</p>
-              {exportType === "projects" && (
-                <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-                  {projects.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No projects available</p>
-                  ) : (
-                    projects.map((project) => (
-                      <label key={project.id} className="flex items-center gap-2 text-sm">
+                {timePeriod === "duration" && (
+                  <div className="mt-3 ml-4 space-y-3 border-l-2 border-zinc-300 pl-3 dark:border-zinc-600">
+                    <div className="space-y-2">
+                      <label className="flex cursor-pointer items-center gap-2">
                         <input
-                          type="checkbox"
-                          checked={selectedProjects.includes(project.id)}
-                          onChange={() => toggleProject(project.id)}
+                          type="radio"
+                          name="durationMode"
+                          value="preset"
+                          checked={durationMode === "preset"}
+                          onChange={() => setDurationMode("preset")}
                           className="h-4 w-4 text-blue-600"
                         />
-                        <span className="text-zinc-700 dark:text-zinc-300">{project.name}</span>
-                        <span className="ml-auto text-xs text-zinc-500">Job {project.jobId}</span>
+                        <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                          Presets
+                        </span>
                       </label>
-                    ))
-                  )}
-                </div>
-              )}
+                      {durationMode === "preset" && (
+                        <div className="ml-6 flex flex-wrap gap-2">
+                          {[7, 30, 90].map((days) => (
+                            <button
+                              key={days}
+                              onClick={() => setDurationPreset(days as 7 | 30 | 90)}
+                              className={`rounded-lg px-3 py-1 text-xs font-medium transition ${
+                                durationPreset === days
+                                  ? "bg-blue-600 text-white"
+                                  : "border border-zinc-300 bg-white text-zinc-700 hover:border-blue-300 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+                              }`}
+                            >
+                              Last {days} days
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="radio"
+                          name="durationMode"
+                          value="custom"
+                          checked={durationMode === "custom"}
+                          onChange={() => setDurationMode("custom")}
+                          className="h-4 w-4 text-blue-600"
+                        />
+                        <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                          Custom Range
+                        </span>
+                      </label>
+                      {durationMode === "custom" && (
+                        <div className="ml-6 grid gap-2 sm:grid-cols-2">
+                          <div>
+                            <label className="block text-xs text-zinc-600 dark:text-zinc-400">
+                              Start Date
+                            </label>
+                            <input
+                              type="date"
+                              value={customRangeStart}
+                              onChange={(e) => setCustomRangeStart(e.target.value)}
+                              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-zinc-600 dark:text-zinc-400">
+                              End Date
+                            </label>
+                            <input
+                              type="date"
+                              value={customRangeEnd}
+                              onChange={(e) => setCustomRangeEnd(e.target.value)}
+                              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </label>
+          </div>
+
+          {/* JOBS SECTION */}
+          <div className="rounded-xl border-2 border-zinc-200/70 bg-white/40 p-5 dark:border-zinc-700/70 dark:bg-zinc-800/40">
+            <h2 className="mb-4 font-semibold text-zinc-900 dark:text-zinc-100">
+              Select Jobs
+            </h2>
+            {jobs.length === 0 ? (
+              <p className="text-sm text-zinc-500">No jobs available</p>
+            ) : (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 rounded-lg border-2 border-blue-300/50 bg-blue-50/50 p-2 dark:border-blue-500/30 dark:bg-blue-900/20">
+                  <input
+                    type="checkbox"
+                    checked={allJobsSelected}
+                    onChange={toggleAllJobs}
+                    className="h-4 w-4 text-blue-600"
+                  />
+                  <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    All Jobs
+                  </span>
+                </label>
+                {jobs.map((job) => (
+                  <label key={job.id} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedJobs.includes(job.id)}
+                      onChange={() => toggleJob(job.id)}
+                      className="h-4 w-4 text-blue-600"
+                    />
+                    <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                      {job.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* PROJECTS SECTION */}
+          <div className="rounded-xl border-2 border-zinc-200/70 bg-white/40 p-5 dark:border-zinc-700/70 dark:bg-zinc-800/40">
+            <h2 className="mb-4 font-semibold text-zinc-900 dark:text-zinc-100">
+              Select Projects
+            </h2>
+            {projects.length === 0 ? (
+              <p className="text-sm text-zinc-500">No projects available</p>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                <label className="flex items-center gap-2 rounded-lg border-2 border-blue-300/50 bg-blue-50/50 p-2 dark:border-blue-500/30 dark:bg-blue-900/20 sticky top-0">
+                  <input
+                    type="checkbox"
+                    checked={allProjectsSelected}
+                    onChange={toggleAllProjects}
+                    className="h-4 w-4 text-blue-600"
+                  />
+                  <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    All Projects
+                  </span>
+                </label>
+                {projects.map((project) => {
+                  const jobName = jobs.find((j) => j.id === project.jobId)?.name;
+                  return (
+                    <label
+                      key={project.id}
+                      className="flex items-center gap-2 pl-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedProjects.includes(project.id)}
+                        onChange={() => toggleProject(project.id)}
+                        className="h-4 w-4 text-blue-600"
+                      />
+                      <span className="flex-1 text-sm text-zinc-700 dark:text-zinc-300">
+                        {project.name}
+                      </span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {jobName}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* GROUPING SECTION */}
+          <div className="rounded-xl border-2 border-zinc-200/70 bg-white/40 p-5 dark:border-zinc-700/70 dark:bg-zinc-800/40">
+            <h2 className="mb-4 font-semibold text-zinc-900 dark:text-zinc-100">
+              Group Results By
+            </h2>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="groupBy"
+                  value="date"
+                  checked={groupBy === "date"}
+                  onChange={() => setGroupBy("date")}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                  By Date
+                </span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="groupBy"
+                  value="job"
+                  checked={groupBy === "job"}
+                  onChange={() => setGroupBy("job")}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                  By Job
+                </span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="groupBy"
+                  value="project"
+                  checked={groupBy === "project"}
+                  onChange={() => setGroupBy("project")}
+                  className="h-4 w-4 text-blue-600"
+                />
+                <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                  By Project
+                </span>
+              </label>
+            </div>
+          </div>
         </div>
       )}
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex justify-end gap-3">
         <button
           onClick={handleExport}
           disabled={exporting || loading}
-          className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {exporting ? "Exporting..." : "Export to PDF"}
         </button>

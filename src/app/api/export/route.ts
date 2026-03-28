@@ -4,181 +4,164 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import puppeteer from "puppeteer";
 import fs from "node:fs";
+import {
+  calculateTimePeriodDates,
+  groupTasksByDate,
+  groupTasksByJob,
+  groupTasksByProject,
+  type ExportTask,
+  type GroupByOption,
+  type TimePeriod,
+} from "@/lib/export-helpers";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type ExportTask = {
-  id: number;
-  title: string;
-  description: string | null;
-  status: "in_progress" | "on_hold" | "completed" | "cancelled";
-  startedAt: Date;
-  endedAt: Date | null;
-  elapsedSeconds: number;
-  completionOutput: string | null;
-  cancellationReason: string | null;
-  logNotes: string | null;
-  subtasks: { id: number; title: string; isCompleted: boolean }[];
-  project: {
-    id: number;
-    name: string;
-    job?: { id: number; name: string } | null;
-  };
-};
-
 export async function GET(request: Request) {
   try {
     await requireAuth();
-    
+
     const url = new URL(request.url);
-    const exportType = url.searchParams.get("type") || "today";
-    const jobId = url.searchParams.get("jobId");
-    const projectIds = url.searchParams.get("projectIds")?.split(",").map(Number).filter(Boolean);
-    const date = url.searchParams.get("date");
-    const startDate = url.searchParams.get("startDate");
-    const endDate = url.searchParams.get("endDate");
+    const timePeriod = (url.searchParams.get("timePeriod") || "day") as TimePeriod | "range";
+    const startDateParam = url.searchParams.get("startDate");
+    const endDateParam = url.searchParams.get("endDate");
+    const jobIdsParam = url.searchParams.get("jobIds");
+    const projectIdsParam = url.searchParams.get("projectIds");
+    const groupBy = (url.searchParams.get("groupBy") || "date") as GroupByOption;
 
-    if (exportType === "available-dates") {
-      const result = await prisma.task.findMany({
-        where: {
-          status: { in: ["completed", "cancelled"] },
-          endedAt: { not: null },
-        },
-        select: { endedAt: true },
-        orderBy: { endedAt: "desc" },
-      });
+    // Parse filtered job and project IDs
+    const jobIds = jobIdsParam
+      ? jobIdsParam.split(",").map(Number).filter(Boolean)
+      : [];
+    const projectIds = projectIdsParam
+      ? projectIdsParam.split(",").map(Number).filter(Boolean)
+      : [];
 
-      const dates = Array.from(
-        new Set(
-          result
-            .map((task) => task.endedAt)
-            .filter((endedAt): endedAt is Date => Boolean(endedAt))
-            .map((endedAt) => endedAt.toISOString().split("T")[0]),
-        ),
-      );
+    // Calculate date range based on time period
+    let startDate: string;
+    let endDate: string;
 
-      return NextResponse.json({ dates });
-    }
-    
-    let whereClause: Record<string, unknown> = {};
-    const includeJobs = true;
-    let title = "Task Activity Report";
-    let filenameBase = "activity-report";
-    
-    if (exportType === "today" || exportType === "day") {
-      const baseDate =
-        exportType === "day" && date
-          ? new Date(`${date}T00:00:00`)
-          : new Date();
-
-      if (Number.isNaN(baseDate.getTime())) {
-        return NextResponse.json({ error: "Invalid date value." }, { status: 400 });
-      }
-
-      const dayLabel = baseDate.toDateString();
-      const startOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 0, 0, 0, 0);
-      const endOfDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 23, 59, 59, 999);
-      whereClause = {
-        OR:
-          exportType === "today"
-            ? [
-                { status: { in: ["in_progress", "on_hold"] } },
-                {
-                  status: { in: ["completed", "cancelled"] },
-                  endedAt: { gte: startOfDay, lte: endOfDay },
-                },
-              ]
-            : [
-                {
-                  status: { in: ["completed", "cancelled"] },
-                  endedAt: { gte: startOfDay, lte: endOfDay },
-                },
-              ],
-      };
-      title = `Daily Report - ${dayLabel}`;
-      filenameBase = `daily-report-${startOfDay.toISOString().split('T')[0]}`;
-    } else if (exportType === "range") {
-      if (!startDate || !endDate) {
-        return NextResponse.json({ error: "startDate and endDate are required for range export." }, { status: 400 });
-      }
-
-      const start = new Date(`${startDate}T00:00:00`);
-      const end = new Date(`${endDate}T23:59:59.999`);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
-        return NextResponse.json({ error: "Invalid date range." }, { status: 400 });
-      }
-
-      whereClause = {
-        OR: [
-          {
-            status: { in: ["completed", "cancelled"] },
-            endedAt: { gte: start, lte: end },
-          },
-        ],
-      };
-      title = `Range Report - ${startDate} to ${endDate}`;
-      filenameBase = `range-report-${startDate}-to-${endDate}`;
-    } else if (exportType === "job" && jobId) {
-      whereClause = {
-        project: {
-          jobId: Number(jobId)
+    try {
+      if (timePeriod === "range") {
+        if (!startDateParam || !endDateParam) {
+          return NextResponse.json(
+            { error: "startDate and endDate are required for range export" },
+            { status: 400 }
+          );
         }
-      };
-      const job = await prisma.job.findUnique({ where: { id: Number(jobId) } });
-      title = `Job Report - ${job?.name || 'Unknown Job'}`;
-      filenameBase = `job-report-${job?.nameKey || 'unknown'}`;
-    } else if (exportType === "projects" && projectIds && projectIds.length > 0) {
-      whereClause = {
-        projectId: { in: projectIds }
-      };
-      title = "Selected Projects Report";
-      filenameBase = `projects-report-${new Date().toISOString().split('T')[0]}`;
-    } else if (exportType === "all") {
-      whereClause = {};
-      title = "Complete Activity Report - All Jobs";
-      filenameBase = `complete-report-${new Date().toISOString().split('T')[0]}`;
+        startDate = startDateParam;
+        endDate = endDateParam;
+      } else {
+        const dates = calculateTimePeriodDates(timePeriod as TimePeriod);
+        startDate = dates.start;
+        endDate = dates.end;
+      }
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Invalid time period calculation" },
+        { status: 400 }
+      );
     }
-    
+
+    // Validate dates
+    const startDateObj = new Date(`${startDate}T00:00:00Z`);
+    const endDateObj = new Date(`${endDate}T23:59:59.999Z`);
+    if (Number.isNaN(startDateObj.getTime()) || Number.isNaN(endDateObj.getTime())) {
+      return NextResponse.json(
+        { error: "Invalid date format" },
+        { status: 400 }
+      );
+    }
+    if (startDateObj > endDateObj) {
+      return NextResponse.json(
+        { error: "Start date cannot be after end date" },
+        { status: 400 }
+      );
+    }
+
+    // Build where clause with date range, job filter, and project filter
+    const statusFilter = ["completed" as const, "cancelled" as const];
+    const whereClause: Prisma.TaskWhereInput = {
+      AND: [
+        {
+          status: { in: statusFilter },
+          endedAt: { gte: startDateObj, lte: endDateObj },
+        },
+        jobIds.length > 0 ? { project: { jobId: { in: jobIds } } } : {},
+        projectIds.length > 0 ? { projectId: { in: projectIds } } : {},
+      ].filter((clause) => Object.keys(clause).length > 0),
+    };
+
+    // Fetch tasks
     const tasks = await prisma.task.findMany({
-      where: whereClause as Prisma.TaskWhereInput,
+      where: whereClause,
       include: {
         project: {
           select: {
             id: true,
             name: true,
-            job: includeJobs ? {
-              select: { id: true, name: true }
-            } : undefined
-          }
-        },
-        events: {
-          select: { eventType: true, eventAt: true, meta: true }
+            job: {
+              select: { id: true, name: true },
+            },
+          },
         },
         subtasks: {
-          select: { id: true, title: true, isCompleted: true }
-        }
+          select: { id: true, title: true, isCompleted: true },
+        },
       },
-      orderBy: [
-        { projectId: "asc" },
-        { createdAt: "asc" }
-      ]
+      orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
     });
 
-    const groupedTasks = groupTasksByHierarchy(tasks as ExportTask[]);
-    const htmlContent = generatePDFHTML(groupedTasks, title);
-    
+    if (!tasks || tasks.length === 0) {
+      return NextResponse.json(
+        { error: "No tasks found for the selected filters" },
+        { status: 400 }
+      );
+    }
+
+    // Group tasks based on groupBy option
+    let groupedData:
+      | ReturnType<typeof groupTasksByDate>
+      | ReturnType<typeof groupTasksByJob>
+      | ReturnType<typeof groupTasksByProject>;
+    let title: string;
+    let filenameBase: string;
+
+    const taskData = tasks as ExportTask[];
+
+    if (groupBy === "date") {
+      groupedData = groupTasksByDate(taskData);
+      title = `Activity Report - ${startDate} to ${endDate} (Grouped by Date)`;
+      filenameBase = `report-${startDate}-to-${endDate}-by-date`;
+    } else if (groupBy === "job") {
+      groupedData = groupTasksByJob(taskData);
+      title = `Activity Report - ${startDate} to ${endDate} (Grouped by Job)`;
+      filenameBase = `report-${startDate}-to-${endDate}-by-job`;
+    } else if (groupBy === "project") {
+      groupedData = groupTasksByProject(taskData);
+      title = `Activity Report - ${startDate} to ${endDate} (Grouped by Project)`;
+      filenameBase = `report-${startDate}-to-${endDate}-by-project`;
+    } else {
+      // Default to date grouping
+      groupedData = groupTasksByDate(taskData);
+      title = `Activity Report - ${startDate} to ${endDate}`;
+      filenameBase = `report-${startDate}-to-${endDate}`;
+    }
+
+    // Generate HTML with appropriate grouping
+    const htmlContent = generatePDFHTML(groupedData, title, groupBy);
+
     try {
       const puppeteerOptions: Parameters<typeof puppeteer.launch>[0] = {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
       };
 
-      if (process.env.NODE_ENV !== 'production') {
+      if (process.env.NODE_ENV !== "production") {
         const possibleChromePaths = [
-          'C:\\Users\\muis6\\.cache\\puppeteer\\chrome\\win64-146.0.7680.153\\chrome-win64\\chrome.exe',
-          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+          "C:\\Users\\muis6\\.cache\\puppeteer\\chrome\\win64-146.0.7680.153\\chrome-win64\\chrome.exe",
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
         ];
 
         for (const chromePath of possibleChromePaths) {
@@ -190,104 +173,74 @@ export async function GET(request: Request) {
           } catch {}
         }
       } else {
-        puppeteerOptions.executablePath = '/usr/bin/chromium-browser';
+        puppeteerOptions.executablePath = "/usr/bin/chromium-browser";
       }
 
       const browser = await puppeteer.launch(puppeteerOptions);
-      
+
       try {
         const page = await browser.newPage();
-        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-        
+        await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+
         const pdfBuffer = await page.pdf({
-          format: 'A4',
+          format: "A4",
           printBackground: true,
           margin: {
-            top: '20mm',
-            right: '20mm',
-            bottom: '20mm',
-            left: '20mm'
-          }
+            top: "20mm",
+            right: "20mm",
+            bottom: "20mm",
+            left: "20mm",
+          },
         });
-        
+
         const filename = `${filenameBase}.pdf`;
-        
+
         return new NextResponse(Buffer.from(pdfBuffer), {
           status: 200,
           headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="${filename}"`,
-            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-            Pragma: 'no-cache',
-            Expires: '0',
-          }
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
         });
       } finally {
         await browser.close();
       }
     } catch (puppeteerError) {
-      console.error('Puppeteer PDF generation failed:', puppeteerError);
-      
+      console.error("Puppeteer PDF generation failed:", puppeteerError);
+
       const filename = `${filenameBase}.html`;
-      
+
       return new NextResponse(htmlContent, {
         status: 200,
         headers: {
-          'Content-Type': 'text/html',
-          'Content-Disposition': `attachment; filename="${filename}"`,
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-          Pragma: 'no-cache',
-          Expires: '0',
-        }
+          "Content-Type": "text/html",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
       });
     }
   } catch (error) {
-    console.error('PDF generation error:', error);
-    return NextResponse.json({ error: "Failed to generate PDF" }, { status: 500 });
+    console.error("PDF generation error:", error);
+    return NextResponse.json(
+      { error: "Failed to generate PDF" },
+      { status: 500 }
+    );
   }
 }
 
-type GroupedTasks = Record<
-  string,
-  {
-    id: string | number;
-    name: string;
-    projects: Record<string, { id: string | number; name: string; tasks: ExportTask[] }>;
-  }
->;
-
-function groupTasksByHierarchy(tasks: ExportTask[]): GroupedTasks {
-  const grouped: GroupedTasks = {};
-  
-  for (const task of tasks) {
-    const jobId = task.project?.job?.id || 'no-job';
-    const jobName = task.project?.job?.name || 'No Job';
-    const projectId = task.project?.id || 'no-project';
-    const projectName = task.project?.name || 'No Project';
-    
-    if (!grouped[jobId]) {
-      grouped[jobId] = {
-        id: jobId,
-        name: jobName,
-        projects: {}
-      };
-    }
-    
-    if (!grouped[jobId].projects[projectId]) {
-      grouped[jobId].projects[projectId] = {
-        id: projectId,
-        name: projectName,
-        tasks: []
-      };
-    }
-    
-    grouped[jobId].projects[projectId].tasks.push(task);
-  }
-  
-  return grouped;
-}
-
-function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
+function generatePDFHTML(
+  groupedData:
+    | ReturnType<typeof groupTasksByDate>
+    | ReturnType<typeof groupTasksByJob>
+    | ReturnType<typeof groupTasksByProject>,
+  title: string,
+  groupBy: GroupByOption
+): string {
   const formatTime = (dateValue: string | Date) => {
     return new Date(dateValue).toLocaleString();
   };
@@ -296,11 +249,11 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
   const stripHTML = (html: string | null) => {
-    if (!html) return '';
+    if (!html) return "";
     return html
       .replace(/<hr\s*\/?>/gi, "\n---\n")
       .replace(/<li[^>]*>/gi, "- ")
@@ -329,7 +282,7 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
           : task.status === "on_hold"
             ? "On Hold/In Review"
             : "In Progress";
-    
+
     return `
       <div class="task ${statusClass}">
         <div class="task-header">
@@ -338,48 +291,160 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
         </div>
         <div class="task-meta">
           Started: ${formatTime(task.startedAt)}
-          ${task.endedAt ? ` | Ended: ${formatTime(task.endedAt)}` : ''}
+          ${task.endedAt ? ` | Ended: ${formatTime(task.endedAt)}` : ""}
           | Duration: ${formatDuration(task.elapsedSeconds)}
         </div>
-        ${task.description ? `<div class="task-description">${stripHTML(task.description)}</div>` : ''}
-        ${task.logNotes ? `<div class="task-notes"><strong>Progress Notes:</strong><br>${stripHTML(task.logNotes)}</div>` : ''}
-        ${task.completionOutput ? `<div class="task-output"><strong>Work Output:</strong><br>${stripHTML(task.completionOutput)}</div>` : ''}
-        ${task.cancellationReason ? `<div class="task-reason"><strong>Cancellation Reason:</strong><br>${stripHTML(task.cancellationReason)}</div>` : ''}
-        ${task.subtasks && task.subtasks.length > 0 ? `
+        ${task.description ? `<div class="task-description">${stripHTML(task.description)}</div>` : ""}
+        ${task.logNotes ? `<div class="task-notes"><strong>Progress Notes:</strong><br>${stripHTML(task.logNotes)}</div>` : ""}
+        ${task.completionOutput ? `<div class="task-output"><strong>Work Output:</strong><br>${stripHTML(task.completionOutput)}</div>` : ""}
+        ${task.cancellationReason ? `<div class="task-reason"><strong>Cancellation Reason:</strong><br>${stripHTML(task.cancellationReason)}</div>` : ""}
+        ${
+          task.subtasks && task.subtasks.length > 0
+            ? `
           <div class="task-subtasks">
             <strong>Subtasks (${task.subtasks.filter((st) => st.isCompleted).length}/${task.subtasks.length}):</strong>
             <ul>
-              ${task.subtasks.map((subtask) => `
-                <li class="${subtask.isCompleted ? 'completed' : 'pending'}">
-                  ${subtask.isCompleted ? '✓' : '○'} ${subtask.title}
+              ${task.subtasks
+                .map(
+                  (subtask) => `
+                <li class="${subtask.isCompleted ? "completed" : "pending"}">
+                  ${subtask.isCompleted ? "✓" : "○"} ${subtask.title}
                 </li>
-              `).join('')}
+              `
+                )
+                .join("")}
             </ul>
           </div>
-        ` : ''}
+        `
+            : ""
+        }
       </div>
     `;
   };
 
+  // Calculate totals
   let totalTasks = 0;
-  let totalInProgress = 0;
-  let totalOnHold = 0;
   let totalCompleted = 0;
   let totalCancelled = 0;
   let totalElapsed = 0;
 
-  Object.values(groupedTasks).forEach((job) => {
-    Object.values(job.projects).forEach((project) => {
-      project.tasks.forEach((task) => {
-        totalTasks++;
-        totalElapsed += task.elapsedSeconds;
-        if (task.status === 'in_progress') totalInProgress++;
-        else if (task.status === 'on_hold') totalOnHold++;
-        else if (task.status === 'completed') totalCompleted++;
-        else if (task.status === 'cancelled') totalCancelled++;
+  // Helper to extract all tasks from data structure
+  const getAllTasks = (): ExportTask[] => {
+    const tasks: ExportTask[] = [];
+
+    if (groupBy === "date") {
+      // GroupedByDate structure: date -> jobs -> projects -> tasks
+      const dateGrouped = groupedData as ReturnType<typeof groupTasksByDate>;
+      Object.values(dateGrouped).forEach((dateGroup) => {
+        Object.values(dateGroup.jobs).forEach((job) => {
+          Object.values(job.projects).forEach((project) => {
+            tasks.push(...project.tasks);
+          });
+        });
       });
-    });
+    } else if (groupBy === "job") {
+      // GroupedByJob structure: jobs -> projects -> tasks
+      const jobGrouped = groupedData as ReturnType<typeof groupTasksByJob>;
+      Object.values(jobGrouped).forEach((job) => {
+        Object.values(job.projects).forEach((project) => {
+          tasks.push(...project.tasks);
+        });
+      });
+    } else if (groupBy === "project") {
+      // GroupedByProject structure: projects -> tasks
+      const projectGrouped = groupedData as ReturnType<typeof groupTasksByProject>;
+      Object.values(projectGrouped).forEach((project) => {
+        tasks.push(...project.tasks);
+      });
+    }
+
+    return tasks;
+  };
+
+  const allTasks = getAllTasks();
+  allTasks.forEach((task) => {
+    totalTasks++;
+    totalElapsed += task.elapsedSeconds;
+    if (task.status === "completed") totalCompleted++;
+    else if (task.status === "cancelled") totalCancelled++;
   });
+
+  // Generate HTML content based on grouping
+  let contentHTML = "";
+
+  if (groupBy === "date") {
+    // Group by Date: Date -> Job -> Project -> Tasks
+    const dateGrouped = groupedData as ReturnType<typeof groupTasksByDate>;
+    contentHTML = Object.values(dateGrouped)
+      .map((dateGroup) => {
+        return `
+          <div class="date-section">
+            <div class="date-header">${dateGroup.date}</div>
+            
+            ${Object.values(dateGroup.jobs)
+              .map((job) => {
+                return `
+                <div class="job-section">
+                  <div class="job-header">${job.name}</div>
+                  
+                  ${Object.values(job.projects)
+                    .map((project) => {
+                      return `
+                      <div class="project-section">
+                        <div class="project-header">${project.name}</div>
+                        ${project.tasks.map((task) => renderTask(task)).join("")}
+                      </div>
+                    `;
+                    })
+                    .join("")}
+                </div>
+              `;
+              })
+              .join("")}
+          </div>
+        `;
+      })
+      .join("");
+  } else if (groupBy === "job") {
+    // Group by Job: Job -> Project -> Tasks
+    const jobGrouped = groupedData as ReturnType<typeof groupTasksByJob>;
+    contentHTML = Object.values(jobGrouped)
+      .map((job) => {
+        return `
+          <div class="job-section">
+            <div class="job-header">${job.name}</div>
+            
+            ${Object.values(job.projects)
+              .map((project) => {
+                return `
+                <div class="project-section">
+                  <div class="project-header">${project.name}</div>
+                  ${project.tasks.map((task) => renderTask(task)).join("")}
+                </div>
+              `;
+              })
+              .join("")}
+          </div>
+        `;
+      })
+      .join("");
+  } else if (groupBy === "project") {
+    // Group by Project: Project -> Tasks
+    const projectGrouped = groupedData as ReturnType<typeof groupTasksByProject>;
+    contentHTML = Object.values(projectGrouped)
+      .map((project) => {
+        return `
+          <div class="project-section-primary">
+            <div class="project-header-primary">
+              ${project.name}
+              ${project.job ? ` <span class="job-name">(${project.job.name})</span>` : ""}
+            </div>
+            ${project.tasks.map((task) => renderTask(task)).join("")}
+          </div>
+        `;
+      })
+      .join("");
+  }
 
   return `
     <!DOCTYPE html>
@@ -437,6 +502,23 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
           font-weight: bold;
           color: #333;
         }
+        
+        /* Date grouping styles */
+        .date-section {
+          margin-bottom: 20px;
+          page-break-inside: auto;
+        }
+        .date-header {
+          background: #2c3e50;
+          color: white;
+          padding: 12px 15px;
+          border-radius: 5px;
+          margin-bottom: 15px;
+          font-size: 18px;
+          font-weight: bold;
+        }
+        
+        /* Job grouping styles */
         .job-section {
           margin-bottom: 14px;
           page-break-inside: auto;
@@ -450,9 +532,15 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
           font-size: 16px;
           font-weight: bold;
         }
+        
+        /* Project grouping styles */
         .project-section {
           margin-bottom: 10px;
           margin-left: 8px;
+          page-break-inside: auto;
+        }
+        .project-section-primary {
+          margin-bottom: 15px;
           page-break-inside: auto;
         }
         .project-header {
@@ -465,6 +553,21 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
           font-weight: bold;
           border-left: 4px solid #1976d2;
         }
+        .project-header-primary {
+          background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+          color: white;
+          padding: 12px 15px;
+          border-radius: 5px;
+          margin-bottom: 15px;
+          font-size: 16px;
+          font-weight: bold;
+        }
+        .project-header-primary .job-name {
+          font-size: 13px;
+          font-weight: normal;
+          opacity: 0.9;
+        }
+        
         .task {
           margin-bottom: 8px;
           padding: 10px;
@@ -478,6 +581,9 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
         }
         .task.in-progress {
           border-left: 4px solid #ffc107;
+        }
+        .task.on-hold {
+          border-left: 4px solid #6f42c1;
         }
         .task.cancelled {
           border-left: 4px solid #dc3545;
@@ -586,8 +692,10 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
         }
         @media print {
           body { margin: 0; }
+          .date-section { page-break-inside: avoid; }
           .job-section { page-break-inside: avoid; }
           .project-section { page-break-inside: avoid; }
+          .project-section-primary { page-break-inside: avoid; }
           .task { page-break-inside: avoid; }
         }
       </style>
@@ -604,14 +712,6 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
           <span class="summary-value">${totalTasks}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">In Progress</span>
-          <span class="summary-value">${totalInProgress}</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">On Hold</span>
-          <span class="summary-value">${totalOnHold}</span>
-        </div>
-        <div class="summary-item">
           <span class="summary-label">Completed</span>
           <span class="summary-value">${totalCompleted}</span>
         </div>
@@ -625,19 +725,7 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
         </div>
       </div>
 
-      ${Object.values(groupedTasks).map((job) => `
-        <div class="job-section">
-          <div class="job-header">${job.name}</div>
-          
-          ${Object.values(job.projects).map((project) => `
-            <div class="project-section">
-              <div class="project-header">${project.name}</div>
-              
-              ${project.tasks.map((task) => renderTask(task)).join('')}
-            </div>
-          `).join('')}
-        </div>
-      `).join('')}
+      ${contentHTML}
 
       <div class="footer">
         GID Task Flow - Activity Report
