@@ -2,6 +2,15 @@ import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 
+function toNameKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -51,7 +60,31 @@ export async function PATCH(
     }
 
     const json = await request.json();
-    const { workStart, workEnd, workDays } = json;
+    const { name, workStart, workEnd, workDays } = json;
+
+    // Prepare update data
+    const updateData: any = {};
+
+    // Handle name update
+    if (name) {
+      if (typeof name !== "string" || !name.trim()) {
+        return NextResponse.json({ error: "Job name is required." }, { status: 400 });
+      }
+
+      const newNameKey = toNameKey(name);
+      if (!newNameKey) {
+        return NextResponse.json({ error: "Job name must contain alphanumeric characters." }, { status: 400 });
+      }
+
+      // Check if the new name already exists (excluding current job)
+      const existingWithName = await prisma.job.findUnique({ where: { nameKey: newNameKey } });
+      if (existingWithName && existingWithName.id !== jobId) {
+        return NextResponse.json({ error: "A job with this name already exists." }, { status: 409 });
+      }
+
+      updateData.name = name.trim();
+      updateData.nameKey = newNameKey;
+    }
 
     // Validate time format if provided
     if (workStart && workEnd) {
@@ -63,13 +96,14 @@ export async function PATCH(
       }
     }
 
+    // Handle other updates
+    if (workStart) updateData.workStart = workStart;
+    if (workEnd) updateData.workEnd = workEnd;
+    if (workDays) updateData.workDays = workDays;
+
     const job = await prisma.job.update({
       where: { id: jobId },
-      data: {
-        ...(workStart && { workStart }),
-        ...(workEnd && { workEnd }),
-        ...(workDays && { workDays }),
-      },
+      data: updateData,
       select: {
         id: true,
         name: true,

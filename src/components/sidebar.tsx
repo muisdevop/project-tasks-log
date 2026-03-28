@@ -3,18 +3,24 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 interface SidebarProps {
   username?: string | null;
   projectName?: string | null;
 }
 
-const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: DashboardIcon },
-  { name: "Projects", href: "/projects", icon: ProjectsIcon },
-  { name: "Jobs", href: "/jobs", icon: JobsIcon },
-  { name: "Settings", href: "/settings", icon: SettingsIcon },
-];
+interface Job {
+  id: number;
+  name: string;
+}
+
+interface Project {
+  id: number;
+  name: string;
+  jobId: number;
+}
 
 function DashboardIcon({ className }: { className?: string }) {
   return (
@@ -59,6 +65,88 @@ function LogoutIcon({ className }: { className?: string }) {
 
 export function Sidebar({ username, projectName }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
+  const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<Set<number>>(new Set());
+  const [editingJobId, setEditingJobId] = useState<number | null>(null);
+  const [editingJobName, setEditingJobName] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchJobsAndProjects();
+  }, []);
+
+  async function fetchJobsAndProjects() {
+    try {
+      const jobsRes = await fetch("/api/jobs");
+      if (jobsRes.ok) {
+        const jobsData = await jobsRes.json();
+        setJobs(jobsData.jobs || []);
+        
+        const projectsRes = await fetch("/api/projects");
+        if (projectsRes.ok) {
+          const projectsData = await projectsRes.json();
+          setProjects(projectsData);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch jobs and projects:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggleJobExpand(jobId: number) {
+    setExpandedJobs((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId);
+      } else {
+        newSet.add(jobId);
+      }
+      return newSet;
+    });
+  }
+
+  function toggleProjectsMenu(jobId: number) {
+    setExpandedProjectsMenu((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId);
+      } else {
+        newSet.add(jobId);
+      }
+      return newSet;
+    });
+  }
+
+  async function handleJobNameChange(jobId: number, newName: string) {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName }),
+      });
+      
+      if (response.ok) {
+        setJobs((prev) =>
+          prev.map((job) => (job.id === jobId ? { ...job, name: newName } : job))
+        );
+        setEditingJobId(null);
+        setEditingJobName("");
+      }
+    } catch (error) {
+      console.error("Failed to update job name:", error);
+    }
+  }
+
+  const jobsForProjects = jobs.map((job) => ({
+    ...job,
+    projects: projects.filter((p) => p.jobId === job.id),
+  }));
+
   const isTasksPage = pathname?.startsWith("/projects/") && pathname?.includes("/tasks");
 
   return (
@@ -76,47 +164,172 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-4">
-        {/* Main Navigation */}
-        <div className="space-y-1">
-          {/* Dashboard Link */}
-          <Link
-            href="/dashboard"
-            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-              pathname === "/dashboard"
-                ? "bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-500/30"
-                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            }`}
-          >
-            <DashboardIcon className={`h-5 w-5 transition-colors ${pathname === "/dashboard" ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-300"}`} />
-            Dashboard
-          </Link>
+      <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+        {/* Dashboard Link */}
+        <Link
+          href="/dashboard"
+          className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+            pathname === "/dashboard"
+              ? "bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-500/30"
+              : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+          }`}
+        >
+          <DashboardIcon className={`h-5 w-5 transition-colors ${pathname === "/dashboard" ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-300"}`} />
+          Dashboard
+        </Link>
 
-          {/* Projects Link */}
-          <Link
-            href="/projects"
-            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-              pathname === "/projects"
-                ? "bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30"
-                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            }`}
-          >
-            <ProjectsIcon className={`h-5 w-5 transition-colors ${pathname === "/projects" ? "text-blue-400" : "text-slate-400 group-hover:text-slate-300"}`} />
-            Projects
-          </Link>
+        {/* Jobs Section */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between px-4 py-2">
+            <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+              Jobs
+            </span>
+            <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-xs text-slate-400">
+              {jobs.length}
+            </span>
+          </div>
 
-          {/* Jobs Link */}
-          <Link
-            href="/jobs"
-            className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
-              pathname === "/jobs"
-                ? "bg-purple-500/20 text-purple-400 ring-1 ring-purple-500/30"
-                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            }`}
-          >
-            <JobsIcon className={`h-5 w-5 transition-colors ${pathname === "/jobs" ? "text-purple-400" : "text-slate-400 group-hover:text-slate-300"}`} />
-            Jobs
-          </Link>
+          <div className="mt-2 space-y-1">
+            {loading ? (
+              <div className="px-4 py-2 text-sm text-slate-500">Loading jobs...</div>
+            ) : jobs.length === 0 ? (
+              <div className="px-4 py-2 text-sm text-slate-500">No jobs yet</div>
+            ) : (
+              jobsForProjects.map((job) => (
+                <div key={job.id}>
+                  {/* Job Item */}
+                  <div className="flex items-center gap-2 px-2">
+                    <button
+                      onClick={() => toggleJobExpand(job.id)}
+                      className="rounded px-1.5 py-1 hover:bg-white/10"
+                      title="Toggle job menu"
+                    >
+                      <svg
+                        className={`h-4 w-4 text-slate-400 transition-transform ${
+                          expandedJobs.has(job.id) ? "rotate-90" : ""
+                        }`}
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+
+                    {editingJobId === job.id ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={editingJobName}
+                        onChange={(e) => setEditingJobName(e.target.value)}
+                        onBlur={() => {
+                          if (editingJobName.trim() && editingJobName !== job.name) {
+                            handleJobNameChange(job.id, editingJobName);
+                          } else {
+                            setEditingJobId(null);
+                            setEditingJobName("");
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleJobNameChange(job.id, editingJobName);
+                          } else if (e.key === "Escape") {
+                            setEditingJobId(null);
+                            setEditingJobName("");
+                          }
+                        }}
+                        className="flex-1 rounded px-2 py-1 text-sm bg-slate-800 text-white border border-slate-600 focus:border-blue-500 focus:outline-none"
+                      />
+                    ) : (
+                      <Link
+                        href={`/jobs/${job.id}`}
+                        className="flex-1 rounded px-2 py-1.5 text-sm font-medium text-slate-300 hover:bg-white/10 cursor-pointer transition-colors"
+                      >
+                        {job.name}
+                      </Link>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        setEditingJobId(job.id);
+                        setEditingJobName(job.name);
+                      }}
+                      className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+                      title="Edit job name"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Job Submenu */}
+                  {expandedJobs.has(job.id) && (
+                    <div className="ml-4 mt-1 space-y-1">
+                      {/* Projects Submenu */}
+                      <div>
+                        <button
+                          onClick={() => toggleProjectsMenu(job.id)}
+                          className="w-full flex items-center gap-2 rounded px-3 py-2 text-sm font-medium text-slate-400 hover:bg-white/5 hover:text-slate-200 transition-colors"
+                        >
+                          <ProjectsIcon className="h-4 w-4" />
+                          <span className="flex-1 text-left">Projects</span>
+                          <span className="rounded bg-slate-800/50 px-1.5 py-0.5 text-xs text-slate-500">
+                            {job.projects.length}
+                          </span>
+                          <svg
+                            className={`h-3 w-3 text-slate-500 transition-transform ${
+                              expandedProjectsMenu.has(job.id) ? "rotate-180" : ""
+                            }`}
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+
+                        {/* Projects List */}
+                        {expandedProjectsMenu.has(job.id) && (
+                          <div className="ml-6 space-y-1">
+                            {job.projects.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-slate-500">No projects</div>
+                            ) : (
+                              job.projects.map((project) => (
+                                <Link
+                                  key={project.id}
+                                  href={`/projects/${project.id}/tasks`}
+                                  className={`flex items-center gap-2 rounded px-3 py-2 text-sm transition-all ${
+                                    pathname === `/projects/${project.id}/tasks`
+                                      ? "bg-blue-500/20 text-blue-400"
+                                      : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                                  }`}
+                                >
+                                  <div className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
+                                  <span className="truncate">{project.name}</span>
+                                </Link>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Job Settings */}
+                      <Link
+                        href={`/jobs/${job.id}/settings`}
+                        className={`flex items-center gap-2 rounded px-3 py-2 text-sm font-medium transition-colors ${
+                          pathname === `/jobs/${job.id}/settings`
+                            ? "bg-blue-500/20 text-blue-400"
+                            : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                        }`}
+                      >
+                        <SettingsIcon className="h-4 w-4" />
+                        <span>Settings</span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
 
         {/* Current Page Info (shown when on tasks page) */}
@@ -129,7 +342,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
           </div>
         )}
 
-        {/* Settings Link */}
+        {/* User Settings Link */}
         <div className="mt-auto border-t border-slate-700/30 pt-4">
           <Link
             href="/settings"
@@ -146,7 +359,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       </nav>
 
       {/* User Section */}
-      <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 p-4">
+      <div className="border-t border-white/10 p-4">
         {username ? (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
