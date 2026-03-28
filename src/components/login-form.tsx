@@ -28,7 +28,7 @@ export function LoginForm() {
       return;
     }
 
-    router.push("/projects");
+    router.push("/dashboard");
     router.refresh();
   }
 

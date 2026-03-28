@@ -30,9 +30,6 @@ export function AppNav() {
           <Link href="/dashboard" className={itemClass("/dashboard")}>
             📊 Dashboard
           </Link>
-          <Link href="/projects" className={itemClass("/projects")}>
-            Projects
-          </Link>
           <Link href="/jobs" className={itemClass("/jobs")}>
             Jobs
           </Link>

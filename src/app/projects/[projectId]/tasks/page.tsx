@@ -109,7 +109,7 @@ export default async function TasksPage({ params }: Props) {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, jobId: true },
   });
   if (!project) {
     notFound();
@@ -125,13 +125,13 @@ export default async function TasksPage({ params }: Props) {
       <div className="mx-auto w-full max-w-5xl">
         <div className="mb-6">
           <Link 
-            href="/projects" 
+            href={`/jobs/${project.jobId}/projects`} 
             className="group inline-flex items-center gap-2 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <svg className="h-4 w-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to projects
+            Back to job projects
           </Link>
           <div className="mt-4 flex items-center justify-between gap-4">
             <div>

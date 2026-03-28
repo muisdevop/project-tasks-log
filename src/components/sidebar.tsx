@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
@@ -57,15 +58,54 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   const pathname = usePathname();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
-  const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<Set<number>>(new Set());
-  const [editingJobId, setEditingJobId] = useState<number | null>(null);
-  const [editingJobName, setEditingJobName] = useState("");
+  const [expandedJobs, setExpandedJobs] = useState<number[]>([]);
+  const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    try {
+      const savedExpandedJobs = localStorage.getItem("sidebar-expanded-jobs");
+      const savedExpandedProjects = localStorage.getItem("sidebar-expanded-projects");
+
+      if (savedExpandedJobs) {
+        const parsed = JSON.parse(savedExpandedJobs) as number[];
+        if (Array.isArray(parsed)) setExpandedJobs(parsed);
+      }
+
+      if (savedExpandedProjects) {
+        const parsed = JSON.parse(savedExpandedProjects) as number[];
+        if (Array.isArray(parsed)) setExpandedProjectsMenu(parsed);
+      }
+    } catch {
+      // Ignore malformed local storage values.
+    }
+
     fetchJobsAndProjects();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("sidebar-expanded-jobs", JSON.stringify(expandedJobs));
+  }, [expandedJobs]);
+
+  useEffect(() => {
+    localStorage.setItem("sidebar-expanded-projects", JSON.stringify(expandedProjectsMenu));
+  }, [expandedProjectsMenu]);
+
+  useEffect(() => {
+    const activeJobId = resolveActiveJobId(pathname, projects);
+    if (!activeJobId) return;
+
+    setExpandedJobs((prev) => (prev.includes(activeJobId) ? prev : [...prev, activeJobId]));
+
+    const isProjectPage =
+      (pathname.startsWith("/projects/") && pathname.includes("/tasks")) ||
+      /^\/jobs\/\d+\/projects$/.test(pathname);
+    if (isProjectPage) {
+      setExpandedProjectsMenu((prev) =>
+        prev.includes(activeJobId) ? prev : [...prev, activeJobId],
+      );
+    }
+  }, [pathname, projects]);
 
   async function fetchJobsAndProjects() {
     try {
@@ -77,7 +117,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
         const projectsRes = await fetch("/api/projects");
         if (projectsRes.ok) {
           const projectsData = await projectsRes.json();
-          setProjects(projectsData);
+          setProjects(projectsData.projects || []);
         }
       }
     } catch (error) {
@@ -89,46 +129,16 @@ export function Sidebar({ username, projectName }: SidebarProps) {
 
   function toggleJobExpand(jobId: number) {
     setExpandedJobs((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(jobId)) {
-        newSet.delete(jobId);
-      } else {
-        newSet.add(jobId);
-      }
-      return newSet;
+      if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
+      return [...prev, jobId];
     });
   }
 
   function toggleProjectsMenu(jobId: number) {
     setExpandedProjectsMenu((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(jobId)) {
-        newSet.delete(jobId);
-      } else {
-        newSet.add(jobId);
-      }
-      return newSet;
+      if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
+      return [...prev, jobId];
     });
-  }
-
-  async function handleJobNameChange(jobId: number, newName: string) {
-    try {
-      const response = await fetch(`/api/jobs/${jobId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName }),
-      });
-      
-      if (response.ok) {
-        setJobs((prev) =>
-          prev.map((job) => (job.id === jobId ? { ...job, name: newName } : job))
-        );
-        setEditingJobId(null);
-        setEditingJobName("");
-      }
-    } catch (error) {
-      console.error("Failed to update job name:", error);
-    }
   }
 
   const jobsForProjects = jobs.map((job) => ({
@@ -139,14 +149,12 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   const isTasksPage = pathname?.startsWith("/projects/") && pathname?.includes("/tasks");
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-white/10 bg-slate-900/95 backdrop-blur-xl dark:bg-slate-950/95">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur-xl dark:bg-slate-950/95">
       {/* Logo Section */}
       <div className="flex h-16 items-center border-b border-white/10 px-6">
         <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 shadow-lg ring-1 ring-white/20">
+            <Image src="/logo-new.svg" alt="GID Task Flow" width={22} height={22} className="h-5 w-5" />
           </div>
           <span className="text-lg font-bold text-white">GID Task Flow</span>
         </Link>
@@ -170,12 +178,17 @@ export function Sidebar({ username, projectName }: SidebarProps) {
         {/* Jobs Section */}
         <div className="mt-4">
           <div className="flex items-center justify-between px-4 py-2">
-            <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-              Jobs
-            </span>
-            <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-xs text-slate-400">
-              {jobs.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Jobs</span>
+              <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-xs text-slate-400">{jobs.length}</span>
+            </div>
+            <Link
+              href="/jobs#new-job"
+              className="rounded-md bg-white/5 px-1.5 py-0.5 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+              title="Add new job"
+            >
+              +
+            </Link>
           </div>
 
           <div className="mt-2 space-y-1">
@@ -195,7 +208,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
                     >
                       <svg
                         className={`h-4 w-4 text-slate-400 transition-transform ${
-                          expandedJobs.has(job.id) ? "rotate-90" : ""
+                          expandedJobs.includes(job.id) ? "rotate-90" : ""
                         }`}
                         fill="currentColor"
                         viewBox="0 0 20 20"
@@ -204,80 +217,53 @@ export function Sidebar({ username, projectName }: SidebarProps) {
                       </svg>
                     </button>
 
-                    {editingJobId === job.id ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        value={editingJobName}
-                        onChange={(e) => setEditingJobName(e.target.value)}
-                        onBlur={() => {
-                          if (editingJobName.trim() && editingJobName !== job.name) {
-                            handleJobNameChange(job.id, editingJobName);
-                          } else {
-                            setEditingJobId(null);
-                            setEditingJobName("");
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            handleJobNameChange(job.id, editingJobName);
-                          } else if (e.key === "Escape") {
-                            setEditingJobId(null);
-                            setEditingJobName("");
-                          }
-                        }}
-                        className="flex-1 rounded px-2 py-1 text-sm bg-slate-800 text-white border border-slate-600 focus:border-blue-500 focus:outline-none"
-                      />
-                    ) : (
-                      <Link
-                        href={`/jobs/${job.id}`}
-                        className="flex-1 rounded px-2 py-1.5 text-sm font-medium text-slate-300 hover:bg-white/10 cursor-pointer transition-colors"
-                      >
-                        {job.name}
-                      </Link>
-                    )}
-
-                    <button
-                      onClick={() => {
-                        setEditingJobId(job.id);
-                        setEditingJobName(job.name);
-                      }}
-                      className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-200"
-                      title="Edit job name"
+                    <Link
+                      href={`/jobs/${job.id}`}
+                      className="flex-1 rounded px-2 py-1.5 text-sm font-medium text-slate-300 transition-colors hover:bg-white/10"
                     >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
+                      {job.name}
+                    </Link>
                   </div>
 
                   {/* Job Submenu */}
-                  {expandedJobs.has(job.id) && (
+                  {expandedJobs.includes(job.id) && (
                     <div className="ml-4 mt-1 space-y-1">
                       {/* Projects Submenu */}
                       <div>
-                        <button
-                          onClick={() => toggleProjectsMenu(job.id)}
-                          className="w-full flex items-center gap-2 rounded px-3 py-2 text-sm font-medium text-slate-400 hover:bg-white/5 hover:text-slate-200 transition-colors"
-                        >
-                          <ProjectsIcon className="h-4 w-4" />
-                          <span className="flex-1 text-left">Projects</span>
-                          <span className="rounded bg-slate-800/50 px-1.5 py-0.5 text-xs text-slate-500">
-                            {job.projects.length}
-                          </span>
-                          <svg
-                            className={`h-3 w-3 text-slate-500 transition-transform ${
-                              expandedProjectsMenu.has(job.id) ? "rotate-180" : ""
+                        <div className="flex items-center gap-1">
+                          <Link
+                            href={`/jobs/${job.id}/projects`}
+                            className={`flex flex-1 items-center gap-2 rounded px-3 py-2 text-sm font-medium transition-colors ${
+                              pathname === `/jobs/${job.id}/projects`
+                                ? "bg-blue-500/20 text-blue-400"
+                                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
                             }`}
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
                           >
-                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                        </button>
+                            <ProjectsIcon className="h-4 w-4" />
+                            <span className="flex-1 text-left">Projects</span>
+                            <span className="rounded bg-slate-800/50 px-1.5 py-0.5 text-xs text-slate-500">
+                              {job.projects.length}
+                            </span>
+                          </Link>
+                          <button
+                            onClick={() => toggleProjectsMenu(job.id)}
+                            className="rounded p-1.5 text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-300"
+                            title="Toggle project list"
+                          >
+                            <svg
+                              className={`h-3 w-3 transition-transform ${
+                                expandedProjectsMenu.includes(job.id) ? "rotate-180" : ""
+                              }`}
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        </div>
 
                         {/* Projects List */}
-                        {expandedProjectsMenu.has(job.id) && (
+                        {expandedProjectsMenu.includes(job.id) && (
                           <div className="ml-6 space-y-1">
                             {job.projects.length === 0 ? (
                               <div className="px-3 py-2 text-xs text-slate-500">No projects</div>
@@ -384,6 +370,24 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       </div>
     </aside>
   );
+}
+
+function resolveActiveJobId(pathname: string, projects: Project[]): number | null {
+  const jobMatch = pathname.match(/^\/jobs\/(\d+)/);
+  if (jobMatch) {
+    const jobId = Number(jobMatch[1]);
+    return Number.isInteger(jobId) ? jobId : null;
+  }
+
+  const projectMatch = pathname.match(/^\/projects\/(\d+)\/tasks/);
+  if (projectMatch) {
+    const projectId = Number(projectMatch[1]);
+    if (!Number.isInteger(projectId)) return null;
+    const project = projects.find((item) => item.id === projectId);
+    return project ? project.jobId : null;
+  }
+
+  return null;
 }
 
 import { GlobalBreakWidget } from "./global-break-widget";

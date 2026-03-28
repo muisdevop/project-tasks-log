@@ -3,6 +3,7 @@ import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
+import { JobProjectsSection } from "@/components/job-projects-section";
 
 export default async function JobDetailPage({
   params,
@@ -106,59 +107,7 @@ export default async function JobDetailPage({
           </div>
         </div>
 
-        {/* Projects Section */}
-        <div>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              Projects
-            </h2>
-            <Link
-              href="/projects"
-              className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              Create New →
-            </Link>
-          </div>
-
-          {projects.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/70 p-10 text-center dark:border-zinc-700 dark:bg-zinc-800/30">
-              <p className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                No projects yet
-              </p>
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-                Create a project to start tracking work for this job.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {projects.map((project) => (
-                <Link
-                  key={project.id}
-                  href={`/projects/${project.id}/tasks`}
-                  className="group rounded-2xl border border-white/20 bg-white/70 p-5 shadow-xl backdrop-blur-xl transition-all hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-lg font-semibold text-zinc-900 group-hover:text-blue-600 dark:text-zinc-100 dark:group-hover:text-blue-400">
-                        {project.name}
-                      </h3>
-                      {project.description && (
-                        <p className="mt-2 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
-                          {project.description}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center justify-between border-t border-zinc-200/70 pt-4 dark:border-zinc-700/70">
-                    <span className="text-xs text-zinc-500 group-hover:text-blue-600 dark:text-zinc-400 dark:group-hover:text-blue-400">
-                      View tasks →
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
+        <JobProjectsSection jobId={job.id} initialProjects={projects} />
       </div>
     </SidebarLayout>
   );

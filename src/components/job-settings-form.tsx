@@ -26,6 +26,7 @@ const allDays = [
 
 export function JobSettingsForm({ job }: { job: JobSettings }) {
   const router = useRouter();
+  const [name, setName] = useState(job.name);
   const [workStart, setWorkStart] = useState(job.workStart);
   const [workEnd, setWorkEnd] = useState(job.workEnd);
   const [workDays, setWorkDays] = useState<number[]>(
@@ -48,7 +49,7 @@ export function JobSettingsForm({ job }: { job: JobSettings }) {
     const response = await fetch(`/api/jobs/${job.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workStart, workEnd, workDays }),
+      body: JSON.stringify({ name, workStart, workEnd, workDays }),
     });
     
     if (!response.ok) {
@@ -67,7 +68,7 @@ export function JobSettingsForm({ job }: { job: JobSettings }) {
         <div className="absolute inset-0 bg-linear-to-br from-indigo-500/5 to-blue-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
         <div className="mb-6">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{job.name}</h2>
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{name}</h2>
           {job.description && <p className="text-sm text-zinc-600 dark:text-zinc-400">{job.description}</p>}
         </div>
 
@@ -77,6 +78,20 @@ export function JobSettingsForm({ job }: { job: JobSettings }) {
               {error}
             </div>
           )}
+
+          <div>
+            <label htmlFor="jobName" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Job Name
+            </label>
+            <input
+              id="jobName"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="mt-1 block w-full rounded-xl border border-zinc-200/60 bg-white/80 px-3 py-2.5 text-zinc-900 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-zinc-700/70 dark:bg-zinc-800/70 dark:text-zinc-100 dark:focus:border-blue-500 dark:focus:ring-blue-900/30"
+              required
+            />
+          </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

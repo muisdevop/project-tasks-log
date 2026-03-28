@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 export default async function LoginPage() {
   const username = await getSessionUsername();
   if (username) {
-    redirect("/projects");
+    redirect("/dashboard");
   }
 
   return (
