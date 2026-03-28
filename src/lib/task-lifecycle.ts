@@ -1,5 +1,6 @@
 import type { Task } from "@prisma/client";
 import { workingTimeDiffSeconds } from "./business-time";
+import { totalElapsedSeconds } from "./business-time";
 
 type TransitionAction = "complete" | "cancel" | "resume" | "log-notes";
 
@@ -43,9 +44,13 @@ export function applyTaskTransition(
     workDays,
   });
 
+  const computedElapsed = task.elapsedSeconds + extra;
+  const elapsedSeconds =
+    computedElapsed === 0 ? totalElapsedSeconds(task.startedAt, now) : computedElapsed;
+
   return {
     status: action === "complete" ? "completed" : "cancelled",
-    elapsedSeconds: task.elapsedSeconds + extra,
+    elapsedSeconds,
     startedAt: task.startedAt,
     endedAt: now,
   };

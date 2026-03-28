@@ -6,6 +6,20 @@ import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
 import { taskActionSchema, taskCreateSchema } from "@/lib/validators";
 
+function appendLogNote(existingNotes: string | null, newNote: string | undefined): string | null {
+  const trimmed = newNote?.trim();
+  if (!trimmed) return existingNotes;
+
+  const timestamp = new Date().toLocaleString();
+  const entry = `<div data-note-entry=\"true\"><p><strong>${timestamp}</strong></p>${trimmed}</div>`;
+
+  if (!existingNotes?.trim()) {
+    return entry;
+  }
+
+  return `${existingNotes}<hr/>${entry}`;
+}
+
 export async function GET(request: Request) {
   try {
     await requireAuth();
@@ -70,8 +84,14 @@ export async function GET(request: Request) {
 
     const tasksWithCurrentElapsed = tasks.map((task) => {
       if (task.status !== "in_progress") {
+        const fallbackElapsed =
+          task.elapsedSeconds === 0 && task.endedAt
+            ? totalElapsedSeconds(task.startedAt, task.endedAt)
+            : task.elapsedSeconds;
+
         return {
           ...task,
+          elapsedSeconds: fallbackElapsed,
           startedAt: task.startedAt.toISOString(),
           endedAt: task.endedAt?.toISOString() || null,
         };
@@ -143,11 +163,8 @@ export async function PATCH(request: Request) {
     await requireAuth();
     const json = await request.json();
     const parsed = taskActionSchema.safeParse(json);
-    console.log("Request JSON:", JSON.stringify(json, null, 2));
-    console.log("Validation result:", parsed);
-    
+
     if (!parsed.success) {
-      console.error("Validation error:", parsed.error);
       return NextResponse.json({ error: "Invalid action payload.", details: parsed.error.issues }, { status: 400 });
     }
 
@@ -160,8 +177,6 @@ export async function PATCH(request: Request) {
     }
 
     if (parsed.data.action === "log-notes") {
-      console.log("Log-notes action received:", parsed.data);
-      
       if (task.status !== "in_progress") {
         return NextResponse.json(
           { error: "Only in-progress tasks can have log notes added." },
@@ -169,9 +184,11 @@ export async function PATCH(request: Request) {
         );
       }
 
+      const nextNotes = appendLogNote(task.logNotes, parsed.data.notes);
+
       const updated = await prisma.task.update({
         where: { id: task.id },
-        data: { logNotes: parsed.data.notes || null } as any,
+        data: { logNotes: nextNotes },
       });
 
       return NextResponse.json({ task: updated });
@@ -218,7 +235,10 @@ export async function PATCH(request: Request) {
         status: change.status,
         startedAt: change.startedAt,
         endedAt: change.endedAt,
-        elapsedSeconds: change.elapsedSeconds,
+        elapsedSeconds:
+          parsed.data.action === "complete" || parsed.data.action === "cancel"
+            ? (parsed.data.elapsedSeconds ?? change.elapsedSeconds)
+            : change.elapsedSeconds,
         ...(parsed.data.action === "complete" && parsed.data.details
           ? { completionOutput: parsed.data.details }
           : {}),

@@ -32,6 +32,10 @@ type Task = {
 };
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
+  const TASK_COLLAPSE_STORAGE_KEY = `task-board-collapsed-tasks:${projectId}`;
+  const FINISHED_DATE_EXPANDED_STORAGE_KEY = `task-board-expanded-finished-dates:${projectId}`;
+  const IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY = `task-board-collapsed-progress-dates:${projectId}`;
+
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -40,23 +44,59 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<number>>(new Set());
   const [collapsedInProgressDates, setCollapsedInProgressDates] = useState<Set<string>>(new Set());
-  const [collapsedFinishedDates, setCollapsedFinishedDates] = useState<Set<string>>(new Set());
+  const [expandedFinishedDates, setExpandedFinishedDates] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // Initialize finished dates as collapsed by default
-    const finishedTasks = tasks.filter((task) => task.status !== "in_progress");
-    const finishedDates = new Set<string>();
-    finishedTasks.forEach((task) => {
-      const date = task.startedAt.split('T')[0];
-      finishedDates.add(date);
-    });
-    setCollapsedFinishedDates(finishedDates);
-  }, [tasks]);
+    try {
+      const collapsedTasksRaw = localStorage.getItem(TASK_COLLAPSE_STORAGE_KEY);
+      if (collapsedTasksRaw) {
+        const parsed = JSON.parse(collapsedTasksRaw) as number[];
+        setCollapsedTaskIds(new Set(parsed));
+      }
+
+      const collapsedProgressDatesRaw = localStorage.getItem(IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY);
+      if (collapsedProgressDatesRaw) {
+        const parsed = JSON.parse(collapsedProgressDatesRaw) as string[];
+        setCollapsedInProgressDates(new Set(parsed));
+      }
+
+      const expandedFinishedDatesRaw = localStorage.getItem(FINISHED_DATE_EXPANDED_STORAGE_KEY);
+      if (expandedFinishedDatesRaw) {
+        const parsed = JSON.parse(expandedFinishedDatesRaw) as string[];
+        setExpandedFinishedDates(new Set(parsed));
+      }
+    } catch {
+      // Ignore invalid persisted collapse state.
+    }
+  }, [
+    TASK_COLLAPSE_STORAGE_KEY,
+    IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY,
+    FINISHED_DATE_EXPANDED_STORAGE_KEY,
+  ]);
+
+  useEffect(() => {
+    localStorage.setItem(TASK_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsedTaskIds)));
+  }, [TASK_COLLAPSE_STORAGE_KEY, collapsedTaskIds]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY,
+      JSON.stringify(Array.from(collapsedInProgressDates)),
+    );
+  }, [IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY, collapsedInProgressDates]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      FINISHED_DATE_EXPANDED_STORAGE_KEY,
+      JSON.stringify(Array.from(expandedFinishedDates)),
+    );
+  }, [FINISHED_DATE_EXPANDED_STORAGE_KEY, expandedFinishedDates]);
 
   function toggleDateCollapse(date: string, isFinished: boolean) {
     if (isFinished) {
-      setCollapsedFinishedDates(prev => {
+      setExpandedFinishedDates((prev) => {
         const newSet = new Set(prev);
         if (newSet.has(date)) {
           newSet.delete(date);
@@ -78,9 +118,26 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     }
   }
 
-  function groupTasksByDate(tasks: Task[]): Record<string, Task[]> {
+  function toggleTaskCollapse(taskId: number) {
+    setCollapsedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  }
+
+  function taskGroupDate(task: Task, isFinished: boolean): string {
+    const source = isFinished && task.endedAt ? task.endedAt : task.startedAt;
+    return source.split("T")[0];
+  }
+
+  function groupTasksByDate(tasks: Task[], isFinished: boolean): Record<string, Task[]> {
     return tasks.reduce((groups, task) => {
-      const date = task.startedAt.split('T')[0];
+      const date = taskGroupDate(task, isFinished);
       if (!groups[date]) {
         groups[date] = [];
       }
@@ -168,16 +225,9 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         notes: notes 
       }),
     });
-    
-    console.log("Log notes request payload:", {
-      taskId: logNotesTask.taskId, 
-      action: "log-notes",
-      notes: notes.substring(0, 100) + (notes.length > 100 ? "..." : "")
-    });
-    
+
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as { error?: string };
-      console.error("Log notes error:", data);
       setError(data.error ?? "Failed to save notes.");
     }
     
@@ -192,9 +242,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
   function renderTaskSection(title: string, tasks: Task[], isFinished: boolean) {
     if (tasks.length === 0) return null;
 
-    const groupedTasks = groupTasksByDate(tasks);
+    const groupedTasks = groupTasksByDate(tasks, isFinished);
     const sortedDates = Object.keys(groupedTasks).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    const collapsedDates = isFinished ? collapsedFinishedDates : collapsedInProgressDates;
 
     return (
       <section className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
@@ -223,7 +272,9 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           
           <div className="space-y-4">
             {sortedDates.map((date) => {
-              const isCollapsed = collapsedDates.has(date);
+              const isCollapsed = isFinished
+                ? !expandedFinishedDates.has(date)
+                : collapsedInProgressDates.has(date);
               const dateTasks = groupedTasks[date];
               
               return (
@@ -256,9 +307,27 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                   
                   {!isCollapsed && (
                     <div className="p-4 space-y-3">
-                      {dateTasks.map((task) => (
+                      {dateTasks.map((task) => {
+                        const isTaskCollapsed = collapsedTaskIds.has(task.id);
+                        return (
                         <article key={task.id} className="rounded-xl border border-zinc-200/50 bg-white/70 p-4 backdrop-blur-sm transition-all hover:border-blue-300/50 hover:bg-white/90 hover:shadow-md dark:border-zinc-700/50 dark:bg-zinc-800/40 dark:hover:border-blue-500/30 dark:hover:bg-zinc-800/60">
-                          <p className="font-semibold text-zinc-800 dark:text-zinc-100">{task.title}</p>
+                          <button
+                            type="button"
+                            onClick={() => toggleTaskCollapse(task.id)}
+                            className="flex w-full items-center justify-between gap-3 text-left"
+                          >
+                            <p className="font-semibold text-zinc-800 dark:text-zinc-100">{task.title}</p>
+                            <svg
+                              className={`h-4 w-4 text-zinc-500 transition-transform ${isTaskCollapsed ? "" : "rotate-180"}`}
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+
+                          {!isTaskCollapsed ? (
+                            <>
                           <RichTextDisplay content={task.description} className="mt-2 text-sm text-zinc-600 dark:text-zinc-300" />
                           
                           {/* Subtasks - only for in-progress tasks */}
@@ -266,7 +335,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                           
                           {task.logNotes ? (
                             <div className="mt-3 rounded-lg border border-blue-200/50 bg-blue-50/50 p-3 dark:border-blue-800/30 dark:bg-blue-900/20">
-                              <p className="text-sm font-medium text-blue-700 dark:text-blue-400 mb-1">Progress Notes:</p>
+                              <p className="mb-1 text-sm font-medium text-blue-700 dark:text-blue-400">Notes History:</p>
                               <RichTextDisplay content={task.logNotes} className="text-sm text-zinc-600 dark:text-zinc-300" />
                             </div>
                           ) : null}
@@ -303,7 +372,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                                 Cancel
                               </button>
                               <button
-                                onClick={() => setLogNotesTask({ taskId: task.id, notes: task.logNotes || "" })}
+                                onClick={() => setLogNotesTask({ taskId: task.id, notes: "" })}
                                 disabled={busyTaskId === task.id}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
                               >
@@ -348,8 +417,10 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               ) : null}
                             </>
                           ) : null}
+                            </>
+                          ) : null}
                         </article>
-                      ))}
+                      )})}
                     </div>
                   )}
                 </div>

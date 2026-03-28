@@ -38,4 +38,22 @@ describe("applyTaskTransition", () => {
     expect(result.startedAt).toEqual(now);
     expect(result.endedAt).toBeNull();
   });
+
+  it("uses wall-clock elapsed when business-time increment is zero", () => {
+    const task = {
+      status: "in_progress" as const,
+      startedAt: new Date("2026-03-30T21:00:00"),
+      elapsedSeconds: 0,
+    };
+
+    const result = applyTaskTransition(
+      task,
+      "cancel",
+      new Date("2026-03-30T23:00:00"),
+      settings,
+    );
+
+    expect(result.status).toBe("cancelled");
+    expect(result.elapsedSeconds).toBe(2 * 3600);
+  });
 });

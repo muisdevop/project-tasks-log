@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RichTextEditor } from "./rich-text-editor";
 
 interface LogNotesModalProps {
@@ -19,6 +19,12 @@ export function LogNotesModal({
   loading = false,
 }: LogNotesModalProps) {
   const [notes, setNotes] = useState(initialNotes);
+
+  useEffect(() => {
+    if (isOpen) {
+      setNotes(initialNotes);
+    }
+  }, [initialNotes, isOpen]);
 
   if (!isOpen) return null;
 

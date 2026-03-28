@@ -20,6 +20,7 @@ export const taskActionSchema = z.object({
   action: z.enum(["complete", "cancel", "resume", "log-notes"]),
   details: z.string().trim().max(10000).optional(),
   notes: z.string().trim().max(10000).optional(),
+  elapsedSeconds: z.number().int().min(0).optional(),
 });
 
 export const settingsSchema = z.object({
