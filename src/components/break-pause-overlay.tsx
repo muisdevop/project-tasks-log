@@ -13,22 +13,24 @@ type ActiveBreak = {
 };
 
 export function BreakPauseOverlay() {
-  const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [isMounted, setIsMounted] = useState(false);
-
-  // Load activeBreak from localStorage on mount
-  useEffect(() => {
-    setIsMounted(true);
-    const stored = localStorage.getItem("activeBreak");
-    if (stored) {
-      try {
-        setActiveBreak(JSON.parse(stored));
-      } catch (err) {
-        console.error("Failed to parse activeBreak from localStorage:", err);
-      }
+  const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
     }
-  }, []);
+
+    const stored = localStorage.getItem("activeBreak");
+    if (!stored) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(stored);
+    } catch (err) {
+      console.error("Failed to parse activeBreak from localStorage:", err);
+      return null;
+    }
+  });
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   // Listen for storage changes (when break is started/ended from another component)
   useEffect(() => {
@@ -53,7 +55,6 @@ export function BreakPauseOverlay() {
   // Update elapsed time every second
   useEffect(() => {
     if (!activeBreak) {
-      setElapsedSeconds(0);
       return;
     }
 
@@ -67,7 +68,7 @@ export function BreakPauseOverlay() {
     return () => clearInterval(interval);
   }, [activeBreak]);
 
-  if (!isMounted || !activeBreak) return null;
+  if (!activeBreak) return null;
 
   const remainingSeconds = activeBreak.duration
     ? Math.max(0, activeBreak.duration * 60 - elapsedSeconds)
@@ -79,7 +80,7 @@ export function BreakPauseOverlay() {
     : 0;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div
         className={`relative rounded-3xl border border-white/20 shadow-2xl backdrop-blur-xl transition-all ${
           isOverdue
