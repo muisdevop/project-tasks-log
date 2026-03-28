@@ -63,7 +63,13 @@ export async function PATCH(
     const { name, workStart, workEnd, workDays } = json;
 
     // Prepare update data
-    const updateData: any = {};
+    const updateData: {
+      name?: string;
+      nameKey?: string;
+      workStart?: string;
+      workEnd?: string;
+      workDays?: number[];
+    } = {};
 
     // Handle name update
     if (name) {

@@ -2,9 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import Image from "next/image";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 interface SidebarProps {
   username?: string | null;
@@ -38,14 +36,6 @@ function ProjectsIcon({ className }: { className?: string }) {
   );
 }
 
-function JobsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m0 0l8 4m-8-4v10l8 4m0-10l8 4m-8-4v10M7 12l8 4m0 0l8-4" />
-    </svg>
-  );
-}
-
 function SettingsIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -65,7 +55,6 @@ function LogoutIcon({ className }: { className?: string }) {
 
 export function Sidebar({ username, projectName }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
