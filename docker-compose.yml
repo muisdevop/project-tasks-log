@@ -8,12 +8,18 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
-      DATABASE_URL: ${DATABASE_URL:-file:/data/dev.db}
+      DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL_SQLITE: ${DATABASE_URL_SQLITE:-file:/data/dev.db}
+      DATABASE_URL_POSTGRES: ${DATABASE_URL_POSTGRES:-postgresql://tasklogger:tasklogger@postgres:5432/tasklogger?schema=public}
       APP_USERNAME: ${APP_USERNAME:-admin}
       APP_PASSWORD: ${APP_PASSWORD:-admin123}
       SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
     volumes:
       - tasklogger-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
@@ -21,6 +27,22 @@ services:
       retries: 3
       start_period: 40s
 
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tasklogger}
+      POSTGRES_USER: ${POSTGRES_USER:-tasklogger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasklogger}
+    volumes:
+      - tasklogger-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasklogger} -d ${POSTGRES_DB:-tasklogger}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   tasklogger-data:
+  tasklogger-postgres-data:
 

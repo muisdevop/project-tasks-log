@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
+import { ExportModal } from "./export-modal";
 
 interface SidebarProps {
   username?: string | null;
@@ -58,6 +59,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   const SIDEBAR_JOBS_CACHE_KEY = "sidebar-jobs-cache";
   const SIDEBAR_PROJECTS_CACHE_KEY = "sidebar-projects-cache";
   const pathname = usePathname();
+  const router = useRouter();
   const [jobs, setJobs] = useState<Job[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -79,6 +81,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   const [expandedJobs, setExpandedJobs] = useState<number[]>([]);
   const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<number[]>([]);
   const [loading, setLoading] = useState(() => jobs.length === 0 && projects.length === 0);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     try {
@@ -164,6 +167,12 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
       return [...prev, jobId];
     });
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
   }
 
   const jobsForProjects = jobs.map((job) => ({
@@ -332,6 +341,18 @@ export function Sidebar({ username, projectName }: SidebarProps) {
 
         {/* User Settings Link */}
         <div className="mt-auto border-t border-slate-700/30 pt-4">
+          <button
+            type="button"
+            onClick={() => setShowExportModal(true)}
+            className="group mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-400 transition-all hover:bg-white/5 hover:text-slate-200"
+            title="Export Activity Report"
+          >
+            <svg className="h-5 w-5 text-slate-400 transition-colors group-hover:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v10m0 0l-3-3m3 3l3-3M5 20h14" />
+            </svg>
+            Export
+          </button>
+
           <Link
             href="/settings"
             className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
@@ -359,15 +380,14 @@ export function Sidebar({ username, projectName }: SidebarProps) {
                 <span className="text-xs text-slate-400">Online</span>
               </div>
             </div>
-            <form action="/api/auth/logout" method="POST">
-              <button
-                type="submit"
-                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/5 hover:text-red-400"
-                title="Logout"
-              >
-                <LogoutIcon className="h-5 w-5" />
-              </button>
-            </form>
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/5 hover:text-red-400"
+              title="Logout"
+            >
+              <LogoutIcon className="h-5 w-5" />
+            </button>
           </div>
         ) : (
           <Link
@@ -381,6 +401,8 @@ export function Sidebar({ username, projectName }: SidebarProps) {
           </Link>
         )}
       </div>
+
+      {showExportModal && <ExportModal onClose={() => setShowExportModal(false)} />}
     </aside>
   );
 }

@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TaskStatus {
+  in_progress
+  completed
+  cancelled
+}
+
+enum TaskEventType {
+  created
+  completed
+  cancelled
+  resumed
+}
+
+model UserSettings {
+  id           Int      @id @default(1)
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Job {
+  id          Int      @id @default(autoincrement())
+  name        String
+  nameKey     String   @unique
+  description String?
+  isArchived  Boolean  @default(false)
+  workStart   String   @default("09:00")
+  workEnd     String   @default("17:00")
+  workDays    Json     @default("[1, 2, 3, 4, 5]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  projects    Project[]
+  breaks      BreakType[]
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  name        String
+  nameKey     String   @unique
+  description String?
+  isArchived  Boolean  @default(false)
+  jobId       Int
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tasks       Task[]
+}
+
+model Task {
+  id                 Int        @id @default(autoincrement())
+  projectId          Int
+  title              String
+  description        String?
+  status             TaskStatus @default(in_progress)
+  startedAt          DateTime
+  endedAt            DateTime?
+  elapsedSeconds     Int        @default(0)
+  completionOutput   String?
+  cancellationReason String?
+  logNotes           String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  project            Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  events             TaskEvent[]
+  subtasks           SubTask[]
+}
+
+model BreakType {
+  id        Int      @id @default(autoincrement())
+  name      String
+  type      String
+  duration  Int?
+  isOneTime Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  jobId     Int
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TaskEvent {
+  id        Int           @id @default(autoincrement())
+  taskId    Int
+  eventType TaskEventType
+  eventAt   DateTime      @default(now())
+  meta      Json?
+  task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model SubTask {
+  id          Int      @id @default(autoincrement())
+  taskId      Int
+  title       String
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
