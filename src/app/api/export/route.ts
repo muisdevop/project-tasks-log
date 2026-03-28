@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import puppeteer from "puppeteer";
+import fs from "node:fs";
 
 type ExportTask = {
   id: number;
@@ -57,8 +58,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ dates });
     }
     
-    let whereClause: Prisma.TaskWhereInput = {};
-    let includeJobs = true;
+    let whereClause: Record<string, unknown> = {};
+    const includeJobs = true;
     let title = "Task Activity Report";
     let filenameBase = "activity-report";
     
@@ -130,7 +131,7 @@ export async function GET(request: Request) {
     }
     
     const tasks = await prisma.task.findMany({
-      where: whereClause,
+      where: whereClause as Prisma.TaskWhereInput,
       include: {
         project: {
           select: {
@@ -158,7 +159,7 @@ export async function GET(request: Request) {
     const htmlContent = generatePDFHTML(groupedTasks, title);
     
     try {
-      const puppeteerOptions: any = {
+      const puppeteerOptions: Parameters<typeof puppeteer.launch>[0] = {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
       };
@@ -172,7 +173,6 @@ export async function GET(request: Request) {
 
         for (const chromePath of possibleChromePaths) {
           try {
-            const fs = require('fs');
             if (fs.existsSync(chromePath)) {
               puppeteerOptions.executablePath = chromePath;
               break;
@@ -609,15 +609,15 @@ function generatePDFHTML(groupedTasks: GroupedTasks, title: string): string {
         </div>
       </div>
 
-      ${Object.values(groupedTasks).map((job: any) => `
+      ${Object.values(groupedTasks).map((job) => `
         <div class="job-section">
           <div class="job-header">${job.name}</div>
           
-          ${Object.values(job.projects).map((project: any) => `
+          ${Object.values(job.projects).map((project) => `
             <div class="project-section">
               <div class="project-header">${project.name}</div>
               
-              ${project.tasks.map((task: any) => renderTask(task)).join('')}
+              ${project.tasks.map((task) => renderTask(task)).join('')}
             </div>
           `).join('')}
         </div>
