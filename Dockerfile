@@ -4,9 +4,12 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Ensure Prisma can run during build (it expects DATABASE_URL in prisma.config.ts)
-ARG DATABASE_URL="file:./dev.db"
+# Ensure Prisma can run during build even when orchestration injects empty build args.
+ARG DATABASE_URL
+ARG DATABASE_URL_SQLITE="file:./dev.db"
 ENV DATABASE_URL=$DATABASE_URL
+ENV DATABASE_URL_SQLITE=$DATABASE_URL_SQLITE
+ENV DB_PROVIDER=sqlite
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -24,8 +27,9 @@ COPY tailwind.config.* ./
 COPY postcss.config.* ./
 COPY public ./public
 
-RUN npx prisma generate
-RUN npm run build
+RUN if [ -z "$DATABASE_URL" ]; then export DATABASE_URL="$DATABASE_URL_SQLITE"; fi; \
+	npx prisma generate --schema prisma/schema.sqlite.prisma; \
+	npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
