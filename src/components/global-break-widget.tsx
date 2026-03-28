@@ -33,9 +33,6 @@ export function GlobalBreakWidget() {
   const [loading, setLoading] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
 
-  // Don't show on login page
-  if (pathname === "/login") return null;
-
   const resolveActiveJobId = useCallback(async () => {
     const jobMatch = pathname?.match(/^\/jobs\/(\d+)/);
     if (jobMatch) {
@@ -212,6 +209,8 @@ export function GlobalBreakWidget() {
     : null;
 
   const isOverdue = remainingSeconds === 0 && activeBreak?.duration !== null;
+
+  if (pathname === "/login") return null;
 
   return (
     <div className="fixed right-6 top-6 z-50">

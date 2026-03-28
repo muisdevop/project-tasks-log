@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { ExportModal } from "./export-modal";
+import { resolveActiveJobId } from "@/lib/navigation";
 
 interface SidebarProps {
   username?: string | null;
@@ -81,7 +81,6 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   const [expandedJobs, setExpandedJobs] = useState<number[]>([]);
   const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<number[]>([]);
   const [loading, setLoading] = useState(() => jobs.length === 0 && projects.length === 0);
-  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     try {
@@ -341,17 +340,29 @@ export function Sidebar({ username, projectName }: SidebarProps) {
 
         {/* User Settings Link */}
         <div className="mt-auto border-t border-slate-700/30 pt-4">
-          <button
-            type="button"
-            onClick={() => setShowExportModal(true)}
-            className="group mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-slate-400 transition-all hover:bg-white/5 hover:text-slate-200"
+          <Link
+            href="/export"
+            className={`group mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+              pathname === "/export"
+                ? "bg-cyan-500/20 text-cyan-400 ring-1 ring-cyan-500/30"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
             title="Export Activity Report"
           >
-            <svg className="h-5 w-5 text-slate-400 transition-colors group-hover:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              className={`h-5 w-5 transition-colors ${
+                pathname === "/export"
+                  ? "text-cyan-400"
+                  : "text-slate-400 group-hover:text-slate-300"
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v10m0 0l-3-3m3 3l3-3M5 20h14" />
             </svg>
             Export
-          </button>
+          </Link>
 
           <Link
             href="/settings"
@@ -402,27 +413,8 @@ export function Sidebar({ username, projectName }: SidebarProps) {
         )}
       </div>
 
-      {showExportModal && <ExportModal onClose={() => setShowExportModal(false)} />}
     </aside>
   );
-}
-
-function resolveActiveJobId(pathname: string, projects: Project[]): number | null {
-  const jobMatch = pathname.match(/^\/jobs\/(\d+)/);
-  if (jobMatch) {
-    const jobId = Number(jobMatch[1]);
-    return Number.isInteger(jobId) ? jobId : null;
-  }
-
-  const projectMatch = pathname.match(/^\/projects\/(\d+)\/tasks/);
-  if (projectMatch) {
-    const projectId = Number(projectMatch[1]);
-    if (!Number.isInteger(projectId)) return null;
-    const project = projects.find((item) => item.id === projectId);
-    return project ? project.jobId : null;
-  }
-
-  return null;
 }
 
 import { GlobalBreakWidget } from "./global-break-widget";

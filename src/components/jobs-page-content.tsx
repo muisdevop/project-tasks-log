@@ -1,27 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { JobSettingsForm } from "@/components/job-settings-form";
 import { JobCreateForm } from "@/components/job-create-form";
+import Link from "next/link";
 import type { Job } from "@prisma/client";
 
 export function JobsPageContent() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeJobId, setActiveJobId] = useState<number | null>(null);
 
   const fetchJobs = async () => {
     try {
       const response = await fetch("/api/jobs");
       if (response.ok) {
         const data = await response.json();
-        const nextJobs: Job[] = data.jobs || [];
-        setJobs(nextJobs);
-        setActiveJobId((prev) => {
-          if (nextJobs.length === 0) return null;
-          if (prev && nextJobs.some((job) => job.id === prev)) return prev;
-          return nextJobs[0].id;
-        });
+        setJobs(data.jobs || []);
       }
     } catch (error) {
       console.error("Failed to fetch jobs:", error);
@@ -74,34 +67,26 @@ export function JobsPageContent() {
             </span>
           </div>
 
-          <div className="overflow-x-auto rounded-2xl border border-white/20 bg-white/60 p-2 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60">
-            <div className="flex w-max min-w-full gap-2">
-              {jobs.map((job) => {
-                const isActive = activeJobId === job.id;
-                return (
-                  <button
-                    key={job.id}
-                    type="button"
-                    onClick={() => setActiveJobId(job.id)}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                      isActive
-                        ? "bg-linear-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30"
-                        : "bg-white/70 text-zinc-600 hover:bg-white dark:bg-zinc-800/70 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                    }`}
-                  >
-                    {job.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid gap-6 auto-rows-max">
-            {jobs
-              .filter((job) => job.id === activeJobId)
-              .map((job) => (
-                <JobSettingsForm key={job.id} job={job} />
-              ))}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {jobs.map((job) => (
+              <Link
+                key={job.id}
+                href={`/jobs/${job.id}`}
+                className="group rounded-2xl border border-white/20 bg-white/70 p-5 shadow-xl backdrop-blur-xl transition-all hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70"
+              >
+                <h3 className="text-lg font-semibold text-zinc-900 group-hover:text-blue-600 dark:text-zinc-100 dark:group-hover:text-blue-400">
+                  {job.name}
+                </h3>
+                {job.description && (
+                  <p className="mt-2 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
+                    {job.description}
+                  </p>
+                )}
+                <div className="mt-4 border-t border-zinc-200/70 pt-4 text-xs text-zinc-500 group-hover:text-blue-600 dark:border-zinc-700/70 dark:text-zinc-400 dark:group-hover:text-blue-400">
+                  Open job details {">"}
+                </div>
+              </Link>
+            ))}
           </div>
         </div>
       )}
