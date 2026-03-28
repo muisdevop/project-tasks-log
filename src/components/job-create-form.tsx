@@ -44,14 +44,23 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-      <h2 className="mb-6 text-lg font-semibold text-gray-900 dark:text-white">
-        Create New Job
-      </h2>
+    <div className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
+      <div className="absolute inset-0 bg-linear-to-br from-blue-500/5 to-indigo-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="relative mb-6 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+        </div>
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+        Create New Job
+        </h2>
+      </div>
+
+      <form onSubmit={handleSubmit} className="relative space-y-4">
         {error && (
-          <div className="rounded-md bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+          <div className="rounded-xl border border-red-200/60 bg-red-50/80 p-3 text-sm text-red-700 dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-400">
             {error}
           </div>
         )}
@@ -59,7 +68,7 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
         <div>
           <label
             htmlFor="job-name"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+            className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
           >
             Job Name *
           </label>
@@ -69,7 +78,7 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g., Client ABC, Internal Project"
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder-gray-500"
+            className="mt-1 block w-full rounded-xl border border-zinc-200/60 bg-white/80 px-3 py-2.5 text-zinc-900 placeholder-zinc-400 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-zinc-700/70 dark:bg-zinc-800/70 dark:text-zinc-100 dark:placeholder-zinc-500 dark:focus:border-blue-500 dark:focus:ring-blue-900/30"
             required
           />
         </div>
@@ -77,7 +86,7 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
         <div>
           <label
             htmlFor="job-desc"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+            className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
           >
             Description (optional)
           </label>
@@ -87,7 +96,7 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
             onChange={(e) => setDescription(e.target.value)}
             placeholder="e.g., Main client deliverable, 40 hours/week"
             rows={3}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder-gray-500"
+            className="mt-1 block w-full rounded-xl border border-zinc-200/60 bg-white/80 px-3 py-2.5 text-zinc-900 placeholder-zinc-400 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:border-zinc-700/70 dark:bg-zinc-800/70 dark:text-zinc-100 dark:placeholder-zinc-500 dark:focus:border-blue-500 dark:focus:ring-blue-900/30"
           />
         </div>
 
@@ -95,7 +104,7 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
           <button
             type="submit"
             disabled={loading || !name.trim()}
-            className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-white font-medium hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
+            className="flex-1 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:shadow-xl hover:shadow-blue-500/35 disabled:opacity-50"
           >
             {loading ? "Creating..." : "Create Job"}
           </button>

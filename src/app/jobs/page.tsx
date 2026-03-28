@@ -11,7 +11,9 @@ export default async function JobsPage() {
 
   return (
     <SidebarLayout username={username}>
-      <JobsPageContent />
+      <div className="mx-auto w-full max-w-6xl">
+        <JobsPageContent />
+      </div>
     </SidebarLayout>
   );
 }
