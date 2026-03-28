@@ -8,13 +8,20 @@ import type { Job } from "@prisma/client";
 export function JobsPageContent() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeJobId, setActiveJobId] = useState<number | null>(null);
 
   const fetchJobs = async () => {
     try {
       const response = await fetch("/api/jobs");
       if (response.ok) {
         const data = await response.json();
-        setJobs(data.jobs);
+        const nextJobs: Job[] = data.jobs || [];
+        setJobs(nextJobs);
+        setActiveJobId((prev) => {
+          if (nextJobs.length === 0) return null;
+          if (prev && nextJobs.some((job) => job.id === prev)) return prev;
+          return nextJobs[0].id;
+        });
       }
     } catch (error) {
       console.error("Failed to fetch jobs:", error);
@@ -67,10 +74,34 @@ export function JobsPageContent() {
             </span>
           </div>
 
+          <div className="overflow-x-auto rounded-2xl border border-white/20 bg-white/60 p-2 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/60">
+            <div className="flex w-max min-w-full gap-2">
+              {jobs.map((job) => {
+                const isActive = activeJobId === job.id;
+                return (
+                  <button
+                    key={job.id}
+                    type="button"
+                    onClick={() => setActiveJobId(job.id)}
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? "bg-linear-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30"
+                        : "bg-white/70 text-zinc-600 hover:bg-white dark:bg-zinc-800/70 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    {job.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="grid gap-6 auto-rows-max">
-          {jobs.map((job) => (
-            <JobSettingsForm key={job.id} job={job} />
-          ))}
+            {jobs
+              .filter((job) => job.id === activeJobId)
+              .map((job) => (
+                <JobSettingsForm key={job.id} job={job} />
+              ))}
           </div>
         </div>
       )}

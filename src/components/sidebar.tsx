@@ -55,12 +55,30 @@ function LogoutIcon({ className }: { className?: string }) {
 }
 
 export function Sidebar({ username, projectName }: SidebarProps) {
+  const SIDEBAR_JOBS_CACHE_KEY = "sidebar-jobs-cache";
+  const SIDEBAR_PROJECTS_CACHE_KEY = "sidebar-projects-cache";
   const pathname = usePathname();
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [jobs, setJobs] = useState<Job[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const cached = sessionStorage.getItem(SIDEBAR_JOBS_CACHE_KEY);
+      return cached ? (JSON.parse(cached) as Job[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [projects, setProjects] = useState<Project[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const cached = sessionStorage.getItem(SIDEBAR_PROJECTS_CACHE_KEY);
+      return cached ? (JSON.parse(cached) as Project[]) : [];
+    } catch {
+      return [];
+    }
+  });
   const [expandedJobs, setExpandedJobs] = useState<number[]>([]);
   const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => jobs.length === 0 && projects.length === 0);
 
   useEffect(() => {
     try {
@@ -109,16 +127,23 @@ export function Sidebar({ username, projectName }: SidebarProps) {
 
   async function fetchJobsAndProjects() {
     try {
-      const jobsRes = await fetch("/api/jobs");
+      const [jobsRes, projectsRes] = await Promise.all([
+        fetch("/api/jobs"),
+        fetch("/api/projects"),
+      ]);
+
       if (jobsRes.ok) {
-        const jobsData = await jobsRes.json();
-        setJobs(jobsData.jobs || []);
-        
-        const projectsRes = await fetch("/api/projects");
-        if (projectsRes.ok) {
-          const projectsData = await projectsRes.json();
-          setProjects(projectsData.projects || []);
-        }
+        const jobsData = (await jobsRes.json()) as { jobs?: Job[] };
+        const nextJobs = jobsData.jobs || [];
+        setJobs(nextJobs);
+        sessionStorage.setItem(SIDEBAR_JOBS_CACHE_KEY, JSON.stringify(nextJobs));
+      }
+
+      if (projectsRes.ok) {
+        const projectsData = (await projectsRes.json()) as { projects?: Project[] };
+        const nextProjects = projectsData.projects || [];
+        setProjects(nextProjects);
+        sessionStorage.setItem(SIDEBAR_PROJECTS_CACHE_KEY, JSON.stringify(nextProjects));
       }
     } catch (error) {
       console.error("Failed to fetch jobs and projects:", error);
@@ -287,18 +312,6 @@ export function Sidebar({ username, projectName }: SidebarProps) {
                         )}
                       </div>
 
-                      {/* Job Settings */}
-                      <Link
-                        href={`/jobs/${job.id}/settings`}
-                        className={`flex items-center gap-2 rounded px-3 py-2 text-sm font-medium transition-colors ${
-                          pathname === `/jobs/${job.id}/settings`
-                            ? "bg-blue-500/20 text-blue-400"
-                            : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-                        }`}
-                      >
-                        <SettingsIcon className="h-4 w-4" />
-                        <span>Settings</span>
-                      </Link>
                     </div>
                   )}
                 </div>

@@ -16,6 +16,7 @@ type BreakType = {
 type ActiveBreak = {
   id: number;
   breakTypeId: number;
+  jobId: number;
   startTime: Date;
   duration: number | null;
   name: string;
@@ -30,13 +31,46 @@ export function GlobalBreakWidget() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<number | null>(null);
 
   // Don't show on login page
   if (pathname === "/login") return null;
 
+  const resolveActiveJobId = useCallback(async () => {
+    const jobMatch = pathname?.match(/^\/jobs\/(\d+)/);
+    if (jobMatch) {
+      const parsed = Number(jobMatch[1]);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        setActiveJobId(parsed);
+        return parsed;
+      }
+    }
+
+    const projectMatch = pathname?.match(/^\/projects\/(\d+)\/(tasks|settings)/);
+    if (projectMatch) {
+      const projectId = Number(projectMatch[1]);
+      if (Number.isInteger(projectId) && projectId > 0) {
+        try {
+          const response = await fetch(`/api/projects/${projectId}`);
+          if (response.ok) {
+            const data = await response.json();
+            const jobId = Number(data.project?.jobId);
+            if (Number.isInteger(jobId) && jobId > 0) {
+              setActiveJobId(jobId);
+              return jobId;
+            }
+          }
+        } catch (err) {
+          console.error("Failed to resolve job context from project:", err);
+        }
+      }
+    }
+
+    setActiveJobId(null);
+    return null;
+  }, [pathname]);
+
   useEffect(() => {
-    fetchBreaks();
-    // Check for stored active break
     const stored = localStorage.getItem("activeBreak");
     if (stored) {
       const parsed = JSON.parse(stored);
@@ -46,6 +80,27 @@ export function GlobalBreakWidget() {
       });
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBreakContext() {
+      const jobId = await resolveActiveJobId();
+      if (cancelled) return;
+      if (!jobId) {
+        setBreaks([]);
+        setSelectedBreak(null);
+        return;
+      }
+      await fetchBreaks(jobId);
+    }
+
+    loadBreakContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolveActiveJobId]);
 
   useEffect(() => {
     if (!activeBreak) {
@@ -61,20 +116,23 @@ export function GlobalBreakWidget() {
     return () => clearInterval(interval);
   }, [activeBreak]);
 
-  async function fetchBreaks() {
+  async function fetchBreaks(jobId: number) {
     try {
-      const response = await fetch("/api/breaks");
+      const response = await fetch(`/api/breaks?jobId=${jobId}`);
       if (response.ok) {
         const data = await response.json();
         setBreaks(data.breaks?.filter((b: BreakType) => b.isActive) || []);
+      } else {
+        setBreaks([]);
       }
     } catch (err) {
       console.error("Failed to fetch breaks:", err);
+      setBreaks([]);
     }
   }
 
   async function startBreak() {
-    if (!selectedBreak) return;
+    if (!selectedBreak || !activeJobId) return;
 
     const breakType = breaks.find((b) => b.id === selectedBreak);
     if (!breakType) return;
@@ -84,6 +142,7 @@ export function GlobalBreakWidget() {
     const newBreak: ActiveBreak = {
       id: Date.now(),
       breakTypeId: breakType.id,
+      jobId: activeJobId,
       startTime: new Date(),
       duration: breakType.duration,
       name: breakType.name,
@@ -214,9 +273,15 @@ export function GlobalBreakWidget() {
           {isExpanded && (
             <div className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-white/20 bg-white/80 p-5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
               <h3 className="mb-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100">Select Break Type</h3>
+              {!activeJobId ? (
+                <div className="mb-3 rounded-xl border border-amber-200/60 bg-amber-50/80 p-3 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-300">
+                  Open a job or project page to use job-specific breaks.
+                </div>
+              ) : null}
               <select
                 value={selectedBreak || ""}
                 onChange={(e) => setSelectedBreak(e.target.value ? Number(e.target.value) : null)}
+                disabled={!activeJobId}
                 className="mb-3 w-full rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2.5 text-sm outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-orange-500 dark:focus:bg-zinc-800 dark:focus:ring-orange-900/30"
               >
                 <option value="">Choose a break...</option>
@@ -229,7 +294,7 @@ export function GlobalBreakWidget() {
               </select>
               <button
                 onClick={startBreak}
-                disabled={!selectedBreak || loading}
+                disabled={!activeJobId || !selectedBreak || loading}
                 className="w-full rounded-xl bg-linear-to-r from-orange-500 to-amber-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
               >
                 {loading ? "Starting..." : "Start Break"}
