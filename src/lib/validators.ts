@@ -44,6 +44,13 @@ export const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
+export const userProfileSchema = z.object({
+  fullName: z.string().trim().max(120).optional(),
+  email: z.union([z.literal(""), z.string().trim().email().max(255)]).optional(),
+  title: z.string().trim().max(120).optional(),
+  bio: z.string().trim().max(2000).optional(),
+});
+
 export const breakSchema = z.object({
   name: z.string().trim().min(1).max(100),
   type: z.string().trim().min(1).max(50),

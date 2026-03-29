@@ -80,6 +80,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   });
   const [expandedJobs, setExpandedJobs] = useState<number[]>([]);
   const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<number[]>([]);
+  const [profileName, setProfileName] = useState<string | null>(null);
   const [loading, setLoading] = useState(() => jobs.length === 0 && projects.length === 0);
 
   useEffect(() => {
@@ -101,6 +102,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
     }
 
     fetchJobsAndProjects();
+    fetchProfile();
   }, []);
 
   useEffect(() => {
@@ -154,6 +156,20 @@ export function Sidebar({ username, projectName }: SidebarProps) {
     }
   }
 
+  async function fetchProfile() {
+    try {
+      const response = await fetch("/api/profile", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = (await response.json()) as { profile?: { fullName?: string } };
+      const fullName = data.profile?.fullName?.trim();
+      if (fullName) {
+        setProfileName(fullName);
+      }
+    } catch {
+      // Ignore profile loading errors to avoid blocking sidebar rendering.
+    }
+  }
+
   function toggleJobExpand(jobId: number) {
     setExpandedJobs((prev) => {
       if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
@@ -178,6 +194,7 @@ export function Sidebar({ username, projectName }: SidebarProps) {
     ...job,
     projects: projects.filter((p) => p.jobId === job.id),
   }));
+  const displayName = profileName || username || null;
 
   const isTasksPage = pathname?.startsWith("/projects/") && pathname?.includes("/tasks");
 
@@ -380,14 +397,14 @@ export function Sidebar({ username, projectName }: SidebarProps) {
 
       {/* User Section */}
       <div className="border-t border-white/10 p-4">
-        {username ? (
+        {displayName ? (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-purple-600 text-white text-sm font-medium shadow-lg">
-                {username.charAt(0).toUpperCase()}
+                {displayName.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col">
-                <span className="text-sm font-medium text-white">{username}</span>
+                <span className="text-sm font-medium text-white">{displayName}</span>
                 <span className="text-xs text-slate-400">Online</span>
               </div>
             </div>

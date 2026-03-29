@@ -1,5 +1,6 @@
 import { SidebarLayout } from "@/components/sidebar";
 import { PasswordChangeForm } from "@/components/password-change-form";
+import { UserProfileForm } from "@/components/user-profile-form";
 import { prisma } from "@/lib/prisma";
 import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -11,7 +12,6 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  // Ensure UserSettings record exists (for auth)
   await prisma.userSettings.upsert({
     where: { id: 1 },
     update: {},
@@ -19,6 +19,15 @@ export default async function SettingsPage() {
       id: 1,
     },
   });
+
+  const [profile] = await prisma.$queryRaw<
+    Array<{
+      fullName: string | null;
+      email: string | null;
+      title: string | null;
+      bio: string | null;
+    }>
+  >`SELECT "fullName", "email", "title", "bio" FROM "UserSettings" WHERE "id" = 1 LIMIT 1`;
 
   return (
     <SidebarLayout username={username}>
@@ -33,6 +42,15 @@ export default async function SettingsPage() {
         </div>
 
         <div className="space-y-6">
+          <UserProfileForm
+            initial={{
+              fullName: profile?.fullName ?? "",
+              email: profile?.email ?? "",
+              title: profile?.title ?? "",
+              bio: profile?.bio ?? "",
+            }}
+          />
+
           {/* Password Change */}
           <PasswordChangeForm />
 
