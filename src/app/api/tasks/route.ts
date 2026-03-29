@@ -285,7 +285,9 @@ export async function PATCH(request: Request) {
                 ? "completed"
                 : parsed.data.action === "cancel"
                   ? "cancelled"
-                  : "resumed",
+                  : parsed.data.action === "hold"
+                    ? "held"
+                    : "resumed",
             eventAt: now,
             ...(parsed.data.details ? { meta: { details: parsed.data.details } } : {}),
           },

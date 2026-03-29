@@ -23,6 +23,7 @@ enum TaskEventType {
   completed
   cancelled
   resumed
+  held
 }
 
 // UserSettings now only stores authentication

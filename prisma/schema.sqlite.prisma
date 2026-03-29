@@ -18,6 +18,7 @@ enum TaskEventType {
   completed
   cancelled
   resumed
+  held
 }
 
 model UserSettings {
