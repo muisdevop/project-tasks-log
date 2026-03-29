@@ -223,6 +223,13 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+    } else if (parsed.data.action === "hold") {
+      if (task.status !== "in_progress") {
+        return NextResponse.json(
+          { error: "Only in-progress tasks can be put on hold." },
+          { status: 400 },
+        );
+      }
     }
 
     if (parsed.data.action === "resume" && task.status !== "cancelled" && task.status !== "on_hold") {

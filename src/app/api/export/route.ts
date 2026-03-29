@@ -569,8 +569,8 @@ function generatePDFHTML(
         }
         
         .task {
-          margin-bottom: 8px;
-          padding: 10px;
+          margin-bottom: 12px;
+          padding: 12px;
           border: 1px solid #ddd;
           border-radius: 5px;
           background: #f9f9f9;
@@ -592,7 +592,7 @@ function generatePDFHTML(
         .task-header {
           font-weight: bold;
           font-size: 13px;
-          margin-bottom: 6px;
+          margin-bottom: 8px;
           display: flex;
           align-items: center;
           flex-wrap: wrap;
@@ -622,12 +622,12 @@ function generatePDFHTML(
           color: white;
         }
         .task-meta {
-          margin-bottom: 4px;
+          margin-bottom: 8px;
           font-size: 10px;
           color: #666;
         }
         .task-description {
-          margin-bottom: 4px;
+          margin-bottom: 8px;
           font-size: 11px;
           color: #555;
           white-space: pre-line;

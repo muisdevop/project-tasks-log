@@ -2,7 +2,7 @@ import type { Task } from "@prisma/client";
 import { workingTimeDiffSeconds } from "./business-time";
 import { totalElapsedSeconds } from "./business-time";
 
-type TransitionAction = "complete" | "cancel" | "resume" | "log-notes";
+type TransitionAction = "complete" | "cancel" | "resume" | "log-notes" | "hold";
 
 type WorkSchedule = {
   workStart: string;
@@ -25,6 +25,15 @@ export function applyTaskTransition(
       status: "in_progress",
       elapsedSeconds: task.elapsedSeconds,
       startedAt: now,
+      endedAt: null,
+    };
+  }
+
+  if (action === "hold") {
+    return {
+      status: "on_hold",
+      elapsedSeconds: task.elapsedSeconds,
+      startedAt: task.startedAt,
       endedAt: null,
     };
   }

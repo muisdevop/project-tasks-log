@@ -164,8 +164,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     router.refresh();
   }
 
-  async function runAction(taskId: number, action: "complete" | "cancel" | "resume") {
-    if (action === "resume") {
+  async function runAction(taskId: number, action: "complete" | "cancel" | "resume" | "hold") {
+    if (action === "resume" || action === "hold") {
       setBusyTaskId(taskId);
       setError(null);
       const response = await fetch("/api/tasks", {
@@ -361,6 +361,16 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                 </svg>
                                 Complete
+                              </button>
+                              <button
+                                onClick={() => runAction(task.id, "hold")}
+                                disabled={busyTaskId === task.id}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-amber-500/30 transition-all hover:shadow-lg hover:shadow-amber-500/40 disabled:opacity-50"
+                              >
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Put on Hold
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "cancel")}
