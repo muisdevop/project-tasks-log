@@ -58,7 +58,7 @@ export async function GET(request: Request) {
       }
     } catch (err) {
       return NextResponse.json(
-        { error: "Invalid time period calculation" },
+        { error: `Invalid time period calculation ${err}` },
         { status: 400 }
       );
     }
@@ -186,10 +186,10 @@ export async function GET(request: Request) {
           format: "A4",
           printBackground: true,
           margin: {
-            top: "20mm",
-            right: "20mm",
-            bottom: "20mm",
-            left: "20mm",
+            top: "12mm",
+            right: "12mm",
+            bottom: "14mm",
+            left: "12mm",
           },
         });
 
@@ -454,127 +454,136 @@ function generatePDFHTML(
       <title>${title}</title>
       <style>
         body {
-          font-family: Arial, sans-serif;
-          font-size: 12px;
-          line-height: 1.4;
-          color: #333;
+          font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+          font-size: 11px;
+          line-height: 1.35;
+          color: #1f2937;
           margin: 0;
           padding: 0;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
         .header {
           text-align: center;
-          margin-bottom: 18px;
-          border-bottom: 2px solid #333;
-          padding-bottom: 12px;
+          margin-bottom: 12px;
+          border-bottom: 1px solid #d1d5db;
+          padding-bottom: 8px;
         }
         .header h1 {
           margin: 0;
-          font-size: 24px;
-          color: #333;
+          font-size: 20px;
+          color: #111827;
         }
         .header p {
-          margin: 5px 0 0 0;
-          font-size: 14px;
-          color: #666;
+          margin: 4px 0 0 0;
+          font-size: 11px;
+          color: #6b7280;
         }
         .summary {
-          margin: 12px 0;
-          padding: 10px;
-          background: #f0f0f0;
-          border-radius: 5px;
+          margin: 8px 0 12px;
+          padding: 8px;
+          background: #f8fafc;
+          border: 1px solid #e5e7eb;
+          border-radius: 6px;
           display: flex;
           justify-content: space-around;
           flex-wrap: wrap;
-          gap: 6px;
+          gap: 4px;
         }
         .summary-item {
           text-align: center;
-          margin: 4px 10px;
+          margin: 2px 8px;
         }
         .summary-label {
           font-weight: bold;
           display: block;
-          font-size: 11px;
-          color: #666;
+          font-size: 10px;
+          color: #6b7280;
+          letter-spacing: 0.02em;
         }
         .summary-value {
-          font-size: 16px;
+          font-size: 14px;
           font-weight: bold;
-          color: #333;
+          color: #111827;
         }
         
         /* Date grouping styles */
         .date-section {
-          margin-bottom: 20px;
+          margin-bottom: 10px;
           page-break-inside: auto;
         }
         .date-header {
           background: #2c3e50;
           color: white;
-          padding: 12px 15px;
+          padding: 8px 10px;
           border-radius: 5px;
-          margin-bottom: 15px;
-          font-size: 18px;
+          margin-bottom: 8px;
+          font-size: 14px;
           font-weight: bold;
+          page-break-after: avoid;
         }
         
         /* Job grouping styles */
         .job-section {
-          margin-bottom: 14px;
+          margin-bottom: 8px;
           page-break-inside: auto;
         }
         .job-header {
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white;
-          padding: 12px 15px;
+          padding: 7px 10px;
           border-radius: 5px;
-          margin-bottom: 15px;
-          font-size: 16px;
+          margin-bottom: 8px;
+          font-size: 13px;
           font-weight: bold;
+          page-break-after: avoid;
         }
         
         /* Project grouping styles */
         .project-section {
-          margin-bottom: 10px;
+          margin-bottom: 6px;
           margin-left: 8px;
           page-break-inside: auto;
         }
         .project-section-primary {
-          margin-bottom: 15px;
+          margin-bottom: 8px;
           page-break-inside: auto;
         }
         .project-header {
           background: #e3f2fd;
           color: #1976d2;
-          padding: 8px 12px;
+          padding: 6px 9px;
           border-radius: 4px;
-          margin-bottom: 10px;
-          font-size: 14px;
+          margin-bottom: 6px;
+          font-size: 12px;
           font-weight: bold;
           border-left: 4px solid #1976d2;
+          page-break-after: avoid;
         }
         .project-header-primary {
           background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
           color: white;
-          padding: 12px 15px;
+          padding: 8px 10px;
           border-radius: 5px;
-          margin-bottom: 15px;
-          font-size: 16px;
+          margin-bottom: 8px;
+          font-size: 13px;
           font-weight: bold;
+          page-break-after: avoid;
         }
         .project-header-primary .job-name {
-          font-size: 13px;
+          font-size: 11px;
           font-weight: normal;
           opacity: 0.9;
         }
         
         .task {
-          margin-bottom: 12px;
-          padding: 12px;
-          border: 1px solid #ddd;
+          margin-bottom: 6px;
+          padding: 8px;
+          border: 1px solid #e5e7eb;
           border-radius: 5px;
-          background: #f9f9f9;
+          background: #ffffff;
           page-break-inside: avoid;
+          break-inside: avoid;
         }
         .task.completed {
           border-left: 4px solid #28a745;
@@ -591,19 +600,20 @@ function generatePDFHTML(
         }
         .task-header {
           font-weight: bold;
-          font-size: 13px;
-          margin-bottom: 8px;
+          font-size: 12px;
+          margin-bottom: 5px;
           display: flex;
           align-items: center;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: 6px;
         }
         .status-badge {
           font-size: 9px;
-          padding: 2px 8px;
+          padding: 2px 6px;
           border-radius: 12px;
           font-weight: bold;
           text-transform: uppercase;
+          letter-spacing: 0.03em;
         }
         .status-badge.completed {
           background: #28a745;
@@ -622,58 +632,58 @@ function generatePDFHTML(
           color: white;
         }
         .task-meta {
-          margin-bottom: 8px;
+          margin-bottom: 4px;
           font-size: 10px;
-          color: #666;
+          color: #6b7280;
         }
         .task-description {
-          margin-bottom: 8px;
+          margin-bottom: 4px;
           font-size: 11px;
-          color: #555;
+          color: #4b5563;
           white-space: pre-line;
         }
         .task-notes {
-          margin-top: 6px;
-          padding: 8px;
+          margin-top: 4px;
+          padding: 6px;
           background: #e8f4ff;
           border-left: 3px solid #2196F3;
-          font-size: 11px;
+          font-size: 10px;
           border-radius: 3px;
           white-space: pre-line;
         }
         .task-output {
-          margin-top: 6px;
-          padding: 8px;
+          margin-top: 4px;
+          padding: 6px;
           background-color: #f0f8f0;
           border-left: 3px solid #28a745;
-          font-size: 11px;
+          font-size: 10px;
           border-radius: 3px;
           white-space: pre-line;
         }
         .task-reason {
-          margin-top: 6px;
-          padding: 8px;
+          margin-top: 4px;
+          padding: 6px;
           background: #ffe8e8;
           border-left: 3px solid #f44336;
-          font-size: 11px;
+          font-size: 10px;
           border-radius: 3px;
           white-space: pre-line;
         }
         .task-subtasks {
-          margin-top: 6px;
-          padding: 8px;
+          margin-top: 4px;
+          padding: 6px;
           background-color: #f8f9fa;
           border-left: 3px solid #6c757d;
-          font-size: 11px;
+          font-size: 10px;
           border-radius: 3px;
         }
         .task-subtasks ul {
-          margin: 5px 0;
-          padding-left: 20px;
+          margin: 4px 0;
+          padding-left: 16px;
         }
         .task-subtasks li {
-          margin: 3px 0;
-          padding: 2px 0;
+          margin: 2px 0;
+          padding: 1px 0;
         }
         .task-subtasks li.completed {
           color: #28a745;
@@ -684,19 +694,29 @@ function generatePDFHTML(
         }
         .footer {
           text-align: center;
-          margin-top: 20px;
+          margin-top: 10px;
           font-size: 10px;
-          color: #999;
-          border-top: 1px solid #ddd;
-          padding-top: 10px;
+          color: #9ca3af;
+          border-top: 1px solid #e5e7eb;
+          padding-top: 6px;
         }
         @media print {
           body { margin: 0; }
-          .date-section { page-break-inside: avoid; }
-          .job-section { page-break-inside: avoid; }
-          .project-section { page-break-inside: avoid; }
-          .project-section-primary { page-break-inside: avoid; }
-          .task { page-break-inside: avoid; }
+          .date-section,
+          .job-section,
+          .project-section,
+          .project-section-primary {
+            page-break-inside: auto;
+            break-inside: auto;
+          }
+          .task,
+          .date-header,
+          .job-header,
+          .project-header,
+          .project-header-primary {
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
         }
       </style>
     </head>
