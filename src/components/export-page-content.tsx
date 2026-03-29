@@ -44,6 +44,22 @@ export function ExportPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Computed values for intelligent filtering
+  const filteredProjects = selectedJobs.length === 0 
+    ? [] 
+    : projects.filter((p) => selectedJobs.includes(p.jobId));
+
+  // Group filtered projects by job
+  const projectsByJob = filteredProjects.reduce((acc, proj) => {
+    const job = jobs.find((j) => j.id === proj.jobId);
+    const jobName = job?.name || "Unknown Job";
+    if (!acc[jobName]) {
+      acc[jobName] = [];
+    }
+    acc[jobName].push(proj);
+    return acc;
+  }, {} as Record<string, Project[]>);
+
   useEffect(() => {
     fetchData();
     // Set default date range based on today
@@ -54,6 +70,16 @@ export function ExportPageContent() {
       .split("T")[0];
     setCustomRangeStart(sevenDaysAgo);
   }, []);
+
+  // Sync "All Projects" checkbox state based on filtered projects
+  useEffect(() => {
+    if (filteredProjects.length === 0) {
+      setAllProjectsSelected(false);
+    } else {
+      const allFiltered = filteredProjects.every((p) => selectedProjects.includes(p.id));
+      setAllProjectsSelected(allFiltered);
+    }
+  }, [filteredProjects, selectedProjects]);
 
   async function fetchData() {
     try {
@@ -86,12 +112,23 @@ export function ExportPageContent() {
     }
   }
 
+
   function toggleJob(jobId: number) {
-    setSelectedJobs((prev) =>
-      prev.includes(jobId)
+    setSelectedJobs((prev) => {
+      const newSelected = prev.includes(jobId)
         ? prev.filter((id) => id !== jobId)
-        : [...prev, jobId]
-    );
+        : [...prev, jobId];
+      
+      // Auto-adjust project selection: deselect projects from deselected jobs
+      setSelectedProjects((projPrev) =>
+        projPrev.filter((projId) => {
+          const proj = projects.find((p) => p.id === projId);
+          return proj && newSelected.includes(proj.jobId);
+        })
+      );
+      
+      return newSelected;
+    });
     setAllJobsSelected(false);
   }
 
@@ -99,10 +136,16 @@ export function ExportPageContent() {
     if (allJobsSelected) {
       setSelectedJobs([]);
       setAllJobsSelected(false);
+      setSelectedProjects([]);
+      setAllProjectsSelected(false);
     } else {
       const allIds = jobs.map((j) => j.id);
       setSelectedJobs(allIds);
       setAllJobsSelected(true);
+      // Automatically select all projects from these jobs
+      const allProjectIds = projects.map((p) => p.id);
+      setSelectedProjects(allProjectIds);
+      setAllProjectsSelected(true);
     }
   }
 
@@ -120,8 +163,9 @@ export function ExportPageContent() {
       setSelectedProjects([]);
       setAllProjectsSelected(false);
     } else {
-      const allIds = projects.map((p) => p.id);
-      setSelectedProjects(allIds);
+      // Select only filtered projects (from selected jobs)
+      const allFilteredIds = filteredProjects.map((p) => p.id);
+      setSelectedProjects(allFilteredIds);
       setAllProjectsSelected(true);
     }
   }
@@ -433,43 +477,50 @@ export function ExportPageContent() {
             <h2 className="mb-4 font-semibold text-zinc-900 dark:text-zinc-100">
               Select Projects
             </h2>
-            {projects.length === 0 ? (
-              <p className="text-sm text-zinc-500">No projects available</p>
+            {selectedJobs.length === 0 ? (
+              <p className="text-sm text-zinc-500">Select a job first to see available projects</p>
+            ) : filteredProjects.length === 0 ? (
+              <p className="text-sm text-zinc-500">No projects available for selected job{selectedJobs.length > 1 ? 's' : ''}</p>
             ) : (
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                <label className="flex items-center gap-2 rounded-lg border-2 border-blue-300/50 bg-blue-50/50 p-2 dark:border-blue-500/30 dark:bg-blue-900/20 sticky top-0">
-                  <input
-                    type="checkbox"
-                    checked={allProjectsSelected}
-                    onChange={toggleAllProjects}
-                    className="h-4 w-4 text-blue-600"
-                  />
-                  <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    All Projects
-                  </span>
-                </label>
-                {projects.map((project) => {
-                  const jobName = jobs.find((j) => j.id === project.jobId)?.name;
-                  return (
-                    <label
-                      key={project.id}
-                      className="flex items-center gap-2 pl-2"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedProjects.includes(project.id)}
-                        onChange={() => toggleProject(project.id)}
-                        className="h-4 w-4 text-blue-600"
-                      />
-                      <span className="flex-1 text-sm text-zinc-700 dark:text-zinc-300">
-                        {project.name}
-                      </span>
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {jobName}
-                      </span>
-                    </label>
-                  );
-                })}
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {filteredProjects.length > 0 && (
+                  <label className="flex items-center gap-2 rounded-lg border-2 border-blue-300/50 bg-blue-50/50 p-2 dark:border-blue-500/30 dark:bg-blue-900/20 sticky top-0">
+                    <input
+                      type="checkbox"
+                      checked={allProjectsSelected}
+                      onChange={toggleAllProjects}
+                      className="h-4 w-4 text-blue-600"
+                    />
+                    <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                      All Projects
+                    </span>
+                  </label>
+                )}
+                {Object.entries(projectsByJob).map(([jobName, jobProjects]) => (
+                  <div key={jobName} className="border-l-2 border-zinc-300 pl-3 dark:border-zinc-600">
+                    <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-2">
+                      {jobName}
+                    </p>
+                    <div className="space-y-2">
+                      {jobProjects.map((project) => (
+                        <label
+                          key={project.id}
+                          className="flex items-center gap-2"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedProjects.includes(project.id)}
+                            onChange={() => toggleProject(project.id)}
+                            className="h-4 w-4 text-blue-600"
+                          />
+                          <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                            {project.name}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>

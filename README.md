@@ -43,6 +43,9 @@ A modern, enterprise-grade task management application built with Next.js, TypeS
 
 ### 📊 Professional Exports
 - **PDF Reports**: Generate professional PDF activity reports
+- **Intelligent Filtering**: Smart cascading filters - select jobs to automatically show related projects
+- **Job-Grouped Display**: Projects organized and grouped by parent job in the export interface
+- **Smart Selection**: Auto-adjust project selections when jobs are deselected
 - **Complete Data**: Includes tasks, subtasks, notes, and outputs
 - **Rich Formatting**: Professional layout with proper styling
 - **Fallback Support**: HTML export if PDF generation fails
@@ -260,6 +263,29 @@ POST /api/breaks
   "isOneTime": boolean
 }
 ```
+
+### Export Management
+
+```typescript
+// Export tasks (with intelligent filtering)
+POST /api/export
+{
+  "timePeriod": "all" | "today" | "week" | "month" | "custom",
+  "customRangeStart": ISO8601 string,    // Required if timePeriod === "custom"
+  "customRangeEnd": ISO8601 string,      // Required if timePeriod === "custom"
+  "durationMode": "elapsed" | "business",
+  "durationPreset": "auto" | "hours" | "minutes",
+  "selectedJobs": string[],              // Job IDs to include (empty = all)
+  "selectedProjects": string[],          // Project IDs to include (empty = all related to jobs)
+  "groupBy": "date" | "project" | "job"
+}
+```
+
+**Filter Behavior:**
+- When jobs are selected, the UI automatically shows only projects related to those jobs
+- Projects are visually grouped by parent job in the export interface
+- Deselecting a job automatically removes its projects from the selection
+- Provides smart filtering hints ("Select a job first to see available projects")
 
 ## 🎨 UI Components
 
