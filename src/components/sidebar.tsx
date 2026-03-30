@@ -196,8 +196,6 @@ export function Sidebar({ username, projectName }: SidebarProps) {
   }));
   const displayName = profileName || username || null;
 
-  const isTasksPage = pathname?.startsWith("/projects/") && pathname?.includes("/tasks");
-
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur-xl dark:bg-slate-950/95">
       {/* Logo Section */}
@@ -344,16 +342,6 @@ export function Sidebar({ username, projectName }: SidebarProps) {
             )}
           </div>
         </div>
-
-        {/* Current Page Info (shown when on tasks page) */}
-        {isTasksPage && (
-          <div className="mt-4 border-t border-slate-700/30 pt-4">
-            <div className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-blue-400">
-              <div className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-              <span className="truncate">{projectName || "Current Project"}</span>
-            </div>
-          </div>
-        )}
 
         {/* User Settings Link */}
         <div className="mt-auto border-t border-slate-700/30 pt-4">

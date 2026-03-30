@@ -134,6 +134,7 @@ export async function POST(request: Request) {
     }
 
     const now = new Date();
+    const isBreakTask = parsed.data.title.trim().toLowerCase().endsWith(" break");
     const activeTask = await prisma.task.findFirst({
       where: {
         projectId: parsed.data.projectId,
@@ -142,12 +143,24 @@ export async function POST(request: Request) {
       select: { id: true },
     });
 
+    // Break tasks should be immediately completable when break ends.
+    // If work is currently in progress, pause it and let break task run as in-progress.
+    if (isBreakTask && activeTask) {
+      await prisma.task.updateMany({
+        where: {
+          projectId: parsed.data.projectId,
+          status: "in_progress",
+        },
+        data: { status: "on_hold" },
+      });
+    }
+
     const task = await prisma.task.create({
       data: {
         projectId: parsed.data.projectId,
         title: parsed.data.title,
         description: parsed.data.description,
-        status: activeTask ? "on_hold" : "in_progress",
+        status: isBreakTask ? "in_progress" : activeTask ? "on_hold" : "in_progress",
         startedAt: now,
         events: {
           create: {
