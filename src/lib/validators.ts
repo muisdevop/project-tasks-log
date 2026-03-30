@@ -13,6 +13,7 @@ export const taskCreateSchema = z.object({
   projectId: z.number().int().positive(),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).optional(),
+  startedAt: z.string().datetime().optional(),
 });
 
 export const taskActionSchema = z.object({

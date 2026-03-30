@@ -161,7 +161,7 @@ export async function POST(request: Request) {
         title: parsed.data.title,
         description: parsed.data.description,
         status: isBreakTask ? "in_progress" : activeTask ? "on_hold" : "in_progress",
-        startedAt: now,
+        startedAt: parsed.data.startedAt ? new Date(parsed.data.startedAt) : now,
         events: {
           create: {
             eventType: "created",

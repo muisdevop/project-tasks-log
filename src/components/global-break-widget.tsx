@@ -186,6 +186,7 @@ export function GlobalBreakWidget() {
             projectId,
             title: `${activeBreak.name} Break`,
             description: `Break duration: ${formatElapsed(actualDuration)}`,
+            startedAt: activeBreak.startTime.toISOString(),
           }),
         });
 
