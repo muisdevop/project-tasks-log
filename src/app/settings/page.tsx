@@ -1,6 +1,7 @@
 import { SidebarLayout } from "@/components/sidebar";
 import { PasswordChangeForm } from "@/components/password-change-form";
 import { UserProfileForm } from "@/components/user-profile-form";
+import { ReportTitleOptionsManager } from "@/components/report-title-options-manager";
 import { prisma } from "@/lib/prisma";
 import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -50,6 +51,8 @@ export default async function SettingsPage() {
               bio: profile?.bio ?? "",
             }}
           />
+
+          <ReportTitleOptionsManager />
 
           {/* Password Change */}
           <PasswordChangeForm />

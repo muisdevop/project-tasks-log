@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
+import { Prisma, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import puppeteer from "puppeteer";
@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     const jobIdsParam = url.searchParams.get("jobIds");
     const projectIdsParam = url.searchParams.get("projectIds");
     const groupBy = (url.searchParams.get("groupBy") || "date") as GroupByOption;
+    const reportTitleParam = (url.searchParams.get("reportTitle") || "").trim();
 
     // Parse filtered job and project IDs
     const jobIds = jobIdsParam
@@ -79,13 +80,22 @@ export async function GET(request: Request) {
       );
     }
 
-    // Build where clause with date range, job filter, and project filter
-    const statusFilter = ["completed" as const, "cancelled" as const];
+    // Build where clause with date range, job filter, and project filter.
+    // Completed/cancelled tasks are filtered by endedAt, while on-hold tasks
+    // are filtered by startedAt because they may not have endedAt set.
     const whereClause: Prisma.TaskWhereInput = {
       AND: [
         {
-          status: { in: statusFilter },
-          endedAt: { gte: startDateObj, lte: endDateObj },
+          OR: [
+            {
+              status: { in: [TaskStatus.completed, TaskStatus.cancelled] },
+              endedAt: { gte: startDateObj, lte: endDateObj },
+            },
+            {
+              status: TaskStatus.on_hold,
+              startedAt: { gte: startDateObj, lte: endDateObj },
+            },
+          ],
         },
         jobIds.length > 0 ? { project: { jobId: { in: jobIds } } } : {},
         projectIds.length > 0 ? { projectId: { in: projectIds } } : {},
@@ -129,23 +139,30 @@ export async function GET(request: Request) {
 
     const taskData = tasks as ExportTask[];
 
+    const reportTitleBase = reportTitleParam || "Activity Report";
+    const reportTitleFileBase = reportTitleBase
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 60) || "activity-report";
+
     if (groupBy === "date") {
       groupedData = groupTasksByDate(taskData);
-      title = `Activity Report - ${startDate} to ${endDate} (Grouped by Date)`;
-      filenameBase = `report-${startDate}-to-${endDate}-by-date`;
+      title = `${reportTitleBase} - ${startDate} to ${endDate} (Grouped by Date)`;
+      filenameBase = `${reportTitleFileBase}-${startDate}-to-${endDate}-by-date`;
     } else if (groupBy === "job") {
       groupedData = groupTasksByJob(taskData);
-      title = `Activity Report - ${startDate} to ${endDate} (Grouped by Job)`;
-      filenameBase = `report-${startDate}-to-${endDate}-by-job`;
+      title = `${reportTitleBase} - ${startDate} to ${endDate} (Grouped by Job)`;
+      filenameBase = `${reportTitleFileBase}-${startDate}-to-${endDate}-by-job`;
     } else if (groupBy === "project") {
       groupedData = groupTasksByProject(taskData);
-      title = `Activity Report - ${startDate} to ${endDate} (Grouped by Project)`;
-      filenameBase = `report-${startDate}-to-${endDate}-by-project`;
+      title = `${reportTitleBase} - ${startDate} to ${endDate} (Grouped by Project)`;
+      filenameBase = `${reportTitleFileBase}-${startDate}-to-${endDate}-by-project`;
     } else {
       // Default to date grouping
       groupedData = groupTasksByDate(taskData);
-      title = `Activity Report - ${startDate} to ${endDate}`;
-      filenameBase = `report-${startDate}-to-${endDate}`;
+      title = `${reportTitleBase} - ${startDate} to ${endDate}`;
+      filenameBase = `${reportTitleFileBase}-${startDate}-to-${endDate}`;
     }
 
     // Generate HTML with appropriate grouping

@@ -19,6 +19,11 @@ type Project = {
   jobId: number;
 };
 
+type ReportTitlesResponse = {
+  options: string[];
+  defaultTitle: string;
+};
+
 export function ExportPageContent() {
   // Time period controls
   const [timePeriod, setTimePeriod] = useState<TimePeriod>("day");
@@ -37,6 +42,10 @@ export function ExportPageContent() {
 
   // Grouping option
   const [groupBy, setGroupBy] = useState<GroupByOption>("date");
+
+  // Report title selection
+  const [reportTitleOptions, setReportTitleOptions] = useState<string[]>([]);
+  const [selectedReportTitle, setSelectedReportTitle] = useState<string>("Activity Report");
 
   // UI state
   const [loading, setLoading] = useState(true);
@@ -83,9 +92,10 @@ export function ExportPageContent() {
 
   async function fetchData() {
     try {
-      const [jobRes, projRes] = await Promise.all([
+      const [jobRes, projRes, titleRes] = await Promise.all([
         fetch("/api/jobs"),
         fetch("/api/projects"),
+        fetch("/api/report-titles"),
       ]);
 
       if (jobRes.ok) {
@@ -105,8 +115,23 @@ export function ExportPageContent() {
         setSelectedProjects(projList.map((p: Project) => p.id));
         setAllProjectsSelected(true);
       }
+
+      if (titleRes.ok) {
+        const data = (await titleRes.json()) as ReportTitlesResponse;
+        const options = data.options && data.options.length > 0 ? data.options : ["Activity Report"];
+        const fallback = options[0];
+        setReportTitleOptions(options);
+        setSelectedReportTitle(
+          data.defaultTitle && options.includes(data.defaultTitle)
+            ? data.defaultTitle
+            : fallback,
+        );
+      } else {
+        setReportTitleOptions(["Activity Report"]);
+        setSelectedReportTitle("Activity Report");
+      }
     } catch {
-      setError("Failed to load jobs and projects");
+      setError("Failed to load jobs, projects, or report title options");
     } finally {
       setLoading(false);
     }
@@ -226,6 +251,7 @@ export function ExportPageContent() {
       params.set("jobIds", selectedJobs.join(","));
       params.set("projectIds", selectedProjects.join(","));
       params.set("groupBy", groupBy);
+      params.set("reportTitle", selectedReportTitle);
       params.set("_t", Date.now().toString());
 
       const url = `/api/export?${params.toString()}`;
@@ -571,6 +597,27 @@ export function ExportPageContent() {
                 </span>
               </label>
             </div>
+          </div>
+
+          {/* REPORT TITLE SECTION */}
+          <div className="rounded-xl border-2 border-zinc-200/70 bg-white/40 p-5 dark:border-zinc-700/70 dark:bg-zinc-800/40">
+            <h2 className="mb-3 font-semibold text-zinc-900 dark:text-zinc-100">
+              Report PDF Title
+            </h2>
+            <select
+              value={selectedReportTitle}
+              onChange={(e) => setSelectedReportTitle(e.target.value)}
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
+            >
+              {reportTitleOptions.map((titleOption) => (
+                <option key={titleOption} value={titleOption}>
+                  {titleOption}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              Manage title options from Account Settings.
+            </p>
           </div>
         </div>
       )}
