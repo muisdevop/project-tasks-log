@@ -81,8 +81,8 @@ export async function GET(request: Request) {
     }
 
     // Build where clause with date range, job filter, and project filter.
-    // Completed/cancelled tasks are filtered by endedAt, while on-hold tasks
-    // are filtered by startedAt because they may not have endedAt set.
+    // In-progress and on-hold tasks show in all reports (no time filter).
+    // Completed/cancelled tasks are filtered by endedAt within the date range.
     const whereClause: Prisma.TaskWhereInput = {
       AND: [
         {
@@ -92,8 +92,7 @@ export async function GET(request: Request) {
               endedAt: { gte: startDateObj, lte: endDateObj },
             },
             {
-              status: TaskStatus.on_hold,
-              startedAt: { gte: startDateObj, lte: endDateObj },
+              status: { in: [TaskStatus.in_progress, TaskStatus.on_hold] },
             },
           ],
         },
