@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { SidebarLayout } from "@/components/sidebar";
 import { TaskBoard } from "@/components/task-board";
+import { JobAttendance } from "@/components/job-attendance";
 import { prisma } from "@/lib/prisma";
 import { getSessionUsername } from "@/lib/session";
 import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
@@ -124,8 +125,8 @@ export default async function TasksPage({ params }: Props) {
     <SidebarLayout username={username} projectName={project.name}>
       <div className="mx-auto w-full max-w-5xl">
         <div className="mb-6">
-          <Link 
-            href={`/jobs/${project.jobId}/projects`} 
+          <Link
+            href={`/jobs/${project.jobId}/projects`}
             className="group inline-flex items-center gap-2 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <svg className="h-4 w-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -154,7 +155,14 @@ export default async function TasksPage({ params }: Props) {
             </Link>
           </div>
         </div>
-        <TaskBoard projectId={project.id} tasks={tasks} />
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="lg:col-span-3">
+            <TaskBoard projectId={project.id} tasks={tasks} />
+          </div>
+          <div className="lg:col-span-1">
+            <JobAttendance jobId={project.jobId} />
+          </div>
+        </div>
       </div>
     </SidebarLayout>
   );

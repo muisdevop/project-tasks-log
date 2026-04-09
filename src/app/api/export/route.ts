@@ -121,6 +121,26 @@ export async function GET(request: Request) {
       orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
     });
 
+    // Fetch job attendance records for work time calculation
+    const attendanceWhereClause: Prisma.JobAttendanceWhereInput = {
+      AND: [
+        {
+          checkInTime: { gte: startDateObj, lte: endDateObj },
+        },
+        jobIds.length > 0 ? { jobId: { in: jobIds } } : {},
+      ].filter((clause) => Object.keys(clause).length > 0),
+    };
+
+    const attendanceRecords = await prisma.jobAttendance.findMany({
+      where: attendanceWhereClause,
+      include: {
+        job: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { checkInTime: "asc" },
+    });
+
     if (!tasks || tasks.length === 0) {
       return NextResponse.json(
         { error: "No tasks found for the selected filters" },
@@ -165,7 +185,7 @@ export async function GET(request: Request) {
     }
 
     // Generate HTML with appropriate grouping
-    const htmlContent = generatePDFHTML(groupedData, title, groupBy);
+    const htmlContent = generatePDFHTML(groupedData, title, groupBy, attendanceRecords);
 
     try {
       const puppeteerOptions: Parameters<typeof puppeteer.launch>[0] = {
@@ -255,7 +275,16 @@ function generatePDFHTML(
     | ReturnType<typeof groupTasksByJob>
     | ReturnType<typeof groupTasksByProject>,
   title: string,
-  groupBy: GroupByOption
+  groupBy: GroupByOption,
+  attendanceRecords?: Array<{
+    id: number;
+    jobId: number;
+    job: { id: number; name: string };
+    checkInTime: Date;
+    checkOutTime: Date | null;
+    totalWorkSeconds: number;
+    notes: string | null;
+  }>
 ): string {
   const formatTime = (dateValue: string | Date) => {
     return new Date(dateValue).toLocaleString();
@@ -460,6 +489,53 @@ function generatePDFHTML(
         `;
       })
       .join("");
+  }
+
+  // Generate attendance HTML section
+  let attendanceHTML = "";
+  if (attendanceRecords && attendanceRecords.length > 0) {
+    const totalWorkTime = attendanceRecords.reduce(
+      (sum, record) => sum + record.totalWorkSeconds,
+      0
+    );
+
+    attendanceHTML = `
+      <div class="attendance-section">
+        <div class="attendance-header">
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Work Time Summary (Check-in to Check-out)
+        </div>
+        <table class="attendance-table">
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Check In</th>
+              <th>Check Out</th>
+              <th>Work Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${attendanceRecords
+              .map(
+                (record) => `
+              <tr>
+                <td>${record.job.name}</td>
+                <td>${formatTime(record.checkInTime)}</td>
+                <td>${record.checkOutTime ? formatTime(record.checkOutTime) : "Still working"}</td>
+                <td>${formatDuration(record.totalWorkSeconds)}</td>
+              </tr>
+            `
+              )
+              .join("")}
+          </tbody>
+        </table>
+        <div class="attendance-total">
+          Total Work Time: ${formatDuration(totalWorkTime)}
+        </div>
+      </div>
+    `;
   }
 
   return `
@@ -760,6 +836,8 @@ function generatePDFHTML(
           <span class="summary-value">${formatDuration(totalElapsed)}</span>
         </div>
       </div>
+
+      ${attendanceHTML}
 
       ${contentHTML}
 

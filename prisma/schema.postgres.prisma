@@ -46,6 +46,7 @@ model Job {
   updatedAt   DateTime @updatedAt
   projects    Project[]
   breaks      BreakType[]
+  attendance  JobAttendance[]
 }
 
 model Project {
@@ -110,4 +111,20 @@ model SubTask {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+// Job Attendance for checkin/checkout functionality
+model JobAttendance {
+  id              Int       @id @default(autoincrement())
+  jobId           Int
+  job             Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  checkInTime     DateTime
+  checkOutTime    DateTime?
+  totalWorkSeconds Int      @default(0)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([jobId])
+  @@index([checkInTime])
 }

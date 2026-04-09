@@ -147,6 +147,10 @@ export function GlobalBreakWidget() {
 
     setActiveBreak(newBreak);
     localStorage.setItem("activeBreak", JSON.stringify(newBreak));
+
+    // Dispatch event to notify break-pause-overlay
+    window.dispatchEvent(new CustomEvent("breakStarted", { detail: newBreak }));
+
     setSelectedBreak(null);
     setIsExpanded(false);
     setLoading(false);
@@ -210,6 +214,10 @@ export function GlobalBreakWidget() {
 
     setActiveBreak(null);
     localStorage.removeItem("activeBreak");
+
+    // Dispatch event to notify break-pause-overlay
+    window.dispatchEvent(new CustomEvent("breakEnded"));
+
     setLoading(false);
     router.refresh();
   }
