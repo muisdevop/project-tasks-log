@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-import { subtaskSchema } from "@/lib/validators";
+import { subtaskSchema, subtaskUpdateSchema } from "@/lib/validators";
 
 export async function GET(request: Request) {
   try {
@@ -30,14 +30,10 @@ export async function POST(request: Request) {
     await requireAuth();
     
     const json = await request.json();
-    console.log("Subtask POST request data:", json);
-    
     const parsed = subtaskSchema.safeParse(json);
-    console.log("Subtask validation result:", parsed);
     
     if (!parsed.success) {
-      console.error("Subtask validation error:", parsed.error);
-      return NextResponse.json({ error: "Invalid subtask data.", details: parsed.error }, { status: 400 });
+      return NextResponse.json({ error: "Invalid subtask data." }, { status: 400 });
     }
 
     // Verify the task exists and is in progress
@@ -69,11 +65,13 @@ export async function PATCH(request: Request) {
     await requireAuth();
     
     const json = await request.json();
-    const { id, ...data } = json;
+    const parsed = subtaskUpdateSchema.safeParse(json);
     
-    if (!id || typeof id !== "number") {
-      return NextResponse.json({ error: "Invalid subtask ID." }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid subtask data." }, { status: 400 });
     }
+
+    const { id, ...data } = parsed.data;
 
     const subtask = await prisma.subTask.update({
       where: { id },

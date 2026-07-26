@@ -60,10 +60,25 @@ export const breakSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
+export const breakUpdateSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string().trim().min(1).max(100).optional(),
+  type: z.string().trim().min(1).max(50).optional(),
+  duration: z.number().int().min(1).max(480).nullable().optional(),
+  isOneTime: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
 export const subtaskSchema = z.object({
   taskId: z.number().int().positive(),
   title: z.string().trim().min(1).max(2000),
   isCompleted: z.boolean().default(false),
+});
+
+export const subtaskUpdateSchema = z.object({
+  id: z.number().int().positive(),
+  title: z.string().trim().min(1).max(2000).optional(),
+  isCompleted: z.boolean().optional(),
 });
 
 export function toNameKey(name: string): string {

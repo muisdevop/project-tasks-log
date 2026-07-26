@@ -195,10 +195,10 @@ export async function GET(request: Request) {
 
       if (process.env.NODE_ENV !== "production") {
         const possibleChromePaths = [
-          "C:\\Users\\muis6\\.cache\\puppeteer\\chrome\\win64-146.0.7680.153\\chrome-win64\\chrome.exe",
+          process.env.PUPPETEER_EXECUTABLE_PATH,
           "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
           "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-        ];
+        ].filter((path): path is string => Boolean(path));
 
         for (const chromePath of possibleChromePaths) {
           try {
@@ -209,7 +209,8 @@ export async function GET(request: Request) {
           } catch {}
         }
       } else {
-        puppeteerOptions.executablePath = "/usr/bin/chromium-browser";
+        puppeteerOptions.executablePath =
+          process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser";
       }
 
       const browser = await puppeteer.launch(puppeteerOptions);
@@ -290,6 +291,15 @@ function generatePDFHTML(
     return new Date(dateValue).toLocaleString();
   };
 
+  const escapeHTML = (value: string) => {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  };
+
   const formatDuration = (seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -299,15 +309,22 @@ function generatePDFHTML(
 
   const stripHTML = (html: string | null) => {
     if (!html) return "";
-    return html
+    const text = html
       .replace(/<hr\s*\/?>/gi, "\n---\n")
       .replace(/<li[^>]*>/gi, "- ")
       .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<[^>]*>/g, "")
       .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+    // Escape the residual plain text so user content cannot inject markup.
+    return escapeHTML(text);
   };
 
   const renderTask = (task: ExportTask) => {
@@ -332,7 +349,7 @@ function generatePDFHTML(
       <div class="task ${statusClass}">
         <div class="task-header">
           <span class="status-badge ${statusClass}">${statusLabel}</span>
-          ${task.title}
+          ${escapeHTML(task.title)}
         </div>
         <div class="task-meta">
           Started: ${formatTime(task.startedAt)}
@@ -353,7 +370,7 @@ function generatePDFHTML(
                 .map(
                   (subtask) => `
                 <li class="${subtask.isCompleted ? "completed" : "pending"}">
-                  ${subtask.isCompleted ? "✓" : "○"} ${subtask.title}
+                  ${subtask.isCompleted ? "✓" : "○"} ${escapeHTML(subtask.title)}
                 </li>
               `
                 )
@@ -424,19 +441,19 @@ function generatePDFHTML(
       .map((dateGroup) => {
         return `
           <div class="date-section">
-            <div class="date-header">${dateGroup.date}</div>
+            <div class="date-header">${escapeHTML(dateGroup.date)}</div>
             
             ${Object.values(dateGroup.jobs)
               .map((job) => {
                 return `
                 <div class="job-section">
-                  <div class="job-header">${job.name}</div>
+                  <div class="job-header">${escapeHTML(job.name)}</div>
                   
                   ${Object.values(job.projects)
                     .map((project) => {
                       return `
                       <div class="project-section">
-                        <div class="project-header">${project.name}</div>
+                        <div class="project-header">${escapeHTML(project.name)}</div>
                         ${project.tasks.map((task) => renderTask(task)).join("")}
                       </div>
                     `;
@@ -457,13 +474,13 @@ function generatePDFHTML(
       .map((job) => {
         return `
           <div class="job-section">
-            <div class="job-header">${job.name}</div>
+            <div class="job-header">${escapeHTML(job.name)}</div>
             
             ${Object.values(job.projects)
               .map((project) => {
                 return `
                 <div class="project-section">
-                  <div class="project-header">${project.name}</div>
+                  <div class="project-header">${escapeHTML(project.name)}</div>
                   ${project.tasks.map((task) => renderTask(task)).join("")}
                 </div>
               `;
@@ -481,8 +498,8 @@ function generatePDFHTML(
         return `
           <div class="project-section-primary">
             <div class="project-header-primary">
-              ${project.name}
-              ${project.job ? ` <span class="job-name">(${project.job.name})</span>` : ""}
+              ${escapeHTML(project.name)}
+              ${project.job ? ` <span class="job-name">(${escapeHTML(project.job.name)})</span>` : ""}
             </div>
             ${project.tasks.map((task) => renderTask(task)).join("")}
           </div>
@@ -521,7 +538,7 @@ function generatePDFHTML(
               .map(
                 (record) => `
               <tr>
-                <td>${record.job.name}</td>
+                <td>${escapeHTML(record.job.name)}</td>
                 <td>${formatTime(record.checkInTime)}</td>
                 <td>${record.checkOutTime ? formatTime(record.checkOutTime) : "Still working"}</td>
                 <td>${formatDuration(record.totalWorkSeconds)}</td>
@@ -543,7 +560,7 @@ function generatePDFHTML(
     <html>
     <head>
       <meta charset="utf-8">
-      <title>${title}</title>
+      <title>${escapeHTML(title)}</title>
       <style>
         body {
           font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -814,7 +831,7 @@ function generatePDFHTML(
     </head>
     <body>
       <div class="header">
-        <h1>${title}</h1>
+        <h1>${escapeHTML(title)}</h1>
         <p>Generated on ${new Date().toLocaleString()}</p>
       </div>
 

@@ -92,7 +92,7 @@ export async function GET() {
       // Process projects and tasks in this job
       for (const project of job.projects) {
         let projectTotalSeconds = 0;
-        const projectCompletedTasks = 0;
+        let projectCompletedTasks = 0;
 
         for (const task of project.tasks) {
           jobTotalTasks++;
@@ -101,6 +101,7 @@ export async function GET() {
           // Count by status
           if (task.status === "completed") {
             jobCompletedTasks++;
+            projectCompletedTasks++;
             stats.taskStats.completed++;
           } else if (task.status === "in_progress") {
             stats.taskStats.inProgress++;

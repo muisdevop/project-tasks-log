@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-import { breakSchema } from "@/lib/validators";
+import { breakSchema, breakUpdateSchema } from "@/lib/validators";
 
 export async function GET(request: Request) {
   try {
@@ -87,11 +87,13 @@ export async function PATCH(request: Request) {
     await requireAuth();
     
     const json = await request.json();
-    const { id, ...data } = json;
+    const parsed = breakUpdateSchema.safeParse(json);
     
-    if (!id || typeof id !== "number") {
-      return NextResponse.json({ error: "Invalid break ID." }, { status: 400 });
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid break data." }, { status: 400 });
     }
+
+    const { id, ...data } = parsed.data;
 
     const breakType = await prisma.breakType.update({
       where: { id },
