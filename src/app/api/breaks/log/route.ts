@@ -6,6 +6,7 @@ import { HttpError, toErrorResponse } from "@/lib/api-error";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { formatElapsed } from "@/lib/business-time";
 import { breakLogSchema } from "@/lib/validators";
+import { PROJECT_JOB_MISMATCH_ERROR } from "@/lib/breaks";
 
 /** A break that started longer ago than this is rejected as a stale/malformed clock. */
 const MAX_BREAK_DURATION_SECONDS = 12 * 60 * 60;
@@ -66,16 +67,22 @@ export async function POST(request: Request) {
         throw new HttpError(404, "Job not found.");
       }
 
-      // Prefer the project the user is looking at; fall back to the job's first
-      // project so a break taken from the dashboard is still logged.
-      let targetProject =
-        projectId !== undefined
-          ? await tx.project.findFirst({
-              where: { id: projectId, jobId },
-              select: { id: true },
-            })
-          : null;
-      if (!targetProject) {
+      // When the client names a project, that choice is binding: a projectId
+      // that is missing or belongs to another job is rejected instead of
+      // silently re-targeted, so a stale tab can never log a break into the
+      // wrong job unnoticed (the old fallback made the write look successful).
+      let targetProject: { id: number } | null = null;
+      if (projectId !== undefined) {
+        targetProject = await tx.project.findFirst({
+          where: { id: projectId, jobId },
+          select: { id: true },
+        });
+        if (!targetProject) {
+          throw new HttpError(400, PROJECT_JOB_MISMATCH_ERROR);
+        }
+      } else {
+        // No project in hand (e.g. the dashboard widget): fall back to the
+        // job's earliest open project so the break is still logged.
         targetProject = await tx.project.findFirst({
           where: { jobId, isArchived: false },
           orderBy: { createdAt: "asc" },

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ACTIVE_BREAK_KEY,
+  PROJECT_JOB_MISMATCH_ERROR,
   logFinishedBreak,
   parseActiveBreak,
   type ActiveBreak,
@@ -137,5 +138,65 @@ describe("logFinishedBreak", () => {
       ok: false,
       error: "Network error while logging this break. Try again.",
     });
+  });
+
+  it("retries without a projectId when the server reports a job mismatch", async () => {
+    const fetchMock = stubFetch(async (_url, init) => {
+      const hasProject = JSON.parse(String(init?.body)).projectId !== undefined;
+      if (hasProject) {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }),
+        };
+      }
+      return { ok: true, status: 201, json: async () => ({}) };
+    });
+
+    await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      jobId: 10,
+      projectId: 8,
+      name: "Coffee",
+      startedAt: "2026-03-30T10:00:00.000Z",
+    });
+    // The retry logs against the break's own job, never the foreign project.
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      jobId: 10,
+      name: "Coffee",
+      startedAt: "2026-03-30T10:00:00.000Z",
+    });
+  });
+
+  it("does not loop when the project-less retry reports the same mismatch", async () => {
+    const fetchMock = stubFetch(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }),
+    }));
+
+    await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({
+      ok: false,
+      error: "Failed to log this break. Try again.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes a mismatch through when no project was resolved", async () => {
+    const fetchMock = stubFetch(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }),
+    }));
+
+    await expect(logFinishedBreak(activeBreak, "/dashboard")).resolves.toEqual({
+      ok: false,
+      error: "Failed to log this break. Try again.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -69,8 +69,15 @@ export function workingTimeDiffSeconds(
     const normalized = jsDay === 0 ? 7 : jsDay; // Mon=1...Sun=7
     if (allowedDays.has(normalized)) {
       const windowStart = atDayTime(cursor, settings.workStart);
-      const windowEnd = atDayTime(cursor, settings.workEnd);
+      let windowEnd = atDayTime(cursor, settings.workEnd);
+      if (windowEnd < windowStart) {
+        // Night shift (workEnd earlier than workStart, e.g. 22:00-06:00): the
+        // window finishes after midnight but belongs to the day it started on.
+        // Before this, such a schedule silently produced 0 worked seconds.
+        windowEnd = addDays(windowEnd, 1);
+      }
       if (windowEnd > windowStart) {
+        // Equal start/end is a degenerate schedule and contributes nothing.
         total += overlapSeconds(startedAt, endedAt, windowStart, windowEnd);
       }
     }

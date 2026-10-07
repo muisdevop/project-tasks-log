@@ -104,15 +104,26 @@ describe("workingTimeDiffSeconds — degenerate windows and intervals", () => {
     ).toBe(0);
   });
 
-  it("ignores cross-midnight windows (workEnd <= workStart contributes 0)", () => {
-    // A 22:00-06:00 night shift is NOT supported: the same-day window end
-    // (06:00) never exceeds the start (22:00), so nothing is counted.
+  it("counts a cross-midnight (night shift) window on the day it starts", () => {
+    // 22:00-06:00 used to contribute 0 because the same-day end (06:00) never
+    // exceeded the start (22:00).
     const seconds = workingTimeDiffSeconds(
       new Date("2026-03-30T22:00:00"),
       new Date("2026-03-31T02:00:00"),
       { workStart: "22:00", workEnd: "06:00", workDays: [1, 2, 3, 4, 5, 6, 7] },
     );
-    expect(seconds).toBe(0);
+    expect(seconds).toBe(4 * 3600);
+  });
+
+  it("clamps a night-shift window at both ends across the midnight boundary", () => {
+    // Started before the window and finished long after it: only 22:00 -> 06:00
+    // of the Monday window counts (8h), nothing from Tuesday's non-work day.
+    const seconds = workingTimeDiffSeconds(
+      new Date("2026-03-30T12:00:00"),
+      new Date("2026-03-31T12:00:00"),
+      { workStart: "22:00", workEnd: "06:00", workDays: [1] },
+    );
+    expect(seconds).toBe(8 * 3600);
   });
 
   it("returns 0 for an exactly-equal window (workStart === workEnd)", () => {

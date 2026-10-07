@@ -85,13 +85,16 @@ describe("validateLogin with env-provided credentials", () => {
   it("uses APP_PASSWORD_HASH, tolerating surrounding quotes", async () => {
     const hash = await bcrypt.hash("envpw", 4);
     prismaStub.userSettings.findUnique.mockResolvedValue({ passwordHash: null });
-    // Note: the quote-stripper runs after trim(), so only quotes directly
-    // hugging the hash are removed ("'$2b$…$'" ok, "' $2b$… $'" is not).
+    // Quotes are stripped before the inner value is trimmed, so both the tight
+    // form and the padded form ("' $2b$… $'") resolve to the same hash.
     vi.stubEnv("APP_PASSWORD_HASH", `'${hash}'`);
 
     const auth = await loadAuth();
     await expect(auth.validateLogin("admin", "envpw")).resolves.toBe(true);
     await expect(auth.validateLogin("admin", "wrong")).resolves.toBe(false);
+
+    vi.stubEnv("APP_PASSWORD_HASH", `' ${hash} '`);
+    await expect(auth.validateLogin("admin", "envpw")).resolves.toBe(true);
   });
 
   it("ignores an APP_PASSWORD_HASH that is not a bcrypt hash and falls back to APP_PASSWORD", async () => {

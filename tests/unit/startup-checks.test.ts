@@ -26,9 +26,10 @@ describe("getStartupWarnings", () => {
     expect(getStartupWarnings({ SESSION_SECRET: "  Change-This-In-Production  " })).toContain(
       "SESSION_SECRET matches a well-known default value.",
     );
-    // "keyboard cat" is only 12 chars, so the short-secret rule fires first.
+    // A leaked example is a known default even when it is also short, so the
+    // accurate reason is reported first.
     expect(getStartupWarnings({ SESSION_SECRET: "keyboard cat" })).toContain(
-      "SESSION_SECRET is unset or shorter than 16 characters.",
+      "SESSION_SECRET matches a well-known default value.",
     );
     expect(getStartupWarnings({ SESSION_SECRET: "YOUR-SECRET-HERE" })).toContain(
       "SESSION_SECRET matches a well-known default value.",

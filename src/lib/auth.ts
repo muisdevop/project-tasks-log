@@ -25,8 +25,14 @@ function getExpectedUsername(): string {
   return process.env.APP_USERNAME ?? "admin";
 }
 
+/**
+ * Strips surrounding quotes that dotenv/Compose examples leave on a value, then
+ * trims. Order matters: trimming first made `"'  $2b$12$…  '"` (whitespace
+ * inside the quotes) fail the bcrypt shape check and be silently treated as
+ * "no password configured".
+ */
 function normalizePossibleQuotedEnv(value: string): string {
-  return value.trim().replace(/^['"]|['"]$/g, "");
+  return value.replace(/^\s*['"]|['"]\s*$/g, "").trim();
 }
 
 function looksLikeBcryptHash(value: string): boolean {

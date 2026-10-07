@@ -11,6 +11,7 @@ import {
   jobUpdateSchema,
   loginSchema,
   projectSchema,
+  projectUpdateSchema,
   settingsSchema,
   subtaskSchema,
   subtaskUpdateSchema,
@@ -82,6 +83,39 @@ describe("projectSchema / jobCreateSchema", () => {
     expect(jobCreateSchema.safeParse({ name: "n", description: "x".repeat(2001) }).success).toBe(
       false,
     );
+  });
+});
+
+describe("projectUpdateSchema", () => {
+  it("accepts an empty payload and each field on its own", () => {
+    expect(projectUpdateSchema.safeParse({}).success).toBe(true);
+    expect(projectUpdateSchema.parse({ name: "  Renamed  " })).toEqual({ name: "Renamed" });
+    expect(projectUpdateSchema.parse({ description: " note " })).toEqual({
+      description: "note",
+    });
+    expect(projectUpdateSchema.safeParse({ description: "" }).success).toBe(true);
+    expect(projectUpdateSchema.safeParse({ description: "x".repeat(2001) }).success).toBe(false);
+  });
+
+  it("coerces a stringy jobId the way the create route does", () => {
+    expect(projectUpdateSchema.parse({ jobId: "7" })).toEqual({ jobId: 7 });
+    expect(projectUpdateSchema.parse({ jobId: 7 })).toEqual({ jobId: 7 });
+  });
+
+  it("rejects non-positive, fractional and unparseable jobIds", () => {
+    for (const jobId of [0, -3, 1.5, "abc", "", null]) {
+      expect(projectUpdateSchema.safeParse({ jobId }).success).toBe(false);
+    }
+  });
+
+  it("still enforces the name rules when a name is present", () => {
+    expect(projectUpdateSchema.safeParse({ name: "" }).success).toBe(false);
+    expect(projectUpdateSchema.safeParse({ name: "   " }).success).toBe(false);
+    expect(projectUpdateSchema.safeParse({ name: "x".repeat(121) }).success).toBe(false);
+  });
+
+  it("drops unknown fields instead of trusting them", () => {
+    expect(projectUpdateSchema.parse({ name: "A", isArchived: true })).toEqual({ name: "A" });
   });
 });
 
@@ -353,6 +387,25 @@ describe("exportQuerySchema", () => {
         groupBy: "date",
         endDate: "2026-01-05T00:00:00Z",
       }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a well-shaped date that is not a real calendar day", () => {
+    // Digits-only validation let 2026-13-99 through to the date layer, where
+    // new Date() silently rolled it over into a different month.
+    for (const startDate of ["2026-13-99", "2026-02-30", "2026-00-10", "2026-11-31"]) {
+      expect(exportQuerySchema.safeParse({ timePeriod: "range", groupBy: "date", startDate }).success).toBe(
+        false,
+      );
+    }
+    // A leap day is accepted only in a leap year.
+    expect(
+      exportQuerySchema.safeParse({ timePeriod: "range", groupBy: "date", startDate: "2024-02-29" })
+        .success,
+    ).toBe(true);
+    expect(
+      exportQuerySchema.safeParse({ timePeriod: "range", groupBy: "date", startDate: "2026-02-29" })
+        .success,
     ).toBe(false);
   });
 });

@@ -1,103 +1,112 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-import { projectSchema, toNameKey } from "@/lib/validators";
+import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { projectUpdateSchema, toNameKey } from "@/lib/validators";
+
+const PROJECT_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  jobId: true,
+  job: { select: { id: true, name: true } },
+} as const;
+
+function parseProjectId(raw: string): number {
+  const projectId = Number(raw);
+  if (!Number.isInteger(projectId) || projectId <= 0) {
+    throw new HttpError(400, "Invalid projectId.");
+  }
+  return projectId;
+}
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
+  { params }: { params: Promise<{ projectId: string }> },
 ) {
   try {
     await requireAuth();
     const { projectId: projectIdStr } = await params;
-    const projectId = Number(projectIdStr);
-
-    if (!Number.isInteger(projectId) || projectId <= 0) {
-      return NextResponse.json({ error: "Invalid projectId." }, { status: 400 });
-    }
+    const projectId = parseProjectId(projectIdStr);
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        jobId: true,
-        job: {
-          select: { id: true, name: true }
-        }
-      },
+      select: PROJECT_SELECT,
     });
 
-    if (!project) {
-      return NextResponse.json({ error: "Project not found." }, { status: 404 });
-    }
+    if (!project) throw new HttpError(404, "Project not found.");
 
     return NextResponse.json({ project });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    // BG-06: this answered 401 for every thrown error, so a database failure told
+    // a signed-in user to sign in again.
+    return toErrorResponse(error, "Unable to load project.");
   }
 }
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ projectId: string }> }
+  { params }: { params: Promise<{ projectId: string }> },
 ) {
   try {
     await requireAuth();
     const { projectId: projectIdStr } = await params;
-    const projectId = Number(projectIdStr);
+    const projectId = parseProjectId(projectIdStr);
 
-    if (!Number.isInteger(projectId) || projectId <= 0) {
-      return NextResponse.json({ error: "Invalid projectId." }, { status: 400 });
+    const body: unknown = await request.json().catch(() => null);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      throw new HttpError(400, "Invalid project data.");
     }
 
-    const json = await request.json();
-    const { name, description, jobId } = json;
+    // SEC-08: one schema validates the whole payload, replacing the previous
+    // "validate the name only if present, and pass everything else through untyped"
+    // (which also let `description.trim()` throw a TypeError on a non-string).
+    const parsed = projectUpdateSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(400, "Invalid project data.");
+    }
+    const { name, description, jobId } = parsed.data;
 
-    // Validate name if provided
     if (name !== undefined) {
-      const parsed = projectSchema.safeParse({ name });
-      if (!parsed.success) {
-        return NextResponse.json({ error: "Invalid project name." }, { status: 400 });
-      }
-
-      // Check for duplicate name
-      const nameKey = toNameKey(name);
       const existingProject = await prisma.project.findUnique({
-        where: { nameKey },
+        where: { nameKey: toNameKey(name) },
       });
-      
-      // Allow if it's the same project being updated
+      // Renaming a project to the name it already has stays a 200.
       if (existingProject && existingProject.id !== projectId) {
-        return NextResponse.json({ error: "A project with this name already exists." }, { status: 409 });
+        throw new HttpError(409, "A project with this name already exists.");
       }
     }
+
+    if (jobId !== undefined) {
+      const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
+      if (!job) throw new HttpError(404, "Job not found.");
+    }
+
+    // Checked up front so a missing project is a deliberate 404, not the old match
+    // on Prisma's "not found" text — which also swallowed unrelated errors whose
+    // message happened to contain that phrase.
+    const exists = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!exists) throw new HttpError(404, "Project not found.");
 
     const project = await prisma.project.update({
       where: { id: projectId },
       data: {
-        ...(name && { name: name.trim(), nameKey: toNameKey(name.trim()) }),
-        ...(description !== undefined && { description: description.trim() || undefined }),
-        ...(jobId && { jobId: Number(jobId) }),
+        ...(name !== undefined && { name, nameKey: toNameKey(name) }),
+        // Keeps the documented behaviour: an empty description is ignored rather
+        // than clearing the field.
+        ...(description !== undefined && { description: description || undefined }),
+        ...(jobId !== undefined && { jobId }),
       },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        jobId: true,
-        job: {
-          select: { id: true, name: true }
-        }
-      },
+      select: PROJECT_SELECT,
     });
 
     return NextResponse.json({ project });
   } catch (error) {
-    if (error instanceof Error && error.message.includes("not found")) {
-      return NextResponse.json({ error: "Project not found." }, { status: 404 });
-    }
-    console.error("Project update error:", error);
-    return NextResponse.json({ error: "Failed to update project." }, { status: 500 });
+    // BG-06: UnauthorizedError now becomes 401 here instead of falling into the
+    // catch-all 500 that made an expired session look like a server fault.
+    return toErrorResponse(error, "Failed to update project.");
   }
 }

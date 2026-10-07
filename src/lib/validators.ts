@@ -15,6 +15,15 @@ export const projectSchema = z.object({
   description: z.string().trim().max(2000).optional(),
 });
 
+/**
+ * PATCH payload for one project: all fields optional, and `jobId` is coerced the
+ * same way the create route accepts it (SEC-08 replaced the route's ad-hoc
+ * `typeof` checks with one schema).
+ */
+export const projectUpdateSchema = projectSchema.partial().extend({
+  jobId: z.coerce.number().int().positive().optional(),
+});
+
 export const jobCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).optional(),
@@ -104,11 +113,30 @@ export const attendanceSchema = z.object({
   notes: z.string().trim().max(2000).nullish(),
 });
 
+/**
+ * `YYYY-MM-DD` that is also a real calendar day. A digits-only regex let
+ * `2026-13-99` through to the date layer, where `new Date()` silently rolled it
+ * over into another month and exported the wrong range.
+ */
+function isRealCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+  );
+}
+
+const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a calendar date as YYYY-MM-DD.")
+  .refine(isRealCalendarDate, "Expected a real calendar date (YYYY-MM-DD).");
+
 export const exportQuerySchema = z.object({
   timePeriod: z.enum(["day", "week", "month", "range"]),
   groupBy: z.enum(["date", "job", "project"]),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  startDate: isoDateSchema.optional(),
+  endDate: isoDateSchema.optional(),
 });
 
 export const subtaskSchema = z.object({
