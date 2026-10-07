@@ -33,6 +33,12 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
   const [linkError, setLinkError] = useState<string | null>(null);
 
   const editor = useEditor({
+    // RS-04: without this Tiptap tries to build the editor during SSR and throws
+    // "SSR has been detected, please set `immediatelyRender` explicitly to false",
+    // which surfaced as an uncaught page error on every screen hosting the editor.
+    // The editor now attaches on mount, which is also what keeps the server and
+    // client markup identical.
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: {

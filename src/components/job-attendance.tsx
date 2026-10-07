@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useApiMutation } from "@/hooks/use-api-mutation";
 import { formatElapsed } from "@/lib/business-time";
+import { isCancelledRequest } from "@/lib/abort";
 import { ConfirmDialog } from "./confirm-dialog";
 
 type AttendanceRecord = {
@@ -56,19 +57,28 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
 
   // Initial load: fetch-on-mount bootstrap so no state is set synchronously in the effect.
   useEffect(() => {
+    // Navigating away aborts this request; WebKit/Firefox report the abort as a
+    // failed fetch, so it must not be logged (or retried) as an application error.
+    const controller = new AbortController();
+
     const run = async () => {
       try {
-        const response = await fetch(`/api/attendance?jobId=${jobId}`);
+        const response = await fetch(`/api/attendance?jobId=${jobId}`, {
+          signal: controller.signal,
+        });
         if (response.ok) {
           const data = (await response.json()) as AttendanceResponse;
           setAttendance(data.attendance ?? null);
         }
       } catch (err) {
+        if (controller.signal.aborted || isCancelledRequest(err)) return;
         console.error("Failed to fetch attendance:", err);
       }
     };
 
     void run();
+
+    return () => controller.abort();
   }, [jobId]);
 
   const isCheckedIn = Boolean(attendance) && !attendance?.checkOutTime;

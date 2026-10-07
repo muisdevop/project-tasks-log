@@ -22,7 +22,12 @@
     "db:migrate:dev:postgres": "prisma migrate dev --schema prisma/postgres/schema.prisma",
     "db:migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "db:seed": "tsx prisma/seed.ts",
-    "password:hash": "tsx scripts/hash-password.ts"
+    "db:parity": "node scripts/check-schema-parity.mjs",
+    "password:hash": "tsx scripts/hash-password.ts",
+    "docs:openapi": "tsx scripts/generate-openapi.ts",
+    "docs:openapi:check": "tsx scripts/generate-openapi.ts --check",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium webkit firefox"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.5.0",
@@ -46,6 +51,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",

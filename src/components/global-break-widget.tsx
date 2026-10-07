@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { formatElapsed } from "@/lib/business-time";
 import { resolveActiveJobId } from "@/lib/navigation";
 import { useStoredState } from "@/hooks/use-stored-state";
+import { isCancelledRequest } from "@/lib/abort";
 import {
   ACTIVE_BREAK_KEY,
   logFinishedBreak,
@@ -48,35 +49,24 @@ export function GlobalBreakWidget() {
 
   // Project list backing the resolver; fetched once so navigation stays instant.
   useEffect(() => {
-    const run = async () => {
-      try {
-        const response = await fetch("/api/projects", { cache: "no-store" });
-        if (response.ok) {
-          const data = (await response.json()) as ProjectsResponse;
-          setProjects(data.projects ?? []);
-        }
-      } catch (err) {
-        console.error("Failed to load projects for break context:", err);
-      }
-    };
-
-    void run();
-  }, [setProjects]);
-
-  useEffect(() => {
-    if (!activeJobId) return;
-
+    const controller = new AbortController();
     let cancelled = false;
 
     const run = async () => {
       try {
-        const response = await fetch(`/api/breaks?jobId=${activeJobId}`);
-        const data = response.ok ? ((await response.json()) as BreaksResponse) : null;
-        if (cancelled) return;
-        setBreaks((data?.breaks ?? []).filter((breakType) => breakType.isActive));
+        const response = await fetch("/api/projects", { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const data = (await response.json()) as ProjectsResponse;
+          if (!cancelled) setProjects(data.projects ?? []);
+        }
       } catch (err) {
-        console.error("Failed to fetch breaks:", err);
-        if (!cancelled) setBreaks([]);
+        if (cancelled || isCancelledRequest(err)) return;
+        // Best-effort lookup: the widget degrades to "no job context" and the next
+        // navigation retries it. Browsers cancel an in-flight fetch when the document
+        // unloads, which arrives here as `TypeError: Failed to fetch`, so a console
+        // *error* would fire on ordinary fast navigation — RS-04's matrix proved that
+        // is noise, not a defect.
+        console.warn("Break widget: project context unavailable, will retry:", err);
       }
     };
 
@@ -84,6 +74,36 @@ export function GlobalBreakWidget() {
 
     return () => {
       cancelled = true;
+      controller.abort();
+    };
+  }, [setProjects]);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const run = async () => {
+      try {
+        const response = await fetch(`/api/breaks?jobId=${activeJobId}`, { signal: controller.signal });
+        const data = response.ok ? ((await response.json()) as BreaksResponse) : null;
+        if (cancelled) return;
+        setBreaks((data?.breaks ?? []).filter((breakType) => breakType.isActive));
+      } catch (err) {
+        if (cancelled || isCancelledRequest(err)) return;
+        // Same navigation-cancelled race as the project lookup above; the widget
+        // shows an empty break list and refetches on the next route.
+        console.warn("Break widget: break list unavailable, will retry:", err);
+        setBreaks([]);
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
     };
   }, [activeJobId]);
 

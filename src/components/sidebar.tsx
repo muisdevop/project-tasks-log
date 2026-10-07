@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState, useEffect } from "react";
 import { resolveActiveJobId } from "@/lib/navigation";
+import { isCancelledRequest } from "@/lib/abort";
 import { GlobalBreakWidget } from "./global-break-widget";
 import { useStoredState } from "@/hooks/use-stored-state";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -108,11 +109,11 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  async function fetchJobsAndProjects() {
+  async function fetchJobsAndProjects(signal: AbortSignal) {
     try {
       const [jobsRes, projectsRes] = await Promise.all([
-        fetch("/api/jobs", { cache: "no-store" }),
-        fetch("/api/projects", { cache: "no-store" }),
+        fetch("/api/jobs", { cache: "no-store", signal }),
+        fetch("/api/projects", { cache: "no-store", signal }),
       ]);
 
       if (jobsRes.ok) {
@@ -125,31 +126,38 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
         setProjects(projectsData.projects || []);
       }
     } catch (error) {
+      // Navigating away aborts the request; WebKit/Firefox log that as a failure.
+      if (signal.aborted || isCancelledRequest(error)) return;
       console.error("Failed to fetch jobs and projects:", error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function fetchProfile() {
+  async function fetchProfile(signal: AbortSignal) {
     try {
-      const response = await fetch("/api/profile", { cache: "no-store" });
+      const response = await fetch("/api/profile", { cache: "no-store", signal });
       if (!response.ok) return;
       const data = (await response.json()) as { profile?: { fullName?: string } };
       const fullName = data.profile?.fullName?.trim();
       if (fullName) {
         setProfileName(fullName);
       }
-    } catch {
-      // Ignore profile loading errors to avoid blocking sidebar rendering.
+    } catch (error) {
+      if (signal.aborted || isCancelledRequest(error)) return;
+      console.warn("Failed to load profile:", error);
     }
   }
 
   useEffect(() => {
+    // RS-04: abort on unmount so a route change cannot leave a half-finished
+    // bootstrap behind, and so its cancellation is not mistaken for a real error.
+    const controller = new AbortController();
     const bootstrap = async () => {
-      await Promise.all([fetchJobsAndProjects(), fetchProfile()]);
+      await Promise.all([fetchJobsAndProjects(controller.signal), fetchProfile(controller.signal)]);
     };
     void bootstrap();
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only bootstrap
   }, []);
 
@@ -224,7 +232,7 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
   return (
     <aside
       id={SIDEBAR_ID}
-      aria-label="Main navigation"
+      aria-label="Sidebar"
       aria-hidden={drawerHidden || undefined}
       className={`fixed left-0 top-14 z-55 flex h-[calc(100dvh-3.5rem)] w-64 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur-xl transition-transform duration-200 ease-out dark:bg-slate-950/95 md:top-0 md:h-screen md:z-40 ${
         open ? "visible translate-x-0" : "invisible -translate-x-full md:visible md:translate-x-0"
@@ -241,7 +249,10 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+      {/* RS-04: the accessible name belongs on the `nav` element. On the `aside` it
+          only named the complementary landmark, so screen-reader landmark lists and
+          `getByRole("navigation", …)` had an unnamed nav to work with. */}
+      <nav aria-label="Main navigation" className="flex-1 space-y-1 overflow-y-auto p-4">
         {/* Dashboard Link */}
         <Link
           href="/dashboard"
@@ -570,7 +581,11 @@ export function SidebarLayout({
       <Sidebar username={username} open={navOpen} isDesktop={isDesktop} />
       <GlobalBreakWidget />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex-1 pt-14 outline-none md:pl-64 md:pt-0">
-        <div className="min-h-[calc(100vh-3.5rem)] bg-linear-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-4 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10 sm:p-6 md:min-h-screen md:p-8">
+        {/* RS-04: the break widget is a bottom-right fixed overlay below md, so the
+            last row of a short page sat underneath it and swallowed taps (the export
+            button could not be clicked at 375px). Extra bottom padding on mobile keeps
+            page actions clear of it; desktop pins the widget to the top instead. */}
+        <div className="min-h-[calc(100vh-3.5rem)] bg-linear-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-4 pb-20 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10 sm:p-6 sm:pb-20 md:min-h-screen md:p-8">
           {children}
         </div>
       </main>
