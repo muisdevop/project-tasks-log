@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { projectSchema, toNameKey } from "@/lib/validators";
 import { requireAuth } from "@/lib/auth";
+import { toErrorResponse } from "@/lib/api-error";
 
 export async function GET() {
   try {
@@ -17,8 +19,8 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json({ projects });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return toErrorResponse(error, "Failed to fetch projects.");
   }
 }
 
@@ -28,12 +30,23 @@ export async function POST(request: Request) {
     const json = await request.json();
     const parsed = projectSchema.safeParse(json);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid project name." }, { status: 400 });
+      return NextResponse.json({ error: "Invalid project data." }, { status: 400 });
     }
 
-    const name = parsed.data.name.trim();
-    const description = (json.description || "").trim();
-    const jobId = json.jobId ? Number(json.jobId) : undefined;
+    const rawJobId = json.jobId;
+    const jobId = typeof rawJobId === "number" ? rawJobId : Number(rawJobId);
+    if (rawJobId !== undefined && rawJobId !== null && (!Number.isInteger(jobId) || jobId <= 0)) {
+      return NextResponse.json({ error: "Invalid jobId." }, { status: 400 });
+    }
+    if (Number.isInteger(jobId) && jobId > 0) {
+      const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
+      if (!job) {
+        return NextResponse.json({ error: "Job not found." }, { status: 404 });
+      }
+    }
+
+    const name = parsed.data.name;
+    const description = parsed.data.description ?? "";
     const nameKey = toNameKey(name);
 
     const exists = await prisma.project.findUnique({ where: { nameKey } });
@@ -42,15 +55,18 @@ export async function POST(request: Request) {
     }
 
     const project = await prisma.project.create({
-      data: { 
-        name, 
+      data: {
+        name,
         nameKey,
         description: description || undefined,
-        jobId: jobId || 1, // Default to first job or create logic
+        jobId: Number.isInteger(jobId) && jobId > 0 ? jobId : 1,
       },
     });
     return NextResponse.json({ project }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Unable to create project." }, { status: 500 });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return NextResponse.json({ error: "Job not found." }, { status: 404 });
+    }
+    return toErrorResponse(error, "Unable to create project.");
   }
 }

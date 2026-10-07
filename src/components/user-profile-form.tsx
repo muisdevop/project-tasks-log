@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useApiMutation } from "@/hooks/use-api-mutation";
 
 type UserProfile = {
   fullName: string;
@@ -11,37 +11,26 @@ type UserProfile = {
 };
 
 export function UserProfileForm({ initial }: { initial: UserProfile }) {
-  const router = useRouter();
   const [fullName, setFullName] = useState(initial.fullName);
   const [email, setEmail] = useState(initial.email);
   const [title, setTitle] = useState(initial.title);
   const [bio, setBio] = useState(initial.bio);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const { mutate, pending: saving, error } = useApiMutation();
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
-    setError(null);
     setMessage(null);
 
-    const response = await fetch("/api/profile", {
+    const ok = await mutate("/api/profile", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fullName, email, title, bio }),
+      body: { fullName, email, title, bio },
+      fallbackError: "Failed to update profile.",
     });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to update profile.");
-      setSaving(false);
-      return;
+    if (ok) {
+      setMessage("Profile updated successfully.");
     }
-
-    setMessage("Profile updated successfully.");
-    setSaving(false);
-    router.refresh();
   }
 
   return (

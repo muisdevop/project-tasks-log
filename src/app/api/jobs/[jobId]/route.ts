@@ -1,15 +1,9 @@
 import { NextResponse, NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-
-function toNameKey(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
+import { toErrorResponse } from "@/lib/api-error";
+import { jobUpdateSchema, toSlugKey } from "@/lib/validators";
 
 export async function GET(
   request: NextRequest,
@@ -41,8 +35,8 @@ export async function GET(
     }
 
     return NextResponse.json({ job });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return toErrorResponse(error, "Failed to fetch job.");
   }
 }
 
@@ -60,9 +54,13 @@ export async function PATCH(
     }
 
     const json = await request.json();
-    const { name, workStart, workEnd, workDays } = json;
+    const parsed = jobUpdateSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid job data." }, { status: 400 });
+    }
 
-    // Prepare update data
+    const { name, workStart, workEnd, workDays } = parsed.data;
+
     const updateData: {
       name?: string;
       nameKey?: string;
@@ -71,41 +69,31 @@ export async function PATCH(
       workDays?: number[];
     } = {};
 
-    // Handle name update
-    if (name) {
-      if (typeof name !== "string" || !name.trim()) {
-        return NextResponse.json({ error: "Job name is required." }, { status: 400 });
-      }
-
-      const newNameKey = toNameKey(name);
+    if (name !== undefined) {
+      const newNameKey = toSlugKey(name);
       if (!newNameKey) {
         return NextResponse.json({ error: "Job name must contain alphanumeric characters." }, { status: 400 });
       }
 
-      // Check if the new name already exists (excluding current job)
       const existingWithName = await prisma.job.findUnique({ where: { nameKey: newNameKey } });
       if (existingWithName && existingWithName.id !== jobId) {
         return NextResponse.json({ error: "A job with this name already exists." }, { status: 409 });
       }
 
-      updateData.name = name.trim();
+      updateData.name = name;
       updateData.nameKey = newNameKey;
     }
 
-    // Validate time format if provided
-    if (workStart && workEnd) {
-      if (workEnd <= workStart) {
-        return NextResponse.json(
-          { error: "workEnd must be after workStart." },
-          { status: 400 }
-        );
-      }
+    if (workStart !== undefined && workEnd !== undefined && workEnd <= workStart) {
+      return NextResponse.json(
+        { error: "workEnd must be after workStart." },
+        { status: 400 }
+      );
     }
 
-    // Handle other updates
-    if (workStart) updateData.workStart = workStart;
-    if (workEnd) updateData.workEnd = workEnd;
-    if (workDays) updateData.workDays = workDays;
+    if (workStart !== undefined) updateData.workStart = workStart;
+    if (workEnd !== undefined) updateData.workEnd = workEnd;
+    if (workDays !== undefined) updateData.workDays = workDays;
 
     const job = await prisma.job.update({
       where: { id: jobId },
@@ -122,9 +110,9 @@ export async function PATCH(
 
     return NextResponse.json({ job });
   } catch (error) {
-    if (error instanceof Error && error.message.includes("not found")) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       return NextResponse.json({ error: "Job not found." }, { status: 404 });
     }
-    return NextResponse.json({ error: "Failed to update job." }, { status: 500 });
+    return toErrorResponse(error, "Failed to update job.");
   }
 }

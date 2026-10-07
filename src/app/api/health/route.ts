@@ -1,32 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+/**
+ * Unauthenticated liveness/readiness probe (whitelisted in src/proxy.ts).
+ * Returns the absolute minimum and keeps all detail server-side (SEC-07/BF-02).
+ */
 export async function GET() {
   try {
-    // Test database connectivity
     await prisma.$queryRaw`SELECT 1`;
-    
-    // Check if we can access user settings (basic database operation)
-    await prisma.userSettings.findFirst({
-      select: { id: true },
-    });
-
-    return NextResponse.json({ 
-      status: "healthy", 
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      database: "connected"
-    });
+    return NextResponse.json({ status: "ok" }, { status: 200 });
   } catch (error) {
-    return NextResponse.json(
-      { 
-        status: "unhealthy", 
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        database: "disconnected",
-        error: error instanceof Error ? error.message : "Unknown error"
-      },
-      { status: 503 }
-    );
+    console.error("[health] database check failed:", error);
+    return NextResponse.json({ status: "error" }, { status: 503 });
   }
 }

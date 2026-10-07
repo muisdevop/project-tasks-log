@@ -2,6 +2,25 @@ import bcrypt from "bcryptjs";
 import { getSessionUsername } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
+/** Thrown by requireAuth so route handlers can map auth failures to 401 precisely. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Unauthorized");
+    this.name = "UnauthorizedError";
+  }
+}
+
+/** Thrown when no usable credential source is configured (BF-03). */
+export class AuthNotConfiguredError extends Error {
+  constructor() {
+    super("No APP_PASSWORD_HASH (usable) or APP_PASSWORD provided.");
+    this.name = "AuthNotConfiguredError";
+  }
+}
+
+/** Current OWASP-recommended cost floor (SEC-10). */
+export const BCRYPT_COST = 12;
+
 function getExpectedUsername(): string {
   return process.env.APP_USERNAME ?? "admin";
 }
@@ -32,37 +51,55 @@ async function getPasswordHashFromPlaintextIfAvailable(): Promise<string | null>
   if (!rawPlain) return null;
 
   if (!computedHashPromise) {
-    computedHashPromise = bcrypt.hash(rawPlain, 10);
+    computedHashPromise = bcrypt.hash(rawPlain, BCRYPT_COST);
   }
   return computedHashPromise;
 }
 
-export async function validateLogin(username: string, password: string): Promise<boolean> {
-  if (username !== getExpectedUsername()) {
-    return false;
+let dummyHashPromise: Promise<string> | null = null;
+function getDummyHash(): Promise<string> {
+  if (!dummyHashPromise) {
+    dummyHashPromise = bcrypt.hash("timing-equalizer", BCRYPT_COST);
   }
+  return dummyHashPromise;
+}
 
+function hashCost(hash: string): number {
+  const cost = Number(hash.split("$")[2]);
+  return Number.isNaN(cost) ? 0 : cost;
+}
+
+export async function validateLogin(username: string, password: string): Promise<boolean> {
   const dbSettings = await prisma.userSettings.findUnique({
     where: { id: 1 },
     select: { passwordHash: true },
   });
-  const dbHash = dbSettings?.passwordHash ?? null;
-  if (dbHash) {
-    return bcrypt.compare(password, dbHash);
-  }
-
-  const hash = getPasswordHashIfAvailable();
-  if (hash) {
-    return bcrypt.compare(password, hash);
-  }
-
+  const envHash = getPasswordHashIfAvailable();
   const computedHash = await getPasswordHashFromPlaintextIfAvailable();
-  if (!computedHash) {
-    throw new Error("No APP_PASSWORD_HASH (usable) or APP_PASSWORD provided.");
+  const configuredHash = dbSettings?.passwordHash ?? envHash ?? computedHash;
+
+  // Always run a bcrypt comparison (against a dummy hash when the login can
+  // never succeed) so response time does not reveal valid usernames (SEC-02).
+  if (username !== getExpectedUsername() || !configuredHash) {
+    const dummy = await getDummyHash();
+    await bcrypt.compare(password, dummy);
+    if (!configuredHash) {
+      throw new AuthNotConfiguredError();
+    }
+    return false;
   }
 
-  // Password compare against computed hash; guarantees default credentials work.
-  return bcrypt.compare(password, computedHash);
+  const ok = await bcrypt.compare(password, configuredHash);
+  if (!ok) {
+    return false;
+  }
+
+  // Opportunistically upgrade legacy low-cost hashes (SEC-10). Also bumps
+  // tokenVersion, which evicts any other live sessions.
+  if (hashCost(configuredHash) < BCRYPT_COST) {
+    await updateDbPassword(password);
+  }
+  return true;
 }
 
 export async function verifyCurrentPassword(currentPassword: string): Promise<boolean> {
@@ -71,10 +108,10 @@ export async function verifyCurrentPassword(currentPassword: string): Promise<bo
 }
 
 export async function updateDbPassword(newPassword: string): Promise<void> {
-  const newHash = await bcrypt.hash(newPassword, 10);
+  const newHash = await bcrypt.hash(newPassword, BCRYPT_COST);
   await prisma.userSettings.upsert({
     where: { id: 1 },
-    update: { passwordHash: newHash },
+    update: { passwordHash: newHash, tokenVersion: { increment: 1 } },
     create: {
       id: 1,
       passwordHash: newHash,
@@ -85,7 +122,7 @@ export async function updateDbPassword(newPassword: string): Promise<void> {
 export async function requireAuth(): Promise<string> {
   const username = await getSessionUsername();
   if (!username) {
-    throw new Error("Unauthorized");
+    throw new UnauthorizedError();
   }
   return username;
 }

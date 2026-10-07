@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { prisma } from "@/lib/prisma";
 
 const COOKIE_NAME = "stl_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
@@ -12,8 +13,8 @@ function getSecret(): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
-export async function createSession(username: string): Promise<void> {
-  const token = await new SignJWT({ sub: username })
+export async function createSession(username: string, tokenVersion: number): Promise<void> {
+  const token = await new SignJWT({ sub: username, tv: tokenVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE_SECONDS}s`)
@@ -50,6 +51,15 @@ export async function getSessionUsername(): Promise<string | null> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
     if (typeof payload.sub !== "string") {
+      return null;
+    }
+    // Stateles sessions are versioned: password change or logout bumps
+    // UserSettings.tokenVersion, which invalidates previously issued tokens (SEC-06).
+    const settings = await prisma.userSettings.findUnique({
+      where: { id: 1 },
+      select: { tokenVersion: true },
+    });
+    if (!settings || payload.tv !== settings.tokenVersion) {
       return null;
     }
     return payload.sub;

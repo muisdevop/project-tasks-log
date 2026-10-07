@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { toErrorResponse } from "@/lib/api-error";
 import { subtaskSchema, subtaskUpdateSchema } from "@/lib/validators";
 
 export async function GET(request: Request) {
   try {
     await requireAuth();
-    
+
     const url = new URL(request.url);
     const taskId = Number(url.searchParams.get("taskId"));
-    
+
     if (!Number.isInteger(taskId) || taskId <= 0) {
       return NextResponse.json({ error: "Invalid taskId." }, { status: 400 });
     }
@@ -20,18 +22,18 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ subtasks });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return toErrorResponse(error, "Failed to fetch subtasks.");
   }
 }
 
 export async function POST(request: Request) {
   try {
     await requireAuth();
-    
+
     const json = await request.json();
     const parsed = subtaskSchema.safeParse(json);
-    
+
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid subtask data." }, { status: 400 });
     }
@@ -55,18 +57,18 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ subtask }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Failed to create subtask." }, { status: 500 });
+  } catch (error) {
+    return toErrorResponse(error, "Failed to create subtask.");
   }
 }
 
 export async function PATCH(request: Request) {
   try {
     await requireAuth();
-    
+
     const json = await request.json();
     const parsed = subtaskUpdateSchema.safeParse(json);
-    
+
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid subtask data." }, { status: 400 });
     }
@@ -79,18 +81,21 @@ export async function PATCH(request: Request) {
     });
 
     return NextResponse.json({ subtask });
-  } catch {
-    return NextResponse.json({ error: "Failed to update subtask." }, { status: 500 });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return NextResponse.json({ error: "Subtask not found." }, { status: 404 });
+    }
+    return toErrorResponse(error, "Failed to update subtask.");
   }
 }
 
 export async function DELETE(request: Request) {
   try {
     await requireAuth();
-    
+
     const url = new URL(request.url);
     const id = Number(url.searchParams.get("id"));
-    
+
     if (!Number.isInteger(id) || id <= 0) {
       return NextResponse.json({ error: "Invalid subtask ID." }, { status: 400 });
     }
@@ -100,7 +105,10 @@ export async function DELETE(request: Request) {
     });
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete subtask." }, { status: 500 });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return NextResponse.json({ error: "Subtask not found." }, { status: 404 });
+    }
+    return toErrorResponse(error, "Failed to delete subtask.");
   }
 }

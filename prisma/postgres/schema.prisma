@@ -30,6 +30,8 @@ model UserSettings {
   bio          String?
   reportTitleOptions Json?
   defaultReportTitle String?
+  // Bumped on password change / logout to invalidate outstanding sessions (SEC-06)
+  tokenVersion Int      @default(1)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -75,11 +77,16 @@ model Task {
   completionOutput   String?
   cancellationReason String?
   logNotes           String?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  // Marks prayer/lockout break tasks so breaks listing does not rely on title suffixes (FL-05)
+  isBreak            Boolean    @default(false)
   project            Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   events             TaskEvent[]
   subtasks           SubTask[]
+
+  @@index([projectId, status])
+  @@index([status, endedAt])
 }
 
 model BreakType {
@@ -102,6 +109,8 @@ model TaskEvent {
   eventAt   DateTime      @default(now())
   meta      Json?
   task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 model SubTask {
@@ -112,6 +121,8 @@ model SubTask {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 // Job Attendance for checkin/checkout functionality

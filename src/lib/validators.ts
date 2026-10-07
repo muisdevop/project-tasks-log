@@ -5,8 +5,26 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+const hhmmRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** 24-hour "HH:MM" clock time, e.g. "09:00". Shared by settings and job routes (SEC-08). */
+export const hhmmSchema = z.string().regex(hhmmRegex, "Expected HH:MM 24-hour time.");
+
 export const projectSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000).optional(),
+});
+
+export const jobCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000).optional(),
+});
+
+export const jobUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  workStart: hhmmSchema.optional(),
+  workEnd: hhmmSchema.optional(),
+  workDays: z.array(z.number().int().min(1).max(7)).min(1).optional(),
 });
 
 export const taskCreateSchema = z.object({
@@ -14,6 +32,7 @@ export const taskCreateSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).optional(),
   startedAt: z.string().datetime().optional(),
+  isBreak: z.boolean().optional(),
 });
 
 export const taskActionSchema = z.object({
@@ -21,16 +40,13 @@ export const taskActionSchema = z.object({
   action: z.enum(["complete", "cancel", "resume", "hold", "log-notes"]),
   details: z.string().trim().max(10000).optional(),
   notes: z.string().trim().max(10000).optional(),
-  elapsedSeconds: z.number().int().min(0).optional(),
+  // elapsedSeconds is intentionally NOT accepted from clients: worked time is
+  // always computed server-side from business hours (SEC-05).
 });
 
 export const settingsSchema = z.object({
-  workStart: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):([0-5]\d)$/),
-  workEnd: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):([0-5]\d)$/),
+  workStart: hhmmSchema,
+  workEnd: hhmmSchema,
   workDays: z.array(z.number().int().min(1).max(7)).min(1),
 });
 
@@ -69,6 +85,18 @@ export const breakUpdateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+export const attendanceSchema = z.object({
+  jobId: z.number().int().positive(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export const exportQuerySchema = z.object({
+  timePeriod: z.enum(["day", "week", "month", "range"]),
+  groupBy: z.enum(["date", "job", "project"]),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
 export const subtaskSchema = z.object({
   taskId: z.number().int().positive(),
   title: z.string().trim().min(1).max(2000),
@@ -81,6 +109,18 @@ export const subtaskUpdateSchema = z.object({
   isCompleted: z.boolean().optional(),
 });
 
+/** Lowercased single-space-joined key (Project/Job name uniqueness lookup). */
 export function toNameKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Lowercased dash-slug key (Job nameKey). Single-sourced here to prevent the
+ * divergent duplicate that used to live in both jobs routes (AR-04). */
+export function toSlugKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }

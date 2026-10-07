@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { Prisma, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { toErrorResponse } from "@/lib/api-error";
+import { exportQuerySchema } from "@/lib/validators";
 import puppeteer from "puppeteer";
 import fs from "node:fs";
 import {
@@ -11,23 +13,51 @@ import {
   groupTasksByProject,
   type ExportTask,
   type GroupByOption,
-  type TimePeriod,
 } from "@/lib/export-helpers";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// In-process mutex around PDF generation: Puppeteer + Chromium is a heavy,
+// scarce resource in a small container. Concurrent exports would serialize
+// on CPU/memory anyway, so reject instead of piling up headless browsers.
+// A stale flag (crash without finally) self-heals after the timeout.
+let exportInProgress = false;
+let exportStartedAt = 0;
+const EXPORT_MUTEX_STALE_MS = 5 * 60 * 1000;
+
+// Cap the reportable window so a bad request cannot generate an unbounded PDF.
+const MAX_EXPORT_SPAN_DAYS = 366;
+
 export async function GET(request: Request) {
+  if (exportInProgress && Date.now() - exportStartedAt < EXPORT_MUTEX_STALE_MS) {
+    return NextResponse.json(
+      { error: "An export is already in progress. Please wait for it to finish." },
+      { status: 429 },
+    );
+  }
+  exportInProgress = true;
+  exportStartedAt = Date.now();
   try {
     await requireAuth();
 
     const url = new URL(request.url);
-    const timePeriod = (url.searchParams.get("timePeriod") || "day") as TimePeriod | "range";
-    const startDateParam = url.searchParams.get("startDate");
-    const endDateParam = url.searchParams.get("endDate");
+    const parsedQuery = exportQuerySchema.safeParse({
+      timePeriod: url.searchParams.get("timePeriod") || "day",
+      groupBy: url.searchParams.get("groupBy") || "date",
+      startDate: url.searchParams.get("startDate") || undefined,
+      endDate: url.searchParams.get("endDate") || undefined,
+    });
+    if (!parsedQuery.success) {
+      return NextResponse.json(
+        { error: "Invalid export query parameters.", details: parsedQuery.error.issues },
+        { status: 400 },
+      );
+    }
+    const { timePeriod, groupBy, startDate: startDateParam, endDate: endDateParam } =
+      parsedQuery.data;
     const jobIdsParam = url.searchParams.get("jobIds");
     const projectIdsParam = url.searchParams.get("projectIds");
-    const groupBy = (url.searchParams.get("groupBy") || "date") as GroupByOption;
     const reportTitleParam = (url.searchParams.get("reportTitle") || "").trim();
 
     // Parse filtered job and project IDs
@@ -53,7 +83,7 @@ export async function GET(request: Request) {
         startDate = startDateParam;
         endDate = endDateParam;
       } else {
-        const dates = calculateTimePeriodDates(timePeriod as TimePeriod);
+        const dates = calculateTimePeriodDates(timePeriod);
         startDate = dates.start;
         endDate = dates.end;
       }
@@ -76,6 +106,15 @@ export async function GET(request: Request) {
     if (startDateObj > endDateObj) {
       return NextResponse.json(
         { error: "Start date cannot be after end date" },
+        { status: 400 }
+      );
+    }
+    if (
+      endDateObj.getTime() - startDateObj.getTime() >
+      MAX_EXPORT_SPAN_DAYS * 24 * 60 * 60 * 1000
+    ) {
+      return NextResponse.json(
+        { error: `Export range exceeds the maximum of ${MAX_EXPORT_SPAN_DAYS} days.` },
         { status: 400 }
       );
     }
@@ -144,7 +183,7 @@ export async function GET(request: Request) {
     if (!tasks || tasks.length === 0) {
       return NextResponse.json(
         { error: "No tasks found for the selected filters" },
-        { status: 400 }
+        { status: 404 }
       );
     }
 
@@ -190,6 +229,7 @@ export async function GET(request: Request) {
     try {
       const puppeteerOptions: Parameters<typeof puppeteer.launch>[0] = {
         headless: true,
+        protocolTimeout: 60_000,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       };
 
@@ -217,11 +257,12 @@ export async function GET(request: Request) {
 
       try {
         const page = await browser.newPage();
-        await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+        await page.setContent(htmlContent, { waitUntil: "networkidle0", timeout: 30_000 });
 
         const pdfBuffer = await page.pdf({
           format: "A4",
           printBackground: true,
+          timeout: 60_000,
           margin: {
             top: "12mm",
             right: "12mm",
@@ -262,11 +303,9 @@ export async function GET(request: Request) {
       });
     }
   } catch (error) {
-    console.error("PDF generation error:", error);
-    return NextResponse.json(
-      { error: "Failed to generate PDF" },
-      { status: 500 }
-    );
+    return toErrorResponse(error, "Failed to generate PDF.");
+  } finally {
+    exportInProgress = false;
   }
 }
 

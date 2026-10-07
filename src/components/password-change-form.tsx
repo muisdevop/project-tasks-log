@@ -1,42 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useApiMutation } from "@/hooks/use-api-mutation";
 
 export function PasswordChangeForm() {
-  const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
-  const [changingPassword, setChangingPassword] = useState(false);
+  const {
+    mutate,
+    pending: changingPassword,
+    error: passwordError,
+  } = useApiMutation();
 
   async function onChangePassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setChangingPassword(true);
-    setPasswordError(null);
     setPasswordMessage(null);
 
-    const response = await fetch("/api/settings", {
+    const ok = await mutate("/api/settings", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      body: { currentPassword, newPassword, confirmPassword },
+      fallbackError: "Failed to change password.",
     });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setPasswordError(data.error ?? "Failed to change password.");
-      setChangingPassword(false);
-      return;
-    }
+    if (!ok) return;
 
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
     setPasswordMessage("Password updated successfully!");
-    setChangingPassword(false);
-    router.refresh();
   }
 
   return (

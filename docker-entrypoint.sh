@@ -4,7 +4,7 @@ set -eu
 DB_PROVIDER="${DB_PROVIDER:-sqlite}"
 
 if [ "$DB_PROVIDER" = "postgres" ] || [ "$DB_PROVIDER" = "postgresql" ]; then
-	export PRISMA_SCHEMA_PATH="prisma/schema.postgres.prisma"
+	export PRISMA_SCHEMA_PATH="prisma/postgres/schema.prisma"
 	if [ -z "${DATABASE_URL:-}" ]; then
 		export DATABASE_URL="${DATABASE_URL_POSTGRES:-}"
 	fi
@@ -22,12 +22,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 npx prisma generate --schema "$PRISMA_SCHEMA_PATH"
-
-if [ "$DB_PROVIDER" = "postgres" ] || [ "$DB_PROVIDER" = "postgresql" ]; then
-	npx prisma db push --schema "$PRISMA_SCHEMA_PATH"
-else
-	npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH"
-fi
+npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH"
 
 exec npm run start
 

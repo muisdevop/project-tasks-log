@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { toErrorResponse } from "@/lib/api-error";
 
 type JobStat = {
   jobId: number;
@@ -169,7 +170,7 @@ export async function GET() {
 
     return NextResponse.json(stats);
   } catch (error) {
-    console.error("Stats endpoint error:", error);
-    return NextResponse.json({ error: "Failed to fetch statistics" }, { status: 500 });
+    // BG-06: unauthenticated requests must map to 401, not a blanket 500.
+    return toErrorResponse(error, "Failed to fetch statistics.");
   }
 }

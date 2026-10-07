@@ -46,16 +46,21 @@ function createClient() {
       log,
     });
 
-  try {
-    return useSqlite ? createSqliteClient(url) : createPostgresClient(url);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("not compatible with the provider")) {
-      throw error;
-    }
-
-    // Build environments can have provider/env drift; fallback keeps compilation stable.
-    return useSqlite ? createPostgresClient(defaultPostgresUrl) : createSqliteClient(defaultSqliteUrl);
+  // Fail fast on any provider/env mismatch. A silent fallback to the other
+  // database with default connection strings can serve an empty database in
+  // production with no visible error (ST-03).
+  if (useSqlite && !url.startsWith("file:")) {
+    throw new Error(
+      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is sqlite but DATABASE_URL is "${url}". Set DB_PROVIDER=postgres or a file: URL.`,
+    );
   }
+  if (!useSqlite && url.startsWith("file:")) {
+    throw new Error(
+      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is postgres but DATABASE_URL is "${url}". Set DB_PROVIDER=sqlite or a postgresql:// URL.`,
+    );
+  }
+
+  return useSqlite ? createSqliteClient(url) : createPostgresClient(url);
 }
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };

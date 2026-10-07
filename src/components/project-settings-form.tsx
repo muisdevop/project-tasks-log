@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import type { Project } from "@prisma/client";
+import { useApiMutation } from "@/hooks/use-api-mutation";
 
 type ProjectSettings = Pick<Project, "id" | "name" | "description">;
 
@@ -12,36 +12,25 @@ interface ProjectSettingsFormProps {
 }
 
 export function ProjectSettingsForm({ project, onSuccess }: ProjectSettingsFormProps) {
-  const router = useRouter();
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description || "");
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { mutate, pending: saving, error } = useApiMutation();
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
-    setError(null);
 
-    const response = await fetch(`/api/projects/${project.id}`, {
+    const ok = await mutate(`/api/projects/${project.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         name: name.trim(),
         description: description.trim() || undefined,
-      }),
+      },
+      fallbackError: "Failed to save.",
     });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to save.");
-      setSaving(false);
-      return;
+    if (ok) {
+      onSuccess?.();
     }
-
-    setSaving(false);
-    onSuccess?.();
-    router.refresh();
   }
 
   return (

@@ -13,7 +13,7 @@ function getSecret(): Uint8Array | null {
   return new TextEncoder().encode(value);
 }
 
-const publicPaths = ["/login", "/api/auth/login", "/_next", "/favicon.ico"];
+const publicPaths = ["/login", "/api/auth/login", "/api/health", "/_next", "/favicon.ico"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

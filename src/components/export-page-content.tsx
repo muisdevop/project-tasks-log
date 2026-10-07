@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import {
   calculateTimePeriodDates,
   calculateDurationPreset,
-  type TimePeriod,
   type GroupByOption,
 } from "@/lib/export-helpers";
+
+// UI-level period option. "duration" is a UI concept (preset/custom ranges)
+// that maps to the wire value "range" when building the export query string.
+type TimePeriodOption = "day" | "week" | "month" | "duration";
 
 type Job = {
   id: number;
@@ -26,7 +29,7 @@ type ReportTitlesResponse = {
 
 export function ExportPageContent() {
   // Time period controls
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>("day");
+  const [timePeriod, setTimePeriod] = useState<TimePeriodOption>("day");
   const [durationMode, setDurationMode] = useState<"preset" | "custom">("preset");
   const [durationPreset, setDurationPreset] = useState<7 | 30 | 90>(7);
   const [customRangeStart, setCustomRangeStart] = useState<string>("");
