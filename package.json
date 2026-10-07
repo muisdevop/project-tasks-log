@@ -22,6 +22,8 @@
     "db:migrate:dev:postgres": "prisma migrate dev --schema prisma/postgres/schema.prisma",
     "db:migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "db:seed": "tsx prisma/seed.ts",
+    "db:backup": "tsx scripts/backup.ts",
+    "db:restore": "tsx scripts/restore.ts",
     "db:parity": "node scripts/check-schema-parity.mjs",
     "password:hash": "tsx scripts/hash-password.ts",
     "docs:openapi": "tsx scripts/generate-openapi.ts",

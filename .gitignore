@@ -63,3 +63,6 @@ dev.db
 # Generated artifacts: coverage report and the audit workbook export
 /coverage/
 /audit-report/
+
+# Database snapshots written by `npm run db:backup` (MF-06)
+/backups/
