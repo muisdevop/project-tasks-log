@@ -1,24 +1,39 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  attendanceListQuerySchema,
   attendanceSchema,
   breakLogSchema,
   breakSchema,
   breakUpdateSchema,
   changePasswordSchema,
+  dateWindowFilter,
+  decodePageCursor,
+  dropField,
+  encodePageCursor,
   exportQuerySchema,
   hhmmSchema,
+  isPaginationRequested,
   jobCreateSchema,
   jobUpdateSchema,
+  keysetAfter,
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
+  listQuerySchema,
   loginSchema,
+  projectListQuerySchema,
   projectSchema,
   projectUpdateSchema,
+  resolveListLimit,
   settingsSchema,
   subtaskSchema,
   subtaskUpdateSchema,
   taskActionSchema,
   taskCreateSchema,
+  taskListQuerySchema,
+  textContains,
   toNameKey,
   toSlugKey,
+  usesPostgresProvider,
   userProfileSchema,
 } from "@/lib/validators";
 
@@ -443,5 +458,305 @@ describe("toNameKey / toSlugKey", () => {
     expect(toSlugKey("  Weird   Name!!  ")).toBe("weird-name");
     expect(toSlugKey("---Leading Trailing---")).toBe("leading-trailing");
     expect(toSlugKey("CamelCase")).toBe("camelcase");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * MF-05 — list pagination / search / filter helpers.
+ * ------------------------------------------------------------------ */
+
+/** The keyset predicate is `{ OR: [sortOnly, sortPlusId] }` by construction. */
+function orBranches(predicate: Record<string, unknown>): Record<string, unknown>[] {
+  return predicate.OR as Record<string, unknown>[];
+}
+
+describe("listQuerySchema", () => {
+  it("is entirely optional so the unpaged call stays valid", () => {
+    expect(listQuerySchema.parse({})).toEqual({});
+    expect(taskListQuerySchema.parse({ projectId: "1" })).toEqual({});
+  });
+
+  it("coerces the stringy query values routes actually receive", () => {
+    expect(listQuerySchema.parse({ limit: "25", cursor: "abc", q: " alpha " })).toEqual({
+      limit: 25,
+      cursor: "abc",
+      q: "alpha",
+    });
+  });
+
+  it("rejects limit values that are not positive integers", () => {
+    // Query strings always arrive as strings (`Object.fromEntries(searchParams)`),
+    // so only stringy input is exercised here.
+    for (const limit of ["0", "-5", "abc", "1.5", "", " ", "5e", "Infinity", NaN]) {
+      expect(listQuerySchema.safeParse({ limit }).success).toBe(false);
+    }
+    expect(listQuerySchema.safeParse({ limit: 1 }).success).toBe(true);
+    expect(listQuerySchema.safeParse({ limit: "999999" }).success).toBe(true);
+  });
+
+  it("bounds cursor and q length so a hostile query string cannot be inlined", () => {
+    expect(listQuerySchema.safeParse({ cursor: "" }).success).toBe(false);
+    expect(listQuerySchema.safeParse({ cursor: "x".repeat(1024) }).success).toBe(true);
+    expect(listQuerySchema.safeParse({ cursor: "x".repeat(1025) }).success).toBe(false);
+    expect(listQuerySchema.safeParse({ q: "   " }).success).toBe(false);
+    expect(listQuerySchema.safeParse({ q: "x".repeat(200) }).success).toBe(true);
+    expect(listQuerySchema.safeParse({ q: "x".repeat(201) }).success).toBe(false);
+  });
+});
+
+describe("taskListQuerySchema / projectListQuerySchema", () => {
+  it("accepts only the enumerated task statuses", () => {
+    for (const status of ["in_progress", "on_hold", "completed", "cancelled"] as const) {
+      expect(taskListQuerySchema.safeParse({ status }).success).toBe(true);
+    }
+    expect(taskListQuerySchema.safeParse({ status: "doing" }).success).toBe(false);
+    expect(taskListQuerySchema.safeParse({ status: "IN_PROGRESS" }).success).toBe(false);
+  });
+
+  it("coerces jobId and rejects nonsense ids", () => {
+    expect(taskListQuerySchema.parse({ jobId: "7" })).toEqual({ jobId: 7 });
+    expect(projectListQuerySchema.parse({ jobId: "7" })).toEqual({ jobId: 7 });
+    for (const jobId of [0, -3, 1.5, "abc", "", null]) {
+      expect(taskListQuerySchema.safeParse({ jobId }).success).toBe(false);
+      expect(projectListQuerySchema.safeParse({ jobId }).success).toBe(false);
+    }
+  });
+
+  it("drops fields the routes own separately (projectId, ordering, etc.)", () => {
+    expect(taskListQuerySchema.parse({ projectId: "3", orderBy: "title" })).toEqual({});
+  });
+});
+
+describe("attendanceListQuerySchema", () => {
+  it("validates from/to as real calendar dates", () => {
+    expect(attendanceListQuerySchema.parse({ from: "2026-01-05", to: "2026-02-01" })).toEqual({
+      from: "2026-01-05",
+      to: "2026-02-01",
+    });
+    for (const from of ["2026-1-5", "2026-01-05T00:00:00Z", "2026-13-99", "2026-02-30", "today"]) {
+      expect(attendanceListQuerySchema.safeParse({ from }).success).toBe(false);
+    }
+    // A leap day is accepted only in a leap year.
+    expect(attendanceListQuerySchema.safeParse({ from: "2024-02-29" }).success).toBe(true);
+    expect(attendanceListQuerySchema.safeParse({ from: "2026-02-29" }).success).toBe(false);
+  });
+
+  it("combines with the shared page params", () => {
+    expect(attendanceListQuerySchema.parse({ from: "2026-01-05", limit: "10", q: "trip" })).toEqual(
+      { from: "2026-01-05", limit: 10, q: "trip" },
+    );
+  });
+});
+
+describe("resolveListLimit", () => {
+  it("defaults to the standard page size when pagination was not asked for", () => {
+    expect(resolveListLimit(undefined)).toBe(LIST_DEFAULT_LIMIT);
+    expect(LIST_DEFAULT_LIMIT).toBeLessThanOrEqual(LIST_MAX_LIMIT);
+  });
+
+  it("clamps to LIST_MAX_LIMIT instead of trusting the client", () => {
+    expect(resolveListLimit(10)).toBe(10);
+    expect(resolveListLimit(LIST_MAX_LIMIT)).toBe(LIST_MAX_LIMIT);
+    expect(resolveListLimit(LIST_MAX_LIMIT + 1)).toBe(LIST_MAX_LIMIT);
+    expect(resolveListLimit(100_000)).toBe(LIST_MAX_LIMIT);
+  });
+});
+
+describe("isPaginationRequested", () => {
+  it("only opts in on limit and/or cursor", () => {
+    expect(isPaginationRequested(new URLSearchParams(""))).toBe(false);
+    expect(isPaginationRequested(new URLSearchParams("q=alpha&status=completed"))).toBe(false);
+    expect(isPaginationRequested(new URLSearchParams("limit=5"))).toBe(true);
+    expect(isPaginationRequested(new URLSearchParams("cursor=abc"))).toBe(true);
+    expect(isPaginationRequested(new URLSearchParams("cursor="))).toBe(true);
+  });
+});
+
+describe("encodePageCursor / decodePageCursor", () => {
+  it("round-trips the sort timestamp and id", () => {
+    const cursor = encodePageCursor(new Date("2026-03-30T10:00:00.000Z"), 42);
+    expect(decodePageCursor(cursor)).toEqual({ u: "2026-03-30T10:00:00.000Z", i: 42 });
+  });
+
+  it("keeps millisecond precision, since updatedAt ties are common", () => {
+    const cursor = encodePageCursor(new Date("2026-03-30T10:00:00.123Z"), 7);
+    expect(decodePageCursor(cursor)?.u).toBe("2026-03-30T10:00:00.123Z");
+  });
+
+  it("produces a query-string-safe base64url token", () => {
+    // A payload whose bytes would otherwise use + / and = padding.
+    const cursor = encodePageCursor(new Date("2026-12-31T23:59:59.999Z"), 9007199254740991);
+    expect(cursor).not.toMatch(/[+/=]/);
+    expect(encodeURIComponent(cursor)).toBe(cursor);
+    expect(decodePageCursor(cursor)).not.toBeNull();
+  });
+
+  it("returns null instead of throwing for malformed input", () => {
+    expect(decodePageCursor("")).toBeNull();
+    expect(decodePageCursor("bm90LWEtY3Vyc29y")).toBeNull(); // "not-a-cursor"
+    expect(decodePageCursor("~~~not base64~~~")).toBeNull();
+    for (const payload of [
+      "null",
+      "42",
+      '"a string"',
+      "[1,2]",
+      "{}",
+      '{"u":"nope","i":1}',
+      '{"u":"2026-03-30T10:00:00Z","i":0}',
+      '{"u":"2026-03-30T10:00:00Z","i":-2}',
+      '{"u":"2026-03-30T10:00:00Z","i":1.5}',
+      '{"u":"2026-03-30T10:00:00Z"}',
+      '{"i":1}',
+    ]) {
+      expect(decodePageCursor(Buffer.from(payload, "utf8").toString("base64url"))).toBeNull();
+    }
+  });
+
+  it("ignores extra keys so the cursor format can grow", () => {
+    const raw = Buffer.from(
+      JSON.stringify({ u: "2026-03-30T10:00:00Z", i: 3, note: "forward compat" }),
+      "utf8",
+    ).toString("base64url");
+    expect(decodePageCursor(raw)).toEqual({ u: "2026-03-30T10:00:00Z", i: 3 });
+  });
+
+  it("accepts an offset timestamp and normalises it through keysetAfter", () => {
+    const raw = Buffer.from(
+      JSON.stringify({ u: "2026-03-30T12:00:00+02:00", i: 3 }),
+      "utf8",
+    ).toString("base64url");
+    const cursor = decodePageCursor(raw);
+    expect(cursor).not.toBeNull();
+    if (!cursor) return;
+    const [sortOnly] = orBranches(keysetAfter(cursor, "updatedAt"));
+    const range = sortOnly.updatedAt as { lt: Date };
+    expect(range.lt).toBeInstanceOf(Date);
+    expect(range.lt.toISOString()).toBe("2026-03-30T10:00:00.000Z");
+  });
+});
+
+describe("keysetAfter", () => {
+  const cursor = { u: "2026-03-30T10:00:00.000Z", i: 42 };
+
+  it("builds a descending strict-after predicate by default", () => {
+    expect(keysetAfter(cursor, "updatedAt")).toEqual({
+      OR: [
+        { updatedAt: { lt: new Date(cursor.u) } },
+        { updatedAt: new Date(cursor.u), id: { lt: 42 } },
+      ],
+    });
+  });
+
+  it("flips both comparisons for an ascending list", () => {
+    expect(keysetAfter(cursor, "createdAt", false)).toEqual({
+      OR: [
+        { createdAt: { gt: new Date(cursor.u) } },
+        { createdAt: new Date(cursor.u), id: { gt: 42 } },
+      ],
+    });
+  });
+
+  it("carries the id tie-breaker so same-timestamp rows are never skipped", () => {
+    const [sortOnly, sortPlusId] = orBranches(keysetAfter({ u: cursor.u, i: 1 }, "updatedAt"));
+    expect(sortOnly.updatedAt).toEqual({ lt: new Date(cursor.u) });
+    expect(sortPlusId.id).toEqual({ lt: 1 });
+  });
+});
+
+describe("textContains", () => {
+  const envKeys = ["DB_PROVIDER", "PRISMA_SCHEMA_PATH", "DATABASE_URL"] as const;
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = {};
+    for (const key of envKeys) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of envKeys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it("sends a bare contains on SQLite (mode is rejected there)", () => {
+    expect(textContains("title", "alpha")).toEqual({ title: { contains: "alpha" } });
+    expect(usesPostgresProvider()).toBe(false);
+  });
+
+  it("adds mode=insensitive when the provider resolves to Postgres", () => {
+    process.env.DB_PROVIDER = "postgresql";
+    expect(usesPostgresProvider()).toBe(true);
+    expect(textContains("name", "x")).toEqual({ name: { contains: "x", mode: "insensitive" } });
+
+    delete process.env.DB_PROVIDER;
+    process.env.PRISMA_SCHEMA_PATH = "prisma/schema.postgres.prisma";
+    expect(textContains("notes", "x")).toEqual({ notes: { contains: "x", mode: "insensitive" } });
+
+    delete process.env.PRISMA_SCHEMA_PATH;
+    process.env.DATABASE_URL = "postgresql://user:pw@localhost:5432/db";
+    expect(usesPostgresProvider()).toBe(true);
+  });
+
+  it("does not treat a sqlite URL containing the word postgres as Postgres", () => {
+    process.env.DB_PROVIDER = "sqlite";
+    process.env.DATABASE_URL = "file:./postgres-named.db";
+    expect(usesPostgresProvider()).toBe(false);
+  });
+
+  it("names the field it was given", () => {
+    expect(Object.keys(textContains("notes", "v"))).toEqual(["notes"]);
+  });
+});
+
+describe("dateWindowFilter", () => {
+  it("returns null when neither bound is provided", () => {
+    expect(dateWindowFilter("checkInTime")).toBeNull();
+    expect(dateWindowFilter("checkInTime", undefined, undefined)).toBeNull();
+  });
+
+  it("covers the whole `to` day by using an exclusive next-midnight bound", () => {
+    const filter = dateWindowFilter("checkInTime", "2026-01-05", "2026-01-06");
+    const window = (filter as { checkInTime: { gte: Date; lt: Date } }).checkInTime;
+    expect(window.gte).toBeInstanceOf(Date);
+    expect(window.lt.getTime() - window.gte.getTime()).toBe(2 * 86_400_000);
+  });
+
+  it("supports open-ended windows", () => {
+    expect(dateWindowFilter("checkInTime", "2026-01-05")).toEqual({
+      checkInTime: { gte: new Date("2026-01-05T00:00:00") },
+    });
+    const toOnly = dateWindowFilter("checkInTime", undefined, "2026-01-05") as {
+      checkInTime: { gte?: Date; lt: Date };
+    };
+    expect(toOnly.checkInTime.gte).toBeUndefined();
+    expect(toOnly.checkInTime.lt).toEqual(new Date("2026-01-06T00:00:00"));
+  });
+
+  it("builds the range on the field it was given", () => {
+    expect(Object.keys(dateWindowFilter("startedAt", "2026-01-01") ?? {})).toEqual(["startedAt"]);
+  });
+});
+
+describe("dropField", () => {
+  it("removes only the named column and keeps the payload key order", () => {
+    const row = { id: 1, title: "T", elapsedSeconds: 5, updatedAt: new Date(0) };
+    const stripped = dropField(row, "updatedAt");
+    expect(stripped).toEqual({ id: 1, title: "T", elapsedSeconds: 5 });
+    expect(Object.keys(stripped)).toEqual(["id", "title", "elapsedSeconds"]);
+  });
+
+  it("does not mutate the row it was given", () => {
+    const row = { id: 1, createdAt: new Date(0) };
+    dropField(row, "createdAt");
+    expect(row).toHaveProperty("createdAt");
+  });
+
+  it("is a no-op copy for an absent column", () => {
+    const row = { id: 1, name: "n" };
+    expect(dropField(row, "id")).toEqual({ name: "n" });
   });
 });

@@ -140,3 +140,22 @@ model JobAttendance {
   @@index([jobId])
   @@index([checkInTime])
 }
+
+// AI-02: scoped, revocable API tokens for agents / server-to-server callers.
+// Only the SHA-256 hash of the token is stored, never the plaintext.
+// `scope` is an enum-ish string kept as TEXT so both providers stay identical:
+// "read" authorizes GET only, "write" authorizes GET/POST/PATCH/DELETE. The two
+// allowed values are enforced by apiTokenCreateSchema in src/lib/validators.ts.
+model ApiToken {
+  id         Int       @id @default(autoincrement())
+  tokenHash  String    @unique
+  name       String
+  scope      String    @default("read")
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  @@index([revokedAt])
+  @@index([expiresAt])
+}

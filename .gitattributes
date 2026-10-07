@@ -1,0 +1,17 @@
+# Normalise line endings: the index always stores LF and every checkout gets LF,
+# so a Windows clone with core.autocrlf=true no longer reports phantom churn on
+# every file it touches.
+* text=auto eol=lf
+
+# Never rewrite binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.db binary
+*.sqlite binary
+*.woff binary
+*.woff2 binary

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, updateDbPassword, verifyCurrentPassword } from "@/lib/auth";
+import { requireAuth, requireWriteAccess, updateDbPassword, verifyCurrentPassword } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
 import { changePasswordSchema } from "@/lib/validators";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireAuth();
+    await requireAuth(request);
     // Ensure a UserSettings record exists (for auth and general settings)
     await prisma.userSettings.upsert({
       where: { id: 1 },
@@ -23,9 +23,9 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     // POST is currently unused - work schedules are now per-job
     return NextResponse.json({ ok: true });
   } catch (error) {
@@ -35,7 +35,7 @@ export async function POST() {
 
 export async function PATCH(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const json = await request.json();
     const parsed = changePasswordSchema.safeParse(json);
     if (!parsed.success) {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { formatElapsed } from "@/lib/business-time";
@@ -25,7 +25,7 @@ const scheduleSelect = { workStart: true, workEnd: true, workDays: true } as con
  */
 export async function POST(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
 
     const parsed = breakLogSchema.safeParse(
       await request.json().catch(() => null),

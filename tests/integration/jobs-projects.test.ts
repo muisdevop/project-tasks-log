@@ -21,14 +21,14 @@ import type { PrismaClient } from "@prisma/client";
 
 let ctx: TestDbContext;
 let prisma: PrismaClient;
-let jobsGet: () => Promise<Response>;
+let jobsGet: (request: Request) => Promise<Response>;
 let jobsPost: (req: Request) => Promise<Response>;
 let jobDetailGet: (req: NextRequest, ctxArg: { params: Promise<{ jobId: string }> }) => Promise<Response>;
 let jobDetailPatch: (
   req: NextRequest,
   ctxArg: { params: Promise<{ jobId: string }> },
 ) => Promise<Response>;
-let projectsGet: () => Promise<Response>;
+let projectsGet: (request: Request) => Promise<Response>;
 let projectsPost: (req: Request) => Promise<Response>;
 let projectDetailGet: (
   req: NextRequest,
@@ -83,7 +83,7 @@ const detailRequest = (urlPath: string, init?: { method?: string; body?: unknown
 describe("/api/jobs", () => {
   it("rejects unauthenticated GET/POST with 401", async () => {
     mockCookieState.reset();
-    expect((await jobsGet()).status).toBe(401);
+    expect((await jobsGet(apiRequest("/api/jobs"))).status).toBe(401);
     expect((await jobsPost(apiRequest("/api/jobs", { method: "POST", body: { name: "x" } }))).status).toBe(
       401,
     );
@@ -131,14 +131,14 @@ describe("/api/jobs", () => {
     expect(dup.status).toBe(409);
     expect(await jsonOf(dup)).toEqual({ error: "A job with this name already exists." });
 
-    const list = await jobsGet();
+    const list = await jobsGet(apiRequest("/api/jobs"));
     expect((await jsonOf(list)).jobs.map((j: { id: number }) => j.id)).toContain(job.id);
 
     // Archiving (what the client does via the jobs/[jobId] PATCH path today
     // is not exposed; settings page uses direct updates — mirror at DB level)
     // hides the job from the list but not from the detail route.
     await prisma.job.update({ where: { id: job.id }, data: { isArchived: true } });
-    const afterArchive = await jobsGet();
+    const afterArchive = await jobsGet(apiRequest("/api/jobs"));
     expect((await jsonOf(afterArchive)).jobs.map((j: { id: number }) => j.id)).not.toContain(job.id);
 
     const detail = await jobDetailGet(detailRequest(`/api/jobs/${job.id}`), {
@@ -221,7 +221,7 @@ describe("/api/jobs", () => {
 describe("/api/projects", () => {
   it("rejects unauthenticated GET/POST and detail GET with 401", async () => {
     mockCookieState.reset();
-    expect((await projectsGet()).status).toBe(401);
+    expect((await projectsGet(apiRequest("/api/projects"))).status).toBe(401);
     expect(
       (await projectsPost(apiRequest("/api/projects", { method: "POST", body: { name: "x" } }))).status,
     ).toBe(401);
@@ -428,7 +428,7 @@ describe("/api/projects", () => {
     const hidden = await prisma.project.create({
       data: { name: `Eta Gone ${slug}`, nameKey: `eta-gone-${slug}`, jobId: job.id, isArchived: true },
     });
-    const res = await projectsGet();
+    const res = await projectsGet(apiRequest("/api/projects"));
     const ids = ((await jsonOf(res)).projects as Array<{ id: number }>).map((p) => p.id);
     expect(ids).toContain(visible.id);
     expect(ids).not.toContain(hidden.id);

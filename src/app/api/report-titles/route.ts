@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
 
 const FALLBACK_TITLE = "Activity Report";
@@ -68,9 +68,9 @@ async function saveTitleState(tx: TxClient, options: string[], defaultTitle: str
   `;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireAuth();
+    await requireAuth(request);
     await ensureSettingsRow();
     const { options, defaultTitle } = await loadTitleState(prisma);
 
@@ -82,7 +82,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     await ensureSettingsRow();
 
     const body = (await request.json().catch(() => ({}))) as ReportTitlesPayload;

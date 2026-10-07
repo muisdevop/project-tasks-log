@@ -1,7 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
 import { jobUpdateSchema, toSlugKey } from "@/lib/validators";
 
@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireAuth(request);
     const { jobId: jobIdStr } = await params;
     const jobId = Number(jobIdStr);
 
@@ -45,7 +45,7 @@ export async function PATCH(
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const { jobId: jobIdStr } = await params;
     const jobId = Number(jobIdStr);
 

@@ -36,6 +36,16 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // AI-02: agent callers present `Authorization: Bearer <token>` and have no
+  // cookie, so redirecting them to the HTML login page would make the API
+  // unreachable for machines. Pass those requests to the route handler, where
+  // `authenticate()` verifies the digest (and answers 401/403/429 as JSON).
+  // Cookies are never consulted on this branch.
+  const authorization = request.headers.get("authorization") ?? "";
+  if (pathname.startsWith("/api/") && /^Bearer\s+\S+/i.test(authorization)) {
+    return NextResponse.next();
+  }
+
   const token = request.cookies.get(COOKIE_NAME)?.value;
   if (!token) {
     return redirectToLogin(request);

@@ -1,24 +1,98 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { projectSchema, toNameKey } from "@/lib/validators";
-import { requireAuth } from "@/lib/auth";
-import { toErrorResponse } from "@/lib/api-error";
+import {
+  decodePageCursor,
+  dropField,
+  encodePageCursor,
+  isPaginationRequested,
+  keysetAfter,
+  projectListQuerySchema,
+  projectSchema,
+  resolveListLimit,
+  textContains,
+  toNameKey,
+} from "@/lib/validators";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
+import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { invalidateStatsCache } from "@/lib/stats-cache";
 
-export async function GET() {
+const PROJECT_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  jobId: true,
+} as const;
+
+/**
+ * Query params of the incoming request. The handler stays callable without one
+ * (the integration suite invokes `GET()` directly), which means "no filters,
+ * no pagination" — the historical whole-table answer.
+ */
+function listParams(request?: Request): URLSearchParams {
+  return request ? new URL(request.url).searchParams : new URLSearchParams();
+}
+
+/**
+ * GET /api/projects
+ *
+ * MF-05: opt-in pagination + name search / job filter. Without
+ * `limit`/`cursor`/`q`/`jobId` the response stays exactly `{ "projects": [...] }`
+ * — every non-archived project, newest first — which is what the sidebar, the
+ * job pages and the existing tests consume.
+ *
+ * Query parameters
+ * - `q`      case-insensitive `name contains`.
+ * - `jobId`  positive integer; keeps only projects of that (non-archived) job.
+ * - `limit`  page size, 1..200 (values above 200 clamp), default 50.
+ * - `cursor` opaque base64url keyset cursor from a previous `nextCursor`.
+ *
+ * Response
+ * - unpaged -> `{ projects: Project[] }`
+ * - paged   -> `{ projects: Project[], nextCursor: string | null }`
+ *   (`nextCursor: null` on the last page; ordering `createdAt desc, id desc`).
+ */
+export async function GET(request?: Request) {
   try {
-    await requireAuth();
-    const projects = await prisma.project.findMany({
-      where: { isArchived: false },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        jobId: true,
-      },
-      orderBy: { createdAt: "desc" },
+    await requireAuth(request);
+
+    const params = listParams(request);
+    const parsed = projectListQuerySchema.safeParse(Object.fromEntries(params));
+    if (!parsed.success) {
+      throw new HttpError(400, "Invalid project list query.");
+    }
+    const { limit: rawLimit, cursor: rawCursor, q, jobId } = parsed.data;
+    const cursor = rawCursor !== undefined ? decodePageCursor(rawCursor) : null;
+    if (rawCursor !== undefined && !cursor) {
+      throw new HttpError(400, "Invalid cursor.");
+    }
+
+    const paginated = isPaginationRequested(params);
+    const limit = resolveListLimit(rawLimit);
+
+    const clauses: Record<string, unknown>[] = [{ isArchived: false }];
+    if (jobId) clauses.push({ job: { isArchived: false }, jobId });
+    if (q) clauses.push(textContains("name", q));
+    if (cursor) clauses.push(keysetAfter(cursor, "createdAt", true));
+    const where = { AND: clauses } as unknown as Prisma.ProjectWhereInput;
+
+    const rows = await prisma.project.findMany({
+      where,
+      select: { ...PROJECT_SELECT, createdAt: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: paginated ? limit + 1 : undefined,
     });
-    return NextResponse.json({ projects });
+
+    const page = paginated ? rows.slice(0, limit) : rows;
+    const last = page[page.length - 1];
+    const nextCursor =
+      paginated && rows.length > limit && last
+        ? encodePageCursor(last.createdAt, last.id)
+        : null;
+
+    const projects = page.map((project) => dropField(project, "createdAt"));
+
+    return NextResponse.json(paginated ? { projects, nextCursor } : { projects });
   } catch (error) {
     return toErrorResponse(error, "Failed to fetch projects.");
   }
@@ -26,7 +100,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const json = await request.json();
     const parsed = projectSchema.safeParse(json);
     if (!parsed.success) {
@@ -62,6 +136,8 @@ export async function POST(request: Request) {
         jobId: Number.isInteger(jobId) && jobId > 0 ? jobId : 1,
       },
     });
+    // PF-03: a job's `projectCount` on the dashboard just moved.
+    invalidateStatsCache();
     return NextResponse.json({ project }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {

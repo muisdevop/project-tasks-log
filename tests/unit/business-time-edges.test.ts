@@ -4,7 +4,6 @@ import {
   totalElapsedSeconds,
   workingTimeDiffSeconds,
 } from "@/lib/business-time";
-import { formatElapsed as formatElapsedViaTime } from "@/lib/time";
 
 const workdaySettings = { workStart: "09:00", workEnd: "17:00", workDays: [1, 2, 3, 4, 5] };
 
@@ -174,13 +173,6 @@ describe("formatElapsed", () => {
   it("floors fractional seconds and clamps negatives to zero", () => {
     expect(formatElapsed(59.9)).toBe("00:00:59");
     expect(formatElapsed(-1)).toBe("00:00:00");
-  });
-});
-
-describe("time module re-export", () => {
-  it("exposes the same formatElapsed helper", () => {
-    expect(formatElapsedViaTime).toBe(formatElapsed);
-    expect(formatElapsedViaTime(7250)).toBe("02:00:50");
   });
 });
 

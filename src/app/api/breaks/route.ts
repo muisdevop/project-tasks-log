@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
 import { breakSchema, breakUpdateSchema } from "@/lib/validators";
 
 export async function GET(request: Request) {
   try {
-    await requireAuth();
+    await requireAuth(request);
     const url = new URL(request.url);
     const jobId = Number(url.searchParams.get("jobId"));
 
@@ -58,7 +58,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
 
     const json = await request.json();
     const { jobId, ...breakData } = json;
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
 
     const json = await request.json();
     const parsed = breakUpdateSchema.safeParse(json);
@@ -119,7 +119,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
 
     const url = new URL(request.url);
     const id = Number(url.searchParams.get("id"));

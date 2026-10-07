@@ -5,7 +5,8 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-    issueAuthCookie,
+  apiRequest,
+  issueAuthCookie,
   loadPrisma,
   mockCookieState,
   setupTestDatabase,
@@ -16,7 +17,7 @@ import type { PrismaClient, TaskStatus } from "@prisma/client";
 
 let ctx: TestDbContext;
 let prisma: PrismaClient;
-let statsGet: () => Promise<Response>;
+let statsGet: (request: Request) => Promise<Response>;
 
 type StatsShape = {
   jobStats: Array<{
@@ -41,7 +42,16 @@ type StatsShape = {
   timeStats: {
     totalHours: number;
     byJob: Array<{ jobId: number; jobName: string; totalSeconds: number; totalHours: string }>;
-    byProject: Array<{ projectId: number; projectName: string; jobId: number }>;
+    // The route has always sent the full per-project time record; the earlier
+    // narrower literal here simply was never asserted on.
+    byProject: Array<{
+      projectId: number;
+      projectName: string;
+      jobId: number;
+      jobName: string;
+      totalSeconds: number;
+      totalHours: string;
+    }>;
   };
 };
 
@@ -128,7 +138,7 @@ afterAll(async () => {
 
 async function fetchStats(): Promise<StatsShape> {
   await issueAuthCookie(prisma);
-  const res = await statsGet();
+  const res = await statsGet(apiRequest("/api/stats"));
   expect(res.status).toBe(200);
   return res.json();
 }
@@ -136,7 +146,7 @@ async function fetchStats(): Promise<StatsShape> {
 describe("/api/stats", () => {
   it("rejects unauthenticated requests with 401 (BG-06)", async () => {
     mockCookieState.reset();
-    const res = await statsGet();
+    const res = await statsGet(apiRequest("/api/stats"));
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Unauthorized" });
   });
@@ -193,10 +203,46 @@ describe("/api/stats", () => {
     expect(projectIds.has(statsFixture.emptyProjectId)).toBe(false);
   });
 
+  it("caches the aggregation but never past a data change (PF-02/PF-03)", async () => {
+    const before = await fetchStats();
+    expect(before.taskStats.total).toBe(4);
+
+    const { dashboardStatsCache, STATS_TTL_MS } = await import("@/lib/stats-cache");
+    // The payload is now in the short-TTL cache...
+    expect(dashboardStatsCache.snapshot().cached).toBe(true);
+    expect(STATS_TTL_MS).toBeLessThanOrEqual(10_000);
+
+    // ...written straight through Prisma, i.e. by a mutation route that does
+    // not call invalidateStatsCache(). The data watermark, not the TTL, has to
+    // make the next read correct — otherwise the dashboard would be stale.
+    await prisma.task.create({
+      data: {
+        projectId: statsFixture.projectId,
+        title: "Written straight to the database",
+        status: "on_hold",
+        startedAt: new Date(2026, 2, 31, 12, 0),
+        elapsedSeconds: 90,
+      },
+    });
+
+    const after = await fetchStats();
+    expect(after.taskStats.total).toBe(5);
+    expect(after.taskStats.onHold).toBe(2);
+    expect(after.taskStats.withoutSubtasks).toBe(4);
+    expect(after.jobStats[0]!.taskCount).toBe(5);
+    expect(after.jobStats[0]!.totalSeconds).toBe(6090);
+    expect(after.timeStats.byProject[0]!.totalSeconds).toBe(6090);
+
+    // Roll the fixture back so the suite's remaining expectations hold.
+    await prisma.task.deleteMany({ where: { title: "Written straight to the database" } });
+    const rolledBack = await fetchStats();
+    expect(rolledBack.taskStats.total).toBe(4);
+  });
+
   it("an empty database yields all-zero stats (fresh suite ordering safe)", async () => {
     await issueAuthCookie(prisma);
     await prisma.task.deleteMany({});
-    const res = await statsGet();
+    const res = await statsGet(apiRequest("/api/stats"));
     const stats = (await res.json()) as StatsShape;
     expect(stats.taskStats).toEqual({
       total: 0,

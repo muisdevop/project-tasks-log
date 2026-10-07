@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
 import { projectUpdateSchema, toNameKey } from "@/lib/validators";
 
@@ -25,7 +25,7 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   try {
-    await requireAuth();
+    await requireAuth(request);
     const { projectId: projectIdStr } = await params;
     const projectId = parseProjectId(projectIdStr);
 
@@ -49,7 +49,7 @@ export async function PATCH(
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const { projectId: projectIdStr } = await params;
     const projectId = parseProjectId(projectIdStr);
 

@@ -203,6 +203,8 @@ bulk import. Those are tracked as `AI-02` and `AI-03` in the audit backlog.
   with a `/api/health` HEALTHCHECK.
 - Post-login redirects go through `safeRedirectTarget()`, which rejects absolute,
   protocol-relative and backslash tricks.
+- Detailed posture (API tokens, rate-limit budgets, idempotency, security events,
+  CSRF limits): `docs/security.md`.
 
 ## Testing
 

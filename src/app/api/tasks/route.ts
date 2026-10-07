@@ -1,11 +1,23 @@
 import { Prisma, type TaskStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
-import { taskActionSchema, taskCreateSchema } from "@/lib/validators";
+import {
+  decodePageCursor,
+  dropField,
+  encodePageCursor,
+  isPaginationRequested,
+  keysetAfter,
+  resolveListLimit,
+  taskActionSchema,
+  taskCreateSchema,
+  taskListQuerySchema,
+  textContains,
+} from "@/lib/validators";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { invalidateStatsCache } from "@/lib/stats-cache";
 import { sanitizeHtml } from "@/lib/sanitize";
 
 function appendLogNote(
@@ -27,33 +39,85 @@ function appendLogNote(
 
 const scheduleSelect = { workStart: true, workEnd: true, workDays: true } as const;
 
+/**
+ * GET /api/tasks
+ *
+ * MF-05: opt-in pagination + server-side search/filter. The contract is
+ * strictly additive — with only `projectId` (or only `jobId`) the response is
+ * byte-identical to before: `{ "tasks": [...] }` holding every matching row.
+ *
+ * Query parameters
+ * - `projectId` required unless `jobId` is sent; 400 when missing/invalid, 404
+ *   when the project does not exist (unchanged).
+ * - `jobId`     optional. Alone it lists every task in that job's
+ *               non-archived projects; together with `projectId` it additionally
+ *               asserts the project belongs to the job (404 "Job not found."
+ *               when it does not).
+ * - `status`    one of `in_progress | on_hold | completed | cancelled`.
+ * - `q`         case-insensitive `title contains` (Postgres gets
+ *               `mode: insensitive`, SQLite folds ASCII case natively).
+ * - `limit`     page size, 1..200; values above 200 clamp to 200, default 50.
+ * - `cursor`    opaque base64url keyset cursor previously returned as
+ *               `nextCursor` (order is `updatedAt desc, id desc`).
+ *
+ * Response
+ * - no `limit`/`cursor`  -> `{ tasks: Task[] }`                     (as today)
+ * - `limit` and/or cursor -> `{ tasks: Task[], nextCursor: string | null }`
+ *   with `nextCursor: null` on the last page. Invalid `limit`/`cursor`/`status`
+ *   is a 400 with `{ error }`.
+ */
 export async function GET(request: Request) {
   try {
-    await requireAuth();
+    await requireAuth(request);
     const url = new URL(request.url);
-    const projectId = Number(url.searchParams.get("projectId"));
-    if (!Number.isInteger(projectId) || projectId <= 0) {
-      return NextResponse.json({ error: "Invalid projectId." }, { status: 400 });
+    const params = url.searchParams;
+
+    const parsed = taskListQuerySchema.safeParse(Object.fromEntries(params));
+    if (!parsed.success) {
+      throw new HttpError(400, "Invalid task list query.");
+    }
+    const { limit: rawLimit, cursor: rawCursor, q, status, jobId } = parsed.data;
+
+    const rawProjectId = params.get("projectId");
+    const hasProjectId = rawProjectId !== null && rawProjectId !== "";
+    const projectId = Number(rawProjectId);
+
+    // Scope resolution keeps the historical error contract exactly: a missing
+    // or malformed `projectId` (and no `jobId` to scope by) is the same 400,
+    // an unknown project the same 404.
+    if (!hasProjectId && !jobId) {
+      throw new HttpError(400, "Invalid projectId.");
+    }
+    if (hasProjectId && (!Number.isInteger(projectId) || projectId <= 0)) {
+      throw new HttpError(400, "Invalid projectId.");
     }
 
     // Get the project and its associated job for work schedule
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { jobId: true },
-    });
-
-    if (!project) {
-      return NextResponse.json({ error: "Project not found." }, { status: 404 });
+    let scheduleJobId: number;
+    if (hasProjectId) {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { jobId: true },
+      });
+      if (!project) {
+        throw new HttpError(404, "Project not found.");
+      }
+      if (jobId && project.jobId !== jobId) {
+        throw new HttpError(404, "Job not found.");
+      }
+      scheduleJobId = project.jobId;
+    } else {
+      // The guard above only lets us here when `jobId` is a positive integer.
+      scheduleJobId = jobId as number;
     }
 
-    // Get job work schedule
     const job = await prisma.job.findUnique({
-      where: { id: project.jobId },
+      where: { id: scheduleJobId },
       select: scheduleSelect,
     });
 
     if (!job) {
-      return NextResponse.json({ error: "Job not found." }, { status: 404 });
+      throw new HttpError(404, "Job not found.");
     }
 
     const now = new Date();
@@ -61,9 +125,28 @@ export async function GET(request: Request) {
       ? (job.workDays as unknown as number[])
       : [1, 2, 3, 4, 5];
 
-    const tasks = await prisma.task.findMany({
-      where: { projectId },
+    const paginated = isPaginationRequested(params);
+    const limit = resolveListLimit(rawLimit);
+
+    const cursor = rawCursor !== undefined ? decodePageCursor(rawCursor) : null;
+    if (rawCursor !== undefined && !cursor) {
+      throw new HttpError(400, "Invalid cursor.");
+    }
+
+    // `Record<string, unknown>` fragments (see textContains) are widened to the
+    // generated where type once, at the query boundary.
+    const clauses: Record<string, unknown>[] = [
+      hasProjectId ? { projectId } : { project: { jobId, isArchived: false } },
+    ];
+    if (status) clauses.push({ status });
+    if (q) clauses.push(textContains("title", q));
+    if (cursor) clauses.push(keysetAfter(cursor, "updatedAt", true));
+    const where = { AND: clauses } as unknown as Prisma.TaskWhereInput;
+
+    const rows = await prisma.task.findMany({
+      where,
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: paginated ? limit + 1 : undefined,
       select: {
         id: true,
         title: true,
@@ -75,6 +158,8 @@ export async function GET(request: Request) {
         completionOutput: true,
         cancellationReason: true,
         logNotes: true,
+        // Sort key for the keyset cursor; stripped from the payload below.
+        updatedAt: true,
         subtasks: {
           select: {
             id: true,
@@ -86,7 +171,15 @@ export async function GET(request: Request) {
       },
     });
 
-    const tasksWithCurrentElapsed = tasks.map((task) => {
+    const page = paginated ? rows.slice(0, limit) : rows;
+    const hasMore = paginated && rows.length > limit;
+    const last = page[page.length - 1];
+    const nextCursor =
+      paginated && hasMore && last ? encodePageCursor(last.updatedAt, last.id) : null;
+
+    const tasksWithCurrentElapsed = page.map((row) => {
+      // The cursor column is internal to the page (see `dropField`).
+      const task = dropField(row, "updatedAt");
       if (task.status !== "in_progress") {
         const fallbackElapsed =
           task.elapsedSeconds === 0 && task.endedAt
@@ -123,7 +216,9 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json({ tasks: tasksWithCurrentElapsed });
+    return NextResponse.json(
+      paginated ? { tasks: tasksWithCurrentElapsed, nextCursor } : { tasks: tasksWithCurrentElapsed },
+    );
   } catch (error) {
     return toErrorResponse(error, "Unable to fetch tasks.");
   }
@@ -131,7 +226,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const parsed = taskCreateSchema.safeParse(
       await request.json().catch(() => null),
     );
@@ -216,6 +311,10 @@ export async function POST(request: Request) {
       });
     });
 
+    // PF-03: a task was created (and possibly an active one banked on hold), so
+    // the cached dashboard aggregate is dropped right away.
+    invalidateStatsCache();
+
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
     if (
@@ -244,7 +343,7 @@ const ACTION_GUARD_MESSAGES = {
 
 export async function PATCH(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const parsed = taskActionSchema.safeParse(
       await request.json().catch(() => null),
     );
@@ -381,6 +480,10 @@ export async function PATCH(request: Request) {
 
       return tx.task.findUnique({ where: { id: task.id } });
     });
+
+    // PF-03: status/elapsed-time moved, so the cached dashboard aggregate is
+    // dropped instead of waiting out its TTL.
+    invalidateStatsCache();
 
     return NextResponse.json({ task: updated });
   } catch (error) {

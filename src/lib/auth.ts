@@ -1,12 +1,35 @@
 import bcrypt from "bcryptjs";
 import { getSessionUsername } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import {
+  assertBucketRateLimit,
+  checkRateLimit,
+  clientIp,
+  RateLimitedError,
+} from "@/lib/rate-limit";
+import { logSecurityEvent } from "@/lib/security-events";
+import { verifyApiToken, type ApiScope } from "@/lib/api-tokens";
 
 /** Thrown by requireAuth so route handlers can map auth failures to 401 precisely. */
 export class UnauthorizedError extends Error {
   constructor() {
     super("Unauthorized");
     this.name = "UnauthorizedError";
+  }
+}
+
+/**
+ * Authenticated, but not allowed to do this (a `read` token calling a mutating
+ * route, or a token touching the cookie-only token manager). Defined here, not
+ * in api-error.ts, because api-error.ts already imports this module: a reverse
+ * import would make the two files a cycle that resolves classes at load time.
+ */
+export class ForbiddenError extends Error {
+  readonly status = 403;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ForbiddenError";
   }
 }
 
@@ -21,8 +44,17 @@ export class AuthNotConfiguredError extends Error {
 /** Current OWASP-recommended cost floor (SEC-10). */
 export const BCRYPT_COST = 12;
 
+/** A `Bearer` token is presented this many times from one IP in 5 minutes. */
+const TOKEN_REJECT_LIMIT = 30;
+const TOKEN_REJECT_WINDOW_MS = 5 * 60_000;
+
 function getExpectedUsername(): string {
   return process.env.APP_USERNAME ?? "admin";
+}
+
+/** The acting identity for every credential: this app has exactly one owner. */
+export function expectedUsername(): string {
+  return getExpectedUsername();
 }
 
 /**
@@ -125,12 +157,129 @@ export async function updateDbPassword(newPassword: string): Promise<void> {
   });
 }
 
-export async function requireAuth(): Promise<string> {
+/** Who (or what) authenticated a request. */
+export type AuthContext = {
+  /** The single-user owner's username, for both credential kinds. */
+  actor: string;
+  /** `session` = browser cookie, `token` = `Authorization: Bearer` (AI-02). */
+  via: "session" | "token";
+  /** Cookie sessions keep full power; tokens are capped by their stored scope. */
+  scope: ApiScope;
+  /** ApiToken row id for Bearer callers, null for the cookie path. */
+  tokenId: number | null;
+  ip: string;
+};
+
+/** Reads `Authorization: Bearer <token>` without ever echoing it onward. */
+export function bearerTokenOf(request?: Request): string | null {
+  if (!request) return null;
+  const header = request.headers.get("authorization");
+  if (!header) return null;
+  const [scheme, ...rest] = header.trim().split(/\s+/);
+  if (!scheme || scheme.toLowerCase() !== "bearer") return null;
+  const value = rest.join(" ").trim();
+  return value || null;
+}
+
+/**
+ * Authentication resolution order (AI-02) — the first match wins:
+ *
+ * 1. `Authorization: Bearer <token>` (when the handler forwarded its `Request`)
+ *    → SHA-256 digest lookup + constant-time compare, then revoked/expired
+ *    checks, then a throttled `lastUsedAt`, then the per-token rate limiter.
+ *    Rejections are security events; repeated rejections from one IP escalate
+ *    to 429 rather than burning more database lookups.
+ * 2. The `stl_session` cookie, verified exactly as before (`getSessionUsername`,
+ *    token-version revocation). Unchanged and Bearer-independent, so a handler
+ *    that does not forward its `Request` behaves precisely as it did before.
+ * 3. Nothing → `null` (callers map it to 401).
+ *
+ * A request carrying both is treated as the token it presents: machine
+ * credentials win so an agent cannot inherit the browser's full-power session.
+ */
+export async function authenticate(request?: Request): Promise<AuthContext | null> {
+  const ip = request ? clientIp(request) : "unknown";
+  const bearer = bearerTokenOf(request);
+
+  if (bearer) {
+    const verified = await verifyApiToken(bearer, ip);
+    if (!verified.ok) {
+      // Count the rejection; past the budget, stop burning database lookups on
+      // this IP and answer 429 instead of an endless stream of 401s (AI-03).
+      const blocked = checkRateLimit(
+        `token-reject:ip:${ip}`,
+        TOKEN_REJECT_LIMIT,
+        TOKEN_REJECT_WINDOW_MS,
+      );
+      if (!blocked.ok) {
+        logSecurityEvent({ evt: "token.rate_limited", ip, detail: "too_many_rejections" });
+        throw new RateLimitedError(blocked.retryAfterSeconds, "Too many rejected tokens.");
+      }
+      return null;
+    }
+    const tokenId = verified.token.id;
+    const scope: ApiScope = verified.token.scope === "write" ? "write" : "read";
+    assertBucketRateLimit({ tokenId, ip }, "api");
+    return { actor: getExpectedUsername(), via: "token", scope, tokenId, ip };
+  }
+
   const username = await getSessionUsername();
   if (!username) {
+    return null;
+  }
+  return { actor: username, via: "session", scope: "write", tokenId: null, ip };
+}
+
+/**
+ * House guard for every protected route. Returns the acting username, so the
+ * existing `await requireAuth()` / `const username = await requireAuth()` call
+ * sites keep working; pass the handler's `Request` to also accept Bearer tokens.
+ */
+export async function requireAuth(request?: Request): Promise<string> {
+  const context = await requireAuthContext(request);
+  return context.actor;
+}
+
+export async function requireAuthContext(request?: Request): Promise<AuthContext> {
+  const context = await authenticate(request);
+  if (!context) {
     throw new UnauthorizedError();
   }
-  return username;
+  return context;
+}
+
+/** Guard for mutating routes: a `read` token gets 403, a cookie session passes. */
+export async function requireWriteAccess(request?: Request): Promise<AuthContext> {
+  const context = await requireAuthContext(request);
+  if (context.scope !== "write") {
+    logSecurityEvent({
+      evt: "token.rejected",
+      actor: context.actor,
+      ip: context.ip,
+      detail: { reason: "read_scope_on_write_route", tokenId: context.tokenId },
+    });
+    throw new ForbiddenError("This API token is read-only.");
+  }
+  return context;
+}
+
+/**
+ * Cookie-only guard for the token manager (AI-02): an API token must never be
+ * able to mint, list or revoke another token, otherwise one leaked read token
+ * escalates into full control.
+ */
+export async function requireSessionAuth(request?: Request): Promise<string> {
+  if (bearerTokenOf(request)) {
+    logSecurityEvent({
+      evt: "token.mint_denied",
+      ip: request ? clientIp(request) : "unknown",
+      detail: "token_used_on_session_only_route",
+    });
+    throw new ForbiddenError(
+      "API tokens cannot manage API tokens. Use the browser session cookie.",
+    );
+  }
+  return requireAuth();
 }
 
 /**

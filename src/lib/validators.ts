@@ -166,3 +166,209 @@ export function toSlugKey(name: string): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 }
+
+/* ------------------------------------------------------------------ *
+ * MF-05 — opt-in pagination, search and filtering for the list routes.
+ *
+ * Every list route answers EXACTLY as before when none of these params is
+ * sent; the page contract below is strictly additive so the existing UI and
+ * integration tests keep working untouched.
+ * ------------------------------------------------------------------ */
+
+/** Ceiling for a caller-supplied `limit`: bigger requests are clamped, not rejected. */
+export const LIST_MAX_LIMIT = 200;
+/** Page size when a caller asks for pagination but does not name a `limit`. */
+export const LIST_DEFAULT_LIMIT = 50;
+
+/** Params shared by every paginated list route. `limit` must be a positive
+ * integer, so `?limit=0` / `?limit=abc` are a client bug and get a 400 rather
+ * than silently meaning "the default page size". */
+export const listQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional(),
+  cursor: z.string().trim().min(1).max(1024).optional(),
+  /** Lightweight contains-search term (title/name depending on the route). */
+  q: z.string().trim().min(1).max(200).optional(),
+});
+
+/** Server-side filter for `/api/tasks` besides the shared page params. */
+export const taskListQuerySchema = listQuerySchema.extend({
+  status: z.enum(["in_progress", "on_hold", "completed", "cancelled"]).optional(),
+  jobId: z.coerce.number().int().positive().optional(),
+});
+
+/** Server-side filter for `/api/projects` besides the shared page params. */
+export const projectListQuerySchema = listQuerySchema.extend({
+  jobId: z.coerce.number().int().positive().optional(),
+});
+
+/** `/api/attendance` history window besides the shared page params. */
+export const attendanceListQuerySchema = listQuerySchema.extend({
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+});
+
+/** Effective page size: the default when unpaged, clamped to {@link LIST_MAX_LIMIT}. */
+export function resolveListLimit(raw: number | undefined): number {
+  if (raw === undefined) return LIST_DEFAULT_LIMIT;
+  return Math.min(raw, LIST_MAX_LIMIT);
+}
+
+/** True when the caller opted into pagination by sending `limit` and/or `cursor`. */
+export function isPaginationRequested(params: URLSearchParams): boolean {
+  return params.has("limit") || params.has("cursor");
+}
+
+/**
+ * Opaque keyset cursor: `u` is the row's sort column (always a DateTime for the
+ * lists here, serialised as ISO-8601) and `i` the row id tie-breaker. Base64url
+ * keeps it query-string safe; it is opaque to clients on purpose, so its exact
+ * encoding may change as long as `encode`/`decode` stay in step.
+ */
+export const pageCursorSchema = z.object({
+  u: z.string().datetime({ offset: true }),
+  i: z.number().int().positive(),
+});
+
+export type PageCursor = z.infer<typeof pageCursorSchema>;
+
+export function encodePageCursor(sortValue: Date, id: number): string {
+  const payload: PageCursor = { u: sortValue.toISOString(), i: id };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+/** Returns `null` for a malformed, truncated or foreign cursor — routes map that to 400. */
+export function decodePageCursor(raw: string): PageCursor | null {
+  try {
+    const json = Buffer.from(raw, "base64url").toString("utf8");
+    const parsed: unknown = JSON.parse(json);
+    const result = pageCursorSchema.safeParse(parsed);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keyset predicate selecting the rows strictly after `cursor` for a two-column
+ * ordering (`sortField`, then `id` as the tie-breaker) where both columns share
+ * a direction. This is why there is no OFFSET here: an opaque cursor stays
+ * correct while rows are inserted/updated underneath a scrolling reader, and it
+ * keeps SQLite from having to scan the skipped prefix.
+ */
+export function keysetAfter(
+  cursor: PageCursor,
+  sortField: string,
+  descending = true,
+): Record<string, unknown> {
+  const cmp = descending ? "lt" : "gt";
+  const at = new Date(cursor.u);
+  return {
+    OR: [
+      { [sortField]: { [cmp]: at } },
+      { [sortField]: at, id: { [cmp]: cursor.i } },
+    ],
+  };
+}
+
+/**
+ * Provider-aware `contains`. SQLite folds ASCII case in LIKE, so a plain
+ * `contains` is already case-insensitive there; Postgres is case-sensitive and
+ * needs `mode: "insensitive"` — which the SQLite query engine rejects outright,
+ * hence the branch (it mirrors the provider resolution in src/lib/prisma.ts).
+ */
+export function usesPostgresProvider(): boolean {
+  const provider = (process.env.DB_PROVIDER || "").toLowerCase();
+  if (provider.startsWith("postgres")) return true;
+  const schemaPath = (process.env.PRISMA_SCHEMA_PATH || "").toLowerCase();
+  if (schemaPath.includes("postgres")) return true;
+  return (process.env.DATABASE_URL || "").trim().toLowerCase().startsWith("postgres");
+}
+
+/**
+ * Builds `{ <field>: { contains: value } }` (plus `mode` on Postgres). The
+ * return type is deliberately loose: the generated `Prisma.*WhereInput` types
+ * differ between the SQLite and Postgres clients, so routes take this fragment
+ * and cast it once at the query boundary.
+ */
+export function textContains(field: string, value: string): Record<string, unknown> {
+  const filter: Record<string, unknown> = { contains: value };
+  if (usesPostgresProvider()) filter.mode = "insensitive";
+  return { [field]: filter };
+}
+
+/**
+ * Day-granular window filter `[from 00:00 local, to+1day 00:00 local)` on a
+ * DateTime column, or null when the caller named no dates. `to` covers its
+ * whole day, matching how the attendance route bounds "today".
+ */
+export function dateWindowFilter(
+  field: string,
+  from?: string,
+  to?: string,
+): Record<string, unknown> | null {
+  const range: Record<string, unknown> = {};
+  if (from) range.gte = new Date(`${from}T00:00:00`);
+  if (to) range.lt = new Date(new Date(`${to}T00:00:00`).getTime() + 86_400_000);
+  return Object.keys(range).length ? { [field]: range } : null;
+}
+
+/**
+ * Shallow copy of `row` without `field`, keeping the original key order.
+ *
+ * List routes select their keyset sort column (`updatedAt` / `createdAt`) only
+ * to build `nextCursor`; the rows themselves must keep the exact shape the
+ * pre-pagination version returned, so the column is dropped here. The obvious
+ * `({ [field]: _drop, ...rest })` destructure is a lint error (unused binding),
+ * hence the helper.
+ */
+export function dropField<T extends object, K extends keyof T>(row: T, field: K): Omit<T, K> {
+  const copy = { ...row } as Record<string, unknown>;
+  delete copy[String(field)];
+  return copy as Omit<T, K>;
+}
+
+/* ------------------------------------------------------------------ *
+ * AI-02 — API token management (`/api/tokens`).
+ *
+ * The values are written as literals here on purpose: validators.ts is loaded
+ * by `scripts/generate-openapi.ts` in a bare Node process, so it must not pull
+ * in a module that touches Prisma. `src/lib/api-tokens.ts` owns the matching
+ * `ApiScope` type and the digest rules.
+ * ------------------------------------------------------------------ */
+
+/** `read` = GET only; `write` = GET/POST/PATCH/DELETE. Revoke to stop it now. */
+export const API_TOKEN_SCOPES = ["read", "write"] as const;
+
+export const apiTokenCreateSchema = z
+  .object({
+    name: z.string().trim().min(3).max(60),
+    scope: z.enum(API_TOKEN_SCOPES).default("read"),
+    /** Optional ISO-8601 expiry (must be in the future). Never-past tokens only. */
+    expiresAt: z.string().datetime({ offset: true }).nullish(),
+  })
+  .refine(
+    (value) =>
+      value.expiresAt === undefined ||
+      value.expiresAt === null ||
+      new Date(value.expiresAt).getTime() > Date.now(),
+    { message: "expiresAt must be in the future.", path: ["expiresAt"] },
+  );
+
+/**
+ * PATCH is the rename/revocation surface. Setting `revoke: true` stamps
+ * `revokedAt` and is final — a revoked token is never un-revoked, so there is no
+ * `unrevoke`.
+ */
+export const apiTokenUpdateSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().trim().min(3).max(60).optional(),
+    revoke: z.boolean().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.revoke !== undefined, {
+    message: "Provide a new name or set revoke.",
+  });
+
+/** `?id=` on DELETE /api/tokens. */
+export const apiTokenIdSchema = z.object({ id: z.coerce.number().int().positive() });
+

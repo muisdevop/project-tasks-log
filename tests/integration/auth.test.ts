@@ -174,7 +174,7 @@ describe("/api/auth/login", () => {
     // Existing valid cookie, but the secret becomes unusable.
     await issueAuthCookie(prisma);
     process.env.SESSION_SECRET = "short";
-    const settingsRes = await settingsGet();
+    const settingsRes = await settingsGet(apiRequest("/api/settings"));
     expect(settingsRes.status).toBe(401);
 
     silenceConsole();
@@ -209,14 +209,14 @@ describe("/api/auth/logout", () => {
 
     // SEC-06: the captured old token must no longer authenticate.
     mockCookieState.jar.set(COOKIE_NAME, token);
-    const guarded = await settingsGet();
+    const guarded = await settingsGet(apiRequest("/api/settings"));
     expect(guarded.status).toBe(401);
   });
 });
 
 describe("protected routes reject missing/tampered/expired sessions", () => {
   it("GET /api/settings without a cookie is 401", async () => {
-    const res = await settingsGet();
+    const res = await settingsGet(apiRequest("/api/settings"));
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Unauthorized" });
   });
@@ -229,29 +229,29 @@ describe("protected routes reject missing/tampered/expired sessions", () => {
     ).toString("base64url");
     const tampered = payload.slice(0, -4) + "aaaa";
     mockCookieState.jar.set(COOKIE_NAME, `${header}.${forged}.${signature}`);
-    const res = await settingsGet();
+    const res = await settingsGet(apiRequest("/api/settings"));
     expect(res.status).toBe(401);
     mockCookieState.jar.set(COOKIE_NAME, `${header}.${tampered}.${signature}`);
-    expect((await settingsGet()).status).toBe(401);
+    expect((await settingsGet(apiRequest("/api/settings"))).status).toBe(401);
   });
 
   it("expired cookie is 401", async () => {
     const token = await createSessionToken(TEST_USERNAME, 1, process.env.SESSION_SECRET, -60);
     mockCookieState.jar.set(COOKIE_NAME, token);
-    const res = await settingsGet();
+    const res = await settingsGet(apiRequest("/api/settings"));
     expect(res.status).toBe(401);
   });
 
   it("signed with the wrong secret is 401", async () => {
     const token = await createSessionToken(TEST_USERNAME, 1, "another-secret-value-1234567890");
     mockCookieState.jar.set(COOKIE_NAME, token);
-    const res = await settingsGet();
+    const res = await settingsGet(apiRequest("/api/settings"));
     expect(res.status).toBe(401);
   });
 
   it("valid cookie passes the session check", async () => {
     await issueAuthCookie(prisma);
-    const res = await settingsGet();
+    const res = await settingsGet(apiRequest("/api/settings"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
   });
@@ -301,7 +301,7 @@ describe("/api/settings PATCH (change password)", () => {
     expect(res.status).toBe(200);
 
     mockCookieState.jar.set(COOKIE_NAME, oldToken);
-    expect((await settingsGet()).status).toBe(401);
+    expect((await settingsGet(apiRequest("/api/settings"))).status).toBe(401);
 
     const { validateLogin } = await import("@/lib/auth");
     await resetLoginRateLimits();
@@ -316,15 +316,15 @@ describe("/api/settings PATCH (change password)", () => {
   it("POST /api/settings is the unused work-schedule stub (200 when authed)", async () => {
     await issueAuthCookie(prisma);
     const settingsPost = (await import("@/app/api/settings/route")).POST;
-    expect((await settingsPost()).status).toBe(200);
+    expect((await settingsPost(apiRequest("/api/settings", { method: "POST" }))).status).toBe(200);
     clearAuthCookie();
-    expect((await settingsPost()).status).toBe(401);
+    expect((await settingsPost(apiRequest("/api/settings", { method: "POST" }))).status).toBe(401);
   });
 });
 
 describe("/api/profile", () => {
   it("401 when unauthenticated (GET)", async () => {
-    expect((await profileGet()).status).toBe(401);
+    expect((await profileGet(apiRequest("/api/profile"))).status).toBe(401);
   });
 
   it("rejects unauthenticated PATCHes with 401", async () => {
@@ -355,7 +355,7 @@ describe("/api/profile", () => {
     const patched = await patch.json();
     expect(patched.profile.fullName).toBe("Test Person");
 
-    const get = await profileGet();
+    const get = await profileGet(apiRequest("/api/profile"));
     expect(get.status).toBe(200);
     const data = await get.json();
     expect(data.profile.email).toBe("t@example.com");
@@ -365,7 +365,7 @@ describe("/api/profile", () => {
 
 describe("/api/report-titles", () => {
   it("401 when unauthenticated and 400 without an action", async () => {
-    expect((await reportTitlesGet()).status).toBe(401);
+    expect((await reportTitlesGet(apiRequest("/api/report-titles"))).status).toBe(401);
     await issueAuthCookie(prisma);
     const res = await reportTitlesPatch(
       apiRequest("/api/report-titles", { method: "PATCH", body: {} }),
@@ -376,7 +376,7 @@ describe("/api/report-titles", () => {
 
   it("add/update/remove/set-default with duplicate detection", async () => {
     await issueAuthCookie(prisma);
-    const initial = await reportTitlesGet();
+    const initial = await reportTitlesGet(apiRequest("/api/report-titles"));
     expect(initial.status).toBe(200);
     const initialData = await initial.json();
     expect(initialData.options).toEqual(["Activity Report"]);

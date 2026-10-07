@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
 import { userProfileSchema } from "@/lib/validators";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const username = await requireAuth();
+    const username = await requireAuth(request);
 
     await prisma.userSettings.upsert({
       where: { id: 1 },
@@ -41,7 +41,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const json = await request.json();
     const parsed = userProfileSchema.safeParse(json);
 
