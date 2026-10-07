@@ -207,6 +207,49 @@ export const attendanceListQuerySchema = listQuerySchema.extend({
   to: isoDateSchema.optional(),
 });
 
+/**
+ * `/api/subtasks` per-task list besides the shared page params (MF-05, second
+ * wave). `taskId` stays route-validated so its historical 400 body survives.
+ * `isCompleted` only accepts the literal query strings "true"/"false":
+ * `z.coerce.boolean()` would turn "false" into `true` (any non-empty string is
+ * truthy), which is exactly the kind of silent filter inversion this contract
+ * must not acquire.
+ */
+export const subtaskListQuerySchema = listQuerySchema.extend({
+  isCompleted: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+});
+
+/**
+ * Query string of `DELETE /api/tasks/{taskId}` (MD-01 hard-delete cleanup).
+ * `hard` is deliberately an enum of the two literal strings: absent, `1`,
+ * `yes` or `TRUE` all mean "not an explicit confirmation" and the route then
+ * refuses. There is intentionally no soft-delete on this route — soft-delete
+ * semantics live in the task statuses (completed/cancelled) that the UI reads.
+ */
+export const taskHardDeleteQuerySchema = z.object({
+  hard: z.enum(["true", "false"]).optional(),
+});
+
+/**
+ * MF-04: query string of `GET /api/admin/events`. The audit trail has always
+ * been written to `TaskEvent`; it was simply never readable. These are the only
+ * filters an operator needs to make sense of that table, and every one of them
+ * is server-side (no client filtering of a huge feed).
+ *
+ * `eventType` mirrors the `TaskEventType` enum exactly, so a typo is a 400
+ * rather than an invisible empty result. Ids are positive integers for the same
+ * reason: `?jobId=abc` is a client bug, not "no filter".
+ */
+export const adminEventListQuerySchema = listQuerySchema.extend({
+  eventType: z.enum(["created", "completed", "cancelled", "resumed", "held"]).optional(),
+  taskId: z.coerce.number().int().positive().optional(),
+  projectId: z.coerce.number().int().positive().optional(),
+  jobId: z.coerce.number().int().positive().optional(),
+});
+
 /** Effective page size: the default when unpaged, clamped to {@link LIST_MAX_LIMIT}. */
 export function resolveListLimit(raw: number | undefined): number {
   if (raw === undefined) return LIST_DEFAULT_LIMIT;

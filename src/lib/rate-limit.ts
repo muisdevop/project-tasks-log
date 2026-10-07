@@ -57,6 +57,8 @@ export const RATE_LIMIT_PRESETS: Record<string, RateLimitPreset> = {
   /** Minting API tokens is rare and destructive — a tight per-session budget. */
   "tokens-mint": { limit: 10, windowMs: 5 * 60_000 },
   "tokens-list": { limit: 60, windowMs: 60_000 },
+  /** MF-04: the admin feed is a whole-database read; polling loops are a bug. */
+  "admin-events": { limit: 120, windowMs: 60_000 },
 };
 
 /** Thrown by `assertApiRateLimit`; `toErrorResponse` maps it to 429 + Retry-After. */

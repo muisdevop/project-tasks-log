@@ -4,8 +4,30 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
 import { breakSchema, breakUpdateSchema } from "@/lib/validators";
+import { withIdempotency } from "@/lib/idempotency";
+import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
 
+/**
+ * MF-04: every handler is wrapped by `withRequestLogging`, which emits one
+ * structured JSON line per call and stamps `X-Request-Id`.
+ */
 export async function GET(request: Request) {
+  return withRequestLogging(request, () => listBreaks(request));
+}
+
+export async function POST(request: Request) {
+  return withRequestLogging(request, (log) => createBreak(request, log));
+}
+
+export async function PATCH(request: Request) {
+  return withRequestLogging(request, (log) => updateBreak(request, log));
+}
+
+export async function DELETE(request: Request) {
+  return withRequestLogging(request, (log) => deleteBreak(request, log));
+}
+
+async function listBreaks(request: Request) {
   try {
     await requireAuth(request);
     const url = new URL(request.url);
@@ -56,9 +78,14 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+/**
+ * AI-03: `Idempotency-Key` opt-in on the create — a retried "add break type"
+ * replayed by an agent would otherwise leave duplicate rows.
+ */
+async function createBreak(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
 
     const json = await request.json();
     const { jobId, ...breakData } = json;
@@ -77,22 +104,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Job not found." }, { status: 404 });
     }
 
-    const breakType = await prisma.breakType.create({
-      data: {
-        ...parsed.data,
-        jobId,
-      },
-    });
+    return await withIdempotency(
+      request,
+      { jobId, ...parsed.data },
+      async () => {
+        const breakType = await prisma.breakType.create({
+          data: {
+            ...parsed.data,
+            jobId,
+          },
+        });
 
-    return NextResponse.json({ break: breakType }, { status: 201 });
+        return NextResponse.json({ break: breakType }, { status: 201 });
+      },
+      { actor: context.actor, ip: context.ip },
+    );
   } catch (error) {
     return toErrorResponse(error, "Failed to create break.");
   }
 }
 
-export async function PATCH(request: Request) {
+async function updateBreak(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
 
     const json = await request.json();
     const parsed = breakUpdateSchema.safeParse(json);
@@ -117,9 +152,10 @@ export async function PATCH(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+async function deleteBreak(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
 
     const url = new URL(request.url);
     const id = Number(url.searchParams.get("id"));

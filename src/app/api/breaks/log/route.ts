@@ -7,6 +7,20 @@ import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { formatElapsed } from "@/lib/business-time";
 import { breakLogSchema } from "@/lib/validators";
 import { PROJECT_JOB_MISMATCH_ERROR } from "@/lib/breaks";
+import { withIdempotency } from "@/lib/idempotency";
+import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
+
+/**
+ * The validated payload shape of `breakLogSchema`, written down once so the
+ * clock checks and the transaction can share it. Mirrors
+ * `{ jobId, projectId?, name, startedAt }` exactly.
+ */
+type BreakLogInput = {
+  jobId: number;
+  projectId?: number;
+  name: string;
+  startedAt: string;
+};
 
 /** A break that started longer ago than this is rejected as a stale/malformed clock. */
 const MAX_BREAK_DURATION_SECONDS = 12 * 60 * 60;
@@ -22,10 +36,21 @@ const scheduleSelect = { workStart: true, workEnd: true, workDays: true } as con
  * was silently discarded. This endpoint performs the whole write — banking the
  * currently active task, creating the completed break task and its event — in a
  * single transaction, so the outcome is all-or-nothing.
+ *
+ * AI-03: `Idempotency-Key` opt-in. The transaction below is a real write
+ * (it banks the active task and inserts a row), so an agent retrying after a
+ * timeout would otherwise log the same break twice; with a key the original
+ * `{ task }` response is replayed instead.
+ * MF-04: `withRequestLogging` emits the structured request line.
  */
 export async function POST(request: Request) {
+  return withRequestLogging(request, (log) => logBreak(request, log));
+}
+
+async function logBreak(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
 
     const parsed = breakLogSchema.safeParse(
       await request.json().catch(() => null),
@@ -37,122 +62,142 @@ export async function POST(request: Request) {
       );
     }
 
-    const { jobId, projectId, name, startedAt: startedAtRaw } = parsed.data;
-    const now = new Date();
-    const startedAt = new Date(startedAtRaw);
+    const rejected = validateBreakWindow(parsed.data);
+    if (rejected) return rejected;
 
-    if (Number.isNaN(startedAt.getTime())) {
-      return NextResponse.json({ error: "Invalid startedAt." }, { status: 400 });
-    }
-    if (startedAt.getTime() > now.getTime() + FUTURE_SKEW_MS) {
-      return NextResponse.json(
-        { error: "Break start time cannot be in the future." },
-        { status: 400 },
-      );
-    }
-    const wallClockSeconds = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
-    if (wallClockSeconds < 0 || wallClockSeconds > MAX_BREAK_DURATION_SECONDS) {
-      return NextResponse.json(
-        { error: "Break start time is too old to log." },
-        { status: 400 },
-      );
-    }
-
-    const task = await prisma.$transaction(async (tx) => {
-      const job = await tx.job.findUnique({
-        where: { id: jobId },
-        select: { id: true, ...scheduleSelect },
-      });
-      if (!job) {
-        throw new HttpError(404, "Job not found.");
-      }
-
-      // When the client names a project, that choice is binding: a projectId
-      // that is missing or belongs to another job is rejected instead of
-      // silently re-targeted, so a stale tab can never log a break into the
-      // wrong job unnoticed (the old fallback made the write look successful).
-      let targetProject: { id: number } | null = null;
-      if (projectId !== undefined) {
-        targetProject = await tx.project.findFirst({
-          where: { id: projectId, jobId },
-          select: { id: true },
-        });
-        if (!targetProject) {
-          throw new HttpError(400, PROJECT_JOB_MISMATCH_ERROR);
-        }
-      } else {
-        // No project in hand (e.g. the dashboard widget): fall back to the
-        // job's earliest open project so the break is still logged.
-        targetProject = await tx.project.findFirst({
-          where: { jobId, isArchived: false },
-          orderBy: { createdAt: "asc" },
-          select: { id: true },
-        });
-      }
-      if (!targetProject) {
-        throw new HttpError(
-          404,
-          "This job has no project to log the break against.",
-        );
-      }
-
-      // The break pauses whatever is active in that project: bank its worked
-      // time first (same rule as creating a break task through /api/tasks).
-      const activeTask = await tx.task.findFirst({
-        where: { projectId: targetProject.id, status: "in_progress" },
-        select: { id: true, status: true, startedAt: true, elapsedSeconds: true },
-      });
-      if (activeTask) {
-        const held = applyTaskTransition(activeTask, "hold", now, job);
-        await tx.task.update({
-          where: { id: activeTask.id },
-          data: {
-            status: held.status,
-            startedAt: held.startedAt,
-            elapsedSeconds: held.elapsedSeconds,
-          },
-        });
-      }
-
-      // elapsedSeconds is computed server-side from business hours (SEC-05),
-      // exactly as a complete transition would compute it.
-      const snapshot = {
-        status: "in_progress" as TaskStatus,
-        startedAt,
-        elapsedSeconds: 0,
-      };
-      const change = applyTaskTransition(snapshot, "complete", now, job);
-      const durationLabel = formatElapsed(wallClockSeconds);
-
-      return tx.task.create({
-        data: {
-          projectId: targetProject.id,
-          title: `${name} Break`,
-          description: `Break duration: ${durationLabel}`,
-          isBreak: true,
-          status: "completed",
-          startedAt,
-          endedAt: now,
-          elapsedSeconds: change.elapsedSeconds,
-          completionOutput: `Break completed. Duration: ${durationLabel}`,
-          events: {
-            createMany: {
-              data: [
-                { eventType: "created", eventAt: startedAt },
-                {
-                  eventType: "completed",
-                  eventAt: now,
-                  meta: { details: `Break completed. Duration: ${durationLabel}` },
-                },
-              ],
-            },
-          },
-        },
-      });
-    });
-
-    return NextResponse.json({ task }, { status: 201 });
+    return await withIdempotency(
+      request,
+      parsed.data,
+      () => writeBreakTask(parsed.data),
+      { actor: context.actor, ip: context.ip },
+    );
   } catch (error) {
     return toErrorResponse(error, "Failed to log break.");
   }
+}
+
+/** Client-clock checks that must run before the (idempotent) write is attempted. */
+function validateBreakWindow(input: BreakLogInput): NextResponse | null {
+  const now = new Date();
+  const startedAt = new Date(input.startedAt);
+  if (Number.isNaN(startedAt.getTime())) {
+    return NextResponse.json({ error: "Invalid startedAt." }, { status: 400 });
+  }
+  if (startedAt.getTime() > now.getTime() + FUTURE_SKEW_MS) {
+    return NextResponse.json(
+      { error: "Break start time cannot be in the future." },
+      { status: 400 },
+    );
+  }
+  const wallClockSeconds = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+  if (wallClockSeconds < 0 || wallClockSeconds > MAX_BREAK_DURATION_SECONDS) {
+    return NextResponse.json(
+      { error: "Break start time is too old to log." },
+      { status: 400 },
+    );
+  }
+  return null;
+}
+
+/** The whole break write, kept as one function so `withIdempotency` can re-run or skip it atomically. */
+async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
+  const { jobId, projectId, name, startedAt: startedAtRaw } = input;
+  const now = new Date();
+  const startedAt = new Date(startedAtRaw);
+  const wallClockSeconds = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
+
+  const task = await prisma.$transaction(async (tx) => {
+    const job = await tx.job.findUnique({
+      where: { id: jobId },
+      select: { id: true, ...scheduleSelect },
+    });
+    if (!job) {
+      throw new HttpError(404, "Job not found.");
+    }
+
+    // When the client names a project, that choice is binding: a projectId
+    // that is missing or belongs to another job is rejected instead of
+    // silently re-targeted, so a stale tab can never log a break into the
+    // wrong job unnoticed (the old fallback made the write look successful).
+    let targetProject: { id: number } | null = null;
+    if (projectId !== undefined) {
+      targetProject = await tx.project.findFirst({
+        where: { id: projectId, jobId },
+        select: { id: true },
+      });
+      if (!targetProject) {
+        throw new HttpError(400, PROJECT_JOB_MISMATCH_ERROR);
+      }
+    } else {
+      // No project in hand (e.g. the dashboard widget): fall back to the
+      // job's earliest open project so the break is still logged.
+      targetProject = await tx.project.findFirst({
+        where: { jobId, isArchived: false },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+    }
+    if (!targetProject) {
+      throw new HttpError(
+        404,
+        "This job has no project to log the break against.",
+      );
+    }
+
+    // The break pauses whatever is active in that project: bank its worked
+    // time first (same rule as creating a break task through /api/tasks).
+    const activeTask = await tx.task.findFirst({
+      where: { projectId: targetProject.id, status: "in_progress" },
+      select: { id: true, status: true, startedAt: true, elapsedSeconds: true },
+    });
+    if (activeTask) {
+      const held = applyTaskTransition(activeTask, "hold", now, job);
+      await tx.task.update({
+        where: { id: activeTask.id },
+        data: {
+          status: held.status,
+          startedAt: held.startedAt,
+          elapsedSeconds: held.elapsedSeconds,
+        },
+      });
+    }
+
+    // elapsedSeconds is computed server-side from business hours (SEC-05),
+    // exactly as a complete transition would compute it.
+    const snapshot = {
+      status: "in_progress" as TaskStatus,
+      startedAt,
+      elapsedSeconds: 0,
+    };
+    const change = applyTaskTransition(snapshot, "complete", now, job);
+    const durationLabel = formatElapsed(wallClockSeconds);
+
+    return tx.task.create({
+      data: {
+        projectId: targetProject.id,
+        title: `${name} Break`,
+        description: `Break duration: ${durationLabel}`,
+        isBreak: true,
+        status: "completed",
+        startedAt,
+        endedAt: now,
+        elapsedSeconds: change.elapsedSeconds,
+        completionOutput: `Break completed. Duration: ${durationLabel}`,
+        events: {
+          createMany: {
+            data: [
+              { eventType: "created", eventAt: startedAt },
+              {
+                eventType: "completed",
+                eventAt: now,
+                meta: { details: `Break completed. Duration: ${durationLabel}` },
+              },
+            ],
+          },
+        },
+      },
+    });
+  });
+
+  return NextResponse.json({ task }, { status: 201 });
 }

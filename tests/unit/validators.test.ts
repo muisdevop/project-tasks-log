@@ -25,10 +25,12 @@ import {
   projectUpdateSchema,
   resolveListLimit,
   settingsSchema,
+  subtaskListQuerySchema,
   subtaskSchema,
   subtaskUpdateSchema,
   taskActionSchema,
   taskCreateSchema,
+  taskHardDeleteQuerySchema,
   taskListQuerySchema,
   textContains,
   toNameKey,
@@ -758,5 +760,58 @@ describe("dropField", () => {
   it("is a no-op copy for an absent column", () => {
     const row = { id: 1, name: "n" };
     expect(dropField(row, "id")).toEqual({ name: "n" });
+  });
+});
+
+describe("subtaskListQuerySchema", () => {
+  it("is empty-safe, so the unpaged /api/subtasks call still validates", () => {
+    expect(subtaskListQuerySchema.parse({})).toEqual({});
+  });
+
+  it("carries the shared page params", () => {
+    expect(subtaskListQuerySchema.parse({ limit: "20", cursor: "abc", q: " step " })).toEqual({
+      limit: 20,
+      cursor: "abc",
+      q: "step",
+    });
+    expect(subtaskListQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
+    expect(subtaskListQuerySchema.safeParse({ limit: "-2" }).success).toBe(false);
+    expect(subtaskListQuerySchema.safeParse({ limit: "not-a-number" }).success).toBe(false);
+  });
+
+  it("parses isCompleted only as the literal query strings true/false", () => {
+    expect(subtaskListQuerySchema.parse({ isCompleted: "true" })).toEqual({ isCompleted: true });
+    expect(subtaskListQuerySchema.parse({ isCompleted: "false" })).toEqual({ isCompleted: false });
+    // z.coerce.boolean() would read "false" as truthy — the enum must reject
+    // every other spelling instead of silently inverting the filter.
+    for (const isCompleted of ["1", "0", "yes", "TRUE", "falsey", "", " "]) {
+      expect(subtaskListQuerySchema.safeParse({ isCompleted }).success).toBe(false);
+    }
+    // A raw JSON boolean (POST-style bodies) is not the query-string contract.
+    expect(subtaskListQuerySchema.safeParse({ isCompleted: true }).success).toBe(false);
+  });
+
+  it("drops taskId — the route owns that param and its historical 400 body", () => {
+    expect(subtaskListQuerySchema.parse({ taskId: "4", limit: "5" })).toEqual({ limit: 5 });
+  });
+});
+
+describe("taskHardDeleteQuerySchema", () => {
+  it("treats absent, literal-true and literal-false as the only accepted spellings", () => {
+    expect(taskHardDeleteQuerySchema.parse({})).toEqual({});
+    expect(taskHardDeleteQuerySchema.parse({ hard: "true" })).toEqual({ hard: "true" });
+    expect(taskHardDeleteQuerySchema.parse({ hard: "false" })).toEqual({ hard: "false" });
+  });
+
+  it("rejects fuzzy truthiness so an accidental DELETE cannot be half-confirmed", () => {
+    for (const hard of ["1", "yes", "TRUE", "True", "", " ", "no"]) {
+      expect(taskHardDeleteQuerySchema.safeParse({ hard }).success).toBe(false);
+    }
+  });
+
+  it("ignores unrelated query noise the route does not declare", () => {
+    expect(taskHardDeleteQuerySchema.parse({ hard: "true", anythingElse: "x" })).toEqual({
+      hard: "true",
+    });
   });
 });

@@ -28,6 +28,7 @@ import {
 } from "@/lib/api-tokens";
 import { logSecurityEvent } from "@/lib/security-events";
 import { withIdempotency } from "@/lib/idempotency";
+import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
 
 /** A minted secret must not sit in the idempotency replay map for an hour. */
 const TOKEN_MINT_IDEMPOTENCY_TTL_MS = 5 * 60_000;
@@ -38,8 +39,22 @@ function limiterSubject(request: Request) {
 }
 
 export async function GET(request: Request) {
+  return withRequestLogging(request, (log) => listTokens(request, log));
+}
+
+export async function POST(request: Request) {
+  return withRequestLogging(request, (log) => mintToken(request, log));
+}
+
+export async function PATCH(request: Request) {
+  return withRequestLogging(request, (log) => updateToken(request, log));
+}
+
+/** MF-04: every handler logs its actor as `session`, which `requireSessionAuth` just enforced. */
+async function listTokens(request: Request, log: RequestLogContext) {
   try {
-    await requireSessionAuth(request);
+    const actor = await requireSessionAuth(request);
+    log.identify(actor, "session");
     assertBucketRateLimit(limiterSubject(request), "tokens-list");
 
     const rows = await prisma.apiToken.findMany({ orderBy: { createdAt: "desc" } });
@@ -49,9 +64,10 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+async function mintToken(request: Request, log: RequestLogContext) {
   try {
     const actor = await requireSessionAuth(request);
+    log.identify(actor, "session");
     assertBucketRateLimit(limiterSubject(request), "tokens-mint");
 
     const json = await request.json().catch(() => null);
@@ -107,9 +123,12 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
+async function updateToken(request: Request, log: RequestLogContext) {
   try {
     const actor = await requireSessionAuth(request);
+    log.identify(actor, "session");
+    // Writes to the token table share the mint budget: one credential cannot be
+    // used to enumerate-and-revoke every other token in a burst.
     assertBucketRateLimit(limiterSubject(request), "tokens-mint");
 
     const json = await request.json().catch(() => null);
@@ -154,8 +173,13 @@ export async function PATCH(request: Request) {
  * trail survives, and a repeated DELETE is a harmless no-op replay.
  */
 export async function DELETE(request: Request) {
+  return withRequestLogging(request, (log) => revokeToken(request, log));
+}
+
+async function revokeToken(request: Request, log: RequestLogContext) {
   try {
     const actor = await requireSessionAuth(request);
+    log.identify(actor, "session");
     assertBucketRateLimit(limiterSubject(request), "tokens-mint");
 
     const parsed = apiTokenIdSchema.safeParse(

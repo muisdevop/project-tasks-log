@@ -13,9 +13,11 @@ import {
   textContains,
   toNameKey,
 } from "@/lib/validators";
-import { requireAuth, requireWriteAccess } from "@/lib/auth";
+import { requireAuthContext, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
 import { invalidateStatsCache } from "@/lib/stats-cache";
+import { withIdempotency } from "@/lib/idempotency";
+import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
 
 const PROJECT_SELECT = {
   id: true,
@@ -51,10 +53,17 @@ function listParams(request?: Request): URLSearchParams {
  * - unpaged -> `{ projects: Project[] }`
  * - paged   -> `{ projects: Project[], nextCursor: string | null }`
  *   (`nextCursor: null` on the last page; ordering `createdAt desc, id desc`).
+ *
+ * MF-04: wrapped by `withRequestLogging` for the structured request log.
  */
 export async function GET(request?: Request) {
+  return withRequestLogging(request, (log) => listProjects(request, log));
+}
+
+async function listProjects(request: Request | undefined, log: RequestLogContext) {
   try {
-    await requireAuth(request);
+    const caller = await requireAuthContext(request);
+    log.identify(caller.actor, caller.via);
 
     const params = listParams(request);
     const parsed = projectListQuerySchema.safeParse(Object.fromEntries(params));
@@ -98,9 +107,23 @@ export async function GET(request?: Request) {
   }
 }
 
+/**
+ * POST /api/projects
+ *
+ * AI-03: `Idempotency-Key` opt-in for retried creates. The `nameKey` uniqueness
+ * guard already rejects an identical name with 409, but a retry that arrives
+ * after the original 201 was lost in transit should replay that response, not
+ * be told the project "already exists".
+ * MF-04: wrapped by `withRequestLogging`.
+ */
 export async function POST(request: Request) {
+  return withRequestLogging(request, (log) => createProject(request, log));
+}
+
+async function createProject(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
     const json = await request.json();
     const parsed = projectSchema.safeParse(json);
     if (!parsed.success) {
@@ -123,22 +146,29 @@ export async function POST(request: Request) {
     const description = parsed.data.description ?? "";
     const nameKey = toNameKey(name);
 
-    const exists = await prisma.project.findUnique({ where: { nameKey } });
-    if (exists) {
-      return NextResponse.json({ error: "Project already exists." }, { status: 409 });
-    }
+    return await withIdempotency(
+      request,
+      { name, description, jobId: rawJobId },
+      async () => {
+        const exists = await prisma.project.findUnique({ where: { nameKey } });
+        if (exists) {
+          return NextResponse.json({ error: "Project already exists." }, { status: 409 });
+        }
 
-    const project = await prisma.project.create({
-      data: {
-        name,
-        nameKey,
-        description: description || undefined,
-        jobId: Number.isInteger(jobId) && jobId > 0 ? jobId : 1,
+        const project = await prisma.project.create({
+          data: {
+            name,
+            nameKey,
+            description: description || undefined,
+            jobId: Number.isInteger(jobId) && jobId > 0 ? jobId : 1,
+          },
+        });
+        // PF-03: a job's `projectCount` on the dashboard just moved.
+        invalidateStatsCache();
+        return NextResponse.json({ project }, { status: 201 });
       },
-    });
-    // PF-03: a job's `projectCount` on the dashboard just moved.
-    invalidateStatsCache();
-    return NextResponse.json({ project }, { status: 201 });
+      { actor: context.actor, ip: context.ip },
+    );
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
       return NextResponse.json({ error: "Job not found." }, { status: 404 });

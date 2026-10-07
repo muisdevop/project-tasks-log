@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
 import { dashboardStatsCache } from "@/lib/stats-cache";
+import { withReadRetry } from "@/lib/db-resilience";
 
 type JobStat = {
   jobId: number;
@@ -113,19 +114,23 @@ async function computeStats(): Promise<StatsPayload> {
   // walk produced, so the same tasks feed every bucket.
   const liveJobFilter = { isArchived: false } satisfies Prisma.JobWhereInput;
 
-  const [jobs, projects] = await Promise.all([
-    prisma.job.findMany({
-      where: liveJobFilter,
-      orderBy: { createdAt: "asc" },
-      select: { id: true, name: true },
-    }),
-    prisma.project.findMany({
-      where: { isArchived: false, job: { isArchived: false } },
-      // Deterministic stand-in for the previous natural order of the nested list.
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { id: true, name: true, jobId: true },
-    }),
-  ]);
+  const [jobs, projects] = await withReadRetry(
+    () =>
+      Promise.all([
+        prisma.job.findMany({
+          where: liveJobFilter,
+          orderBy: { createdAt: "asc" },
+          select: { id: true, name: true },
+        }),
+        prisma.project.findMany({
+          where: { isArchived: false, job: { isArchived: false } },
+          // Deterministic stand-in for the previous natural order of the nested list.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, name: true, jobId: true },
+        }),
+      ]),
+    { label: "dashboard stats (jobs + projects)" },
+  );
 
   const projectIds = projects.map((project) => project.id);
 
@@ -154,15 +159,19 @@ async function computeStats(): Promise<StatsPayload> {
 
   const taskWhere: Prisma.TaskWhereInput = { projectId: { in: projectIds } };
 
-  const [statusGroups, tasksWithSubtasks] = await Promise.all([
-    prisma.task.groupBy({
-      by: ["projectId", "status"],
-      where: taskWhere,
-      _count: { _all: true },
-      _sum: { elapsedSeconds: true },
-    }),
-    prisma.task.count({ where: { ...taskWhere, subtasks: { some: {} } } }),
-  ]);
+  const [statusGroups, tasksWithSubtasks] = await withReadRetry(
+    () =>
+      Promise.all([
+        prisma.task.groupBy({
+          by: ["projectId", "status"],
+          where: taskWhere,
+          _count: { _all: true },
+          _sum: { elapsedSeconds: true },
+        }),
+        prisma.task.count({ where: { ...taskWhere, subtasks: { some: {} } } }),
+      ]),
+    { label: "dashboard stats (task aggregation)" },
+  );
 
   const aggregateByProject = new Map<number, ProjectAggregate>();
   const ensureAggregate = (projectId: number): ProjectAggregate => {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, requireWriteAccess } from "@/lib/auth";
+import { requireAuthContext, requireWriteAccess } from "@/lib/auth";
 import {
   attendanceListQuerySchema,
   attendanceSchema,
@@ -14,6 +14,8 @@ import {
   textContains,
 } from "@/lib/validators";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { withIdempotency } from "@/lib/idempotency";
+import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
 
 function dayBounds(reference: Date = new Date()) {
   const start = new Date(reference);
@@ -47,10 +49,17 @@ function secondsBetween(from: Date, to: Date): number {
  *   NOTE: in list mode `attendance` is an ARRAY of rows (newest first,
  *   `checkInTime desc, id desc`); the single-object shape only survives when no
  *   pagination parameter is sent, which is what every current client sends.
+ *
+ * MF-04: wrapped by `withRequestLogging` for the structured request log.
  */
 export async function GET(request: Request) {
+  return withRequestLogging(request, (log) => listAttendance(request, log));
+}
+
+async function listAttendance(request: Request, log: RequestLogContext) {
   try {
-    await requireAuth(request);
+    const caller = await requireAuthContext(request);
+    log.identify(caller.actor, caller.via);
 
     const url = new URL(request.url);
     const params = url.searchParams;
@@ -117,10 +126,23 @@ export async function GET(request: Request) {
   }
 }
 
-// Check in
+/**
+ * Check in.
+ *
+ * AI-03: `Idempotency-Key` opt-in — a retried check-in is exactly the case the
+ * finding describes (a create-style write behind a transaction, retried after a
+ * timeout). With a key the original response replays; without one nothing
+ * changes, so the browser flow and the existing tests behave as before.
+ * MF-04: wrapped by `withRequestLogging`.
+ */
 export async function POST(request: Request) {
+  return withRequestLogging(request, (log) => checkIn(request, log));
+}
+
+async function checkIn(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
 
     const parsed = attendanceSchema.safeParse(
       await request.json().catch(() => null),
@@ -131,7 +153,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const { jobId, notes } = parsed.data;
+    const { jobId } = parsed.data;
 
     const job = await prisma.job.findUnique({
       where: { id: jobId },
@@ -141,59 +163,80 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Job not found." }, { status: 404 });
     }
 
-    // FL-04: enforce the attendance invariant inside a transaction —
-    // at most one open check-in per job per day. Stale open rows from
-    // previous days are auto-closed at the day boundary before checking,
-    // so a crash yesterday can never block today's check-in.
-    const { start, end } = dayBounds();
-
-    const attendance = await prisma.$transaction(async (tx) => {
-      const staleRows = await tx.jobAttendance.findMany({
-        where: { jobId, checkOutTime: null, checkInTime: { lt: start } },
-      });
-      for (const row of staleRows) {
-        await tx.jobAttendance.update({
-          where: { id: row.id },
-          data: {
-            checkOutTime: start,
-            totalWorkSeconds: secondsBetween(row.checkInTime, start),
-          },
-        });
-      }
-
-      const existingOpen = await tx.jobAttendance.findFirst({
-        where: {
-          jobId,
-          checkOutTime: null,
-          checkInTime: { gte: start, lt: end },
-        },
-      });
-      if (existingOpen) {
-        throw new HttpError(
-          409,
-          "Already checked in for this job today. Please check out first.",
-        );
-      }
-
-      return tx.jobAttendance.create({
-        data: {
-          jobId,
-          checkInTime: new Date(),
-          notes: notes ?? null,
-        },
-      });
-    });
-
-    return NextResponse.json({ attendance, message: "Checked in successfully" });
+    return await withIdempotency(
+      request,
+      parsed.data,
+      async () => {
+        const attendance = await openCheckIn(parsed.data);
+        return NextResponse.json({ attendance, message: "Checked in successfully" });
+      },
+      { actor: context.actor, ip: context.ip },
+    );
   } catch (error) {
     return toErrorResponse(error, "Failed to check in.");
   }
 }
 
-// Check out
+/**
+ * FL-04: enforce the attendance invariant inside a transaction — at most one
+ * open check-in per job per day. Stale open rows from previous days are
+ * auto-closed at the day boundary before checking, so a crash yesterday can
+ * never block today's check-in.
+ */
+async function openCheckIn(input: { jobId: number; notes?: string | null }) {
+  const { jobId, notes } = input;
+  const { start, end } = dayBounds();
+
+  return prisma.$transaction(async (tx) => {
+    const staleRows = await tx.jobAttendance.findMany({
+      where: { jobId, checkOutTime: null, checkInTime: { lt: start } },
+    });
+    for (const row of staleRows) {
+      await tx.jobAttendance.update({
+        where: { id: row.id },
+        data: {
+          checkOutTime: start,
+          totalWorkSeconds: secondsBetween(row.checkInTime, start),
+        },
+      });
+    }
+
+    const existingOpen = await tx.jobAttendance.findFirst({
+      where: {
+        jobId,
+        checkOutTime: null,
+        checkInTime: { gte: start, lt: end },
+      },
+    });
+    if (existingOpen) {
+      throw new HttpError(
+        409,
+        "Already checked in for this job today. Please check out first.",
+      );
+    }
+
+    return tx.jobAttendance.create({
+      data: {
+        jobId,
+        checkInTime: new Date(),
+        notes: notes ?? null,
+      },
+    });
+  });
+}
+
+/**
+ * Check out — an update guarded by "is there an open row", not a create, so a
+ * retry is already harmless (the second attempt 404s). Request logging only.
+ */
 export async function PATCH(request: Request) {
+  return withRequestLogging(request, (log) => checkOut(request, log));
+}
+
+async function checkOut(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
 
     const parsed = attendanceSchema.safeParse(
       await request.json().catch(() => null),

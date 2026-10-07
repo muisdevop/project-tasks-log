@@ -412,6 +412,38 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
             Export
           </Link>
 
+          {/* MF-04: ops visibility. Single-user app, so this is the owner's view,
+              not a role-gated area — see the MF-07 note in docs/architecture.md. */}
+          <Link
+            href="/admin"
+            className={`group mb-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${
+              pathname === "/admin"
+                ? "bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/30"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+            title="Activity, credentials and diagnostics"
+          >
+            <svg
+              className={`h-5 w-5 transition-colors ${
+                pathname === "/admin"
+                  ? "text-violet-300"
+                  : "text-slate-400 group-hover:text-slate-300"
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+              />
+            </svg>
+            Admin
+          </Link>
+
           <Link
             href="/settings"
             className={`group flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all ${

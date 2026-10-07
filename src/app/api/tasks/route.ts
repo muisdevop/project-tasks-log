@@ -1,7 +1,7 @@
 import { Prisma, type TaskStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, requireWriteAccess } from "@/lib/auth";
+import { requireAuthContext, requireWriteAccess } from "@/lib/auth";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
 import {
@@ -19,6 +19,8 @@ import {
 import { HttpError, toErrorResponse } from "@/lib/api-error";
 import { invalidateStatsCache } from "@/lib/stats-cache";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { withIdempotency } from "@/lib/idempotency";
+import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
 
 function appendLogNote(
   existingNotes: string | null,
@@ -65,10 +67,18 @@ const scheduleSelect = { workStart: true, workEnd: true, workDays: true } as con
  * - `limit` and/or cursor -> `{ tasks: Task[], nextCursor: string | null }`
  *   with `nextCursor: null` on the last page. Invalid `limit`/`cursor`/`status`
  *   is a 400 with `{ error }`.
+ *
+ * MF-04: the handler body is wrapped by `withRequestLogging`, which emits the
+ * structured request log line and stamps `X-Request-Id`.
  */
 export async function GET(request: Request) {
+  return withRequestLogging(request, (log) => listTasks(request, log));
+}
+
+async function listTasks(request: Request, log: RequestLogContext) {
   try {
-    await requireAuth(request);
+    const actor = await requireAuthContext(request);
+    log.identify(actor.actor, actor.via);
     const url = new URL(request.url);
     const params = url.searchParams;
 
@@ -224,9 +234,22 @@ export async function GET(request: Request) {
   }
 }
 
+/**
+ * POST /api/tasks
+ *
+ * AI-03: `Idempotency-Key` aware. A retried create (agent timeout, flaky
+ * reverse proxy) replays the original `{ task }` response instead of starting a
+ * second task; without the header the behaviour is exactly the old one.
+ * MF-04: wrapped by `withRequestLogging`.
+ */
 export async function POST(request: Request) {
+  return withRequestLogging(request, (log) => createTask(request, log));
+}
+
+async function createTask(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
     const parsed = taskCreateSchema.safeParse(
       await request.json().catch(() => null),
     );
@@ -237,85 +260,92 @@ export async function POST(request: Request) {
       );
     }
 
-    const now = new Date();
-    // FL-05: explicit isBreak flag is authoritative; the " break" title suffix
-    // is still honoured so older clients keep working until updated.
-    const isBreakTask =
-      parsed.data.isBreak === true ||
-      parsed.data.title.trim().toLowerCase().endsWith(" break");
-    // SEC-05: client-supplied start times are ignored unless explicitly enabled.
-    const allowClientStart = process.env.ALLOW_CLIENT_START_TIME === "true";
-    const startedAt =
-      allowClientStart && parsed.data.startedAt
-        ? new Date(parsed.data.startedAt)
-        : now;
+    return await withIdempotency(
+      request,
+      parsed.data,
+      async () => {
+        const now = new Date();
+        // FL-05: explicit isBreak flag is authoritative; the " break" title suffix
+        // is still honoured so older clients keep working until updated.
+        const isBreakTask =
+          parsed.data.isBreak === true ||
+          parsed.data.title.trim().toLowerCase().endsWith(" break");
+        // SEC-05: client-supplied start times are ignored unless explicitly enabled.
+        const allowClientStart = process.env.ALLOW_CLIENT_START_TIME === "true";
+        const startedAt =
+          allowClientStart && parsed.data.startedAt
+            ? new Date(parsed.data.startedAt)
+            : now;
 
-    const task = await prisma.$transaction(async (tx) => {
-      const project = await tx.project.findUnique({
-        where: { id: parsed.data.projectId },
-        select: { jobId: true },
-      });
-      if (!project) {
-        throw new HttpError(404, "Project not found.");
-      }
+        const task = await prisma.$transaction(async (tx) => {
+          const project = await tx.project.findUnique({
+            where: { id: parsed.data.projectId },
+            select: { jobId: true },
+          });
+          if (!project) {
+            throw new HttpError(404, "Project not found.");
+          }
 
-      const schedule = await tx.job.findUnique({
-        where: { id: project.jobId },
-        select: scheduleSelect,
-      });
-      if (!schedule) {
-        throw new HttpError(404, "Job not found.");
-      }
+          const schedule = await tx.job.findUnique({
+            where: { id: project.jobId },
+            select: scheduleSelect,
+          });
+          if (!schedule) {
+            throw new HttpError(404, "Job not found.");
+          }
 
-      const activeTask = await tx.task.findFirst({
-        where: {
-          projectId: parsed.data.projectId,
-          status: "in_progress",
-        },
-        select: { id: true, status: true, startedAt: true, elapsedSeconds: true },
-      });
-
-      // Break tasks pause active work — bank its elapsed time first (FL-03)
-      // instead of flipping status without accumulating.
-      if (isBreakTask && activeTask) {
-        const change = applyTaskTransition(activeTask, "hold", now, schedule);
-        await tx.task.update({
-          where: { id: activeTask.id },
-          data: {
-            status: change.status,
-            startedAt: change.startedAt,
-            elapsedSeconds: change.elapsedSeconds,
-          },
-        });
-      }
-
-      return tx.task.create({
-        data: {
-          projectId: parsed.data.projectId,
-          title: parsed.data.title,
-          description: parsed.data.description,
-          isBreak: isBreakTask,
-          status: isBreakTask
-            ? "in_progress"
-            : activeTask
-              ? "on_hold"
-              : "in_progress",
-          startedAt,
-          events: {
-            create: {
-              eventType: "created",
-              eventAt: now,
+          const activeTask = await tx.task.findFirst({
+            where: {
+              projectId: parsed.data.projectId,
+              status: "in_progress",
             },
-          },
-        },
-      });
-    });
+            select: { id: true, status: true, startedAt: true, elapsedSeconds: true },
+          });
 
-    // PF-03: a task was created (and possibly an active one banked on hold), so
-    // the cached dashboard aggregate is dropped right away.
-    invalidateStatsCache();
+          // Break tasks pause active work — bank its elapsed time first (FL-03)
+          // instead of flipping status without accumulating.
+          if (isBreakTask && activeTask) {
+            const change = applyTaskTransition(activeTask, "hold", now, schedule);
+            await tx.task.update({
+              where: { id: activeTask.id },
+              data: {
+                status: change.status,
+                startedAt: change.startedAt,
+                elapsedSeconds: change.elapsedSeconds,
+              },
+            });
+          }
 
-    return NextResponse.json({ task }, { status: 201 });
+          return tx.task.create({
+            data: {
+              projectId: parsed.data.projectId,
+              title: parsed.data.title,
+              description: parsed.data.description,
+              isBreak: isBreakTask,
+              status: isBreakTask
+                ? "in_progress"
+                : activeTask
+                  ? "on_hold"
+                  : "in_progress",
+              startedAt,
+              events: {
+                create: {
+                  eventType: "created",
+                  eventAt: now,
+                },
+              },
+            },
+          });
+        });
+
+        // PF-03: a task was created (and possibly an active one banked on hold), so
+        // the cached dashboard aggregate is dropped right away.
+        invalidateStatsCache();
+
+        return NextResponse.json({ task }, { status: 201 });
+      },
+      { actor: context.actor, ip: context.ip },
+    );
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -341,9 +371,19 @@ const ACTION_GUARD_MESSAGES = {
   hold: "Only in-progress tasks can be put on hold.",
 } as const;
 
+/**
+ * PATCH /api/tasks — lifecycle transitions are NOT wrapped in idempotency: they
+ * are state-guarded inside the transaction (ST-01), so a retry either performs
+ * the transition once or is rejected with 400/409 rather than duplicating work.
+ */
 export async function PATCH(request: Request) {
+  return withRequestLogging(request, (log) => actOnTask(request, log));
+}
+
+async function actOnTask(request: Request, log: RequestLogContext) {
   try {
-    await requireWriteAccess(request);
+    const context = await requireWriteAccess(request);
+    log.identify(context.actor, context.via);
     const parsed = taskActionSchema.safeParse(
       await request.json().catch(() => null),
     );

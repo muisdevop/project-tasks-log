@@ -22,6 +22,9 @@ export class HttpError extends Error {
  * - UnauthorizedError -> 401
  * - ForbiddenError    -> 403 (authenticated, wrong scope / wrong credential kind)
  * - RateLimitedError  -> 429 with `Retry-After` (AI-03 agent-loop guard)
+ * - HttpError         -> its status with the safe message, plus `Retry-After`
+ *                        when the error knows its backoff (RB-01: 503 database
+ *                        unavailable, 504 query deadline)
  * - HttpError         -> its status with the safe message
  * - everything else   -> 500 with a static message.
  *
@@ -41,7 +44,17 @@ export function toErrorResponse(error: unknown, fallbackMessage = "Internal serv
     );
   }
   if (error instanceof HttpError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    // RB-01: a 503 DbUnavailableError (and anything else that knows how long to
+    // wait) carries `retryAfterSeconds` structurally, so the client gets a
+    // machine-readable backoff instead of a bare status. Checked by shape rather
+    // than `instanceof` to keep this module free of an import cycle with
+    // src/lib/db-resilience.ts.
+    const retryAfter = (error as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+    const headers =
+      typeof retryAfter === "number" && retryAfter > 0
+        ? { headers: { "Retry-After": String(Math.ceil(retryAfter)) } }
+        : undefined;
+    return NextResponse.json({ error: error.message }, { status: error.status, ...headers });
   }
   console.error(`[api] ${fallbackMessage}`, error);
   return NextResponse.json({ error: fallbackMessage }, { status: 500 });

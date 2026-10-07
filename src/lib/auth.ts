@@ -264,11 +264,17 @@ export async function requireWriteAccess(request?: Request): Promise<AuthContext
 }
 
 /**
- * Cookie-only guard for the token manager (AI-02): an API token must never be
- * able to mint, list or revoke another token, otherwise one leaked read token
- * escalates into full control.
+ * Cookie-only guard (AI-02): an API token must never reach the surfaces that
+ * would let it escalate — minting, listing or revoking tokens, and the admin
+ * audit feed. Otherwise one leaked read token turns into full control, and a
+ * long-lived token in an agent config can harvest every task title in the
+ * database. `usage` names the refused action so the 403 explains itself instead
+ * of quoting the token manager at an unrelated route.
  */
-export async function requireSessionAuth(request?: Request): Promise<string> {
+export async function requireSessionAuth(
+  request?: Request,
+  usage = "manage API tokens",
+): Promise<string> {
   if (bearerTokenOf(request)) {
     logSecurityEvent({
       evt: "token.mint_denied",
@@ -276,7 +282,7 @@ export async function requireSessionAuth(request?: Request): Promise<string> {
       detail: "token_used_on_session_only_route",
     });
     throw new ForbiddenError(
-      "API tokens cannot manage API tokens. Use the browser session cookie.",
+      `API tokens cannot ${usage}. Use the browser session cookie.`,
     );
   }
   return requireAuth();

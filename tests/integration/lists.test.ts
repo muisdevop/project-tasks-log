@@ -1,17 +1,18 @@
 /**
  * Integration: MF-05 opt-in pagination / search / filtering on the list routes
- * (/api/tasks, /api/jobs, /api/projects, /api/attendance).
+ * (/api/tasks, /api/jobs, /api/projects, /api/attendance, /api/subtasks).
  *
  * Two things are asserted for every route, deliberately:
  * 1. the UNPAGED response is byte-compatible with the pre-pagination contract
- *    (`{ tasks }` / `{ jobs }` / `{ projects }` / `{ attendance }` with no
- *    `nextCursor` key at all), because the dashboard, sidebar and e2e seeds all
- *    read those shapes today; and
+ *    (`{ tasks }` / `{ jobs }` / `{ projects }` / `{ attendance }` /
+ *    `{ subtasks }` with no `nextCursor` key at all), because the dashboard,
+ *    sidebar, task board and e2e seeds all read those shapes today; and
  * 2. the PAGED responses walk a keyset cursor to exhaustion without repeating
  *    or dropping a row, and reject malformed input with a 400 body of
  *    `{ error }`.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { LIST_MAX_LIMIT } from "@/lib/validators";
 import {
   apiRequest,
   issueAuthCookie,
@@ -31,9 +32,16 @@ let tasksGet: (req: Request) => Promise<Response>;
 let jobsGet: (req?: Request) => Promise<Response>;
 let projectsGet: (req?: Request) => Promise<Response>;
 let attendanceGet: (req: Request) => Promise<Response>;
+let subtasksGet: (req: Request) => Promise<Response>;
 
 type Row = { id: number; title?: string; name?: string };
-type ListBody = { tasks?: Row[]; jobs?: Row[]; projects?: Row[]; nextCursor?: string | null };
+type ListBody = {
+  tasks?: Row[];
+  jobs?: Row[];
+  projects?: Row[];
+  subtasks?: Row[];
+  nextCursor?: string | null;
+};
 
 beforeAll(async () => {
   ctx = await setupTestDatabase("lists");
@@ -44,6 +52,7 @@ beforeAll(async () => {
   jobsGet = (await import("@/app/api/jobs/route")).GET;
   projectsGet = (await import("@/app/api/projects/route")).GET;
   attendanceGet = (await import("@/app/api/attendance/route")).GET;
+  subtasksGet = (await import("@/app/api/subtasks/route")).GET;
 
   const job = await prisma.job.create({
     data: {
@@ -85,6 +94,45 @@ beforeAll(async () => {
     data: { projectId: otherProject.id, title: "Task in other project", status: "cancelled", startedAt: started },
   });
 
+  // Subtask paging hosts: seven mixed-state rows on the first project task for
+  // the search/filter walk, and LIST_MAX_LIMIT + 5 rows on the second so the
+  // clamp at LIST_MAX_LIMIT is provable (a page can never exceed the ceiling).
+  const hostTasks = await prisma.task.findMany({
+    where: { projectId: project.id },
+    orderBy: { id: "asc" },
+    take: 2,
+    select: { id: true },
+  });
+  const sevenTitles = [
+    "Sub 01 URGENT",
+    "sub 02 quiet",
+    "Sub 03 URGENT",
+    "sub 04 quiet",
+    "Sub 05 URGENT",
+    "sub 06 quiet",
+    "Sub 07 done-later",
+  ];
+  // Completed set is chosen so all four filter combinations are distinct and
+  // non-trivial: 3 URGENT rows (all completed), 3 completed in total, 4 open,
+  // and 3 rows matching `q=urgent&isCompleted=true` — which is what makes a
+  // `limit=2` page return a full page PLUS a cursor.
+  for (let i = 0; i < sevenTitles.length; i += 1) {
+    await prisma.subTask.create({
+      data: {
+        taskId: hostTasks[0]!.id,
+        title: sevenTitles[i],
+        isCompleted: i === 0 || i === 2 || i === 4,
+      },
+    });
+  }
+  await prisma.subTask.createMany({
+    data: Array.from({ length: LIST_MAX_LIMIT + 5 }, (_unused, i) => ({
+      taskId: hostTasks[1]!.id,
+      title: `Bulk subtask ${String(i + 1).padStart(3, "0")}`,
+      isCompleted: false,
+    })),
+  });
+
   // Attendance history for the job: three closed days plus one open today.
   const today = new Date();
   for (const dayOffset of [3, 2, 1]) {
@@ -107,9 +155,18 @@ beforeAll(async () => {
   listsFixture.otherJobId = otherJob.id;
   listsFixture.projectId = project.id;
   listsFixture.otherProjectId = otherProject.id;
+  listsFixture.subtaskHostId = hostTasks[0]!.id;
+  listsFixture.bulkHostId = hostTasks[1]!.id;
 }, 240_000);
 
-const listsFixture = { jobId: 0, otherJobId: 0, projectId: 0, otherProjectId: 0 };
+const listsFixture = {
+  jobId: 0,
+  otherJobId: 0,
+  projectId: 0,
+  otherProjectId: 0,
+  subtaskHostId: 0,
+  bulkHostId: 0,
+};
 
 afterEach(() => {
   mockCookieState.reset();
@@ -371,6 +428,151 @@ describe("/api/attendance history pagination", () => {
     const bad = await getJsonSafe("/api/attendance?jobId=abc&limit=5", attendanceGet);
     expect(bad.status).toBe(400);
     expect(bad.body).toEqual({ error: "Invalid jobId." });
+  });
+});
+
+describe("/api/subtasks pagination + filters", () => {
+  it("keeps the exact legacy shape when unpaged", async () => {
+    const { status, body } = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}`,
+      subtasksGet,
+    );
+    expect(status).toBe(200);
+    expect(Object.keys(body)).toEqual(["subtasks"]);
+    expect(body.subtasks).toHaveLength(7);
+    // Full Prisma rows, same field set as before pagination was added.
+    expect(Object.keys(body.subtasks![0]!).sort()).toEqual([
+      "createdAt",
+      "id",
+      "isCompleted",
+      "taskId",
+      "title",
+      "updatedAt",
+    ]);
+  });
+
+  it("keeps the historical taskId 400 ahead of any page-param parsing", async () => {
+    const bad = await getJsonSafe("/api/subtasks?taskId=abc&limit=0&cursor=zzz", subtasksGet);
+    expect(bad.status).toBe(400);
+    expect(bad.body).toEqual({ error: "Invalid taskId." });
+
+    const missing = await getJsonSafe("/api/subtasks?limit=5", subtasksGet);
+    expect(missing.status).toBe(400);
+    expect(missing.body).toEqual({ error: "Invalid taskId." });
+  });
+
+  it("walks the bulk table with limit + cursor without gaps or repeats", async () => {
+    const seen: number[] = [];
+    let cursor: string | null | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const { status, body } = await getJsonSafe(
+        `/api/subtasks?taskId=${listsFixture.bulkHostId}&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        subtasksGet,
+      );
+      expect(status).toBe(200);
+      expect(Object.keys(body)).toEqual(["subtasks", "nextCursor"]);
+      seen.push(...(body.subtasks ?? []).map((row) => row.id));
+      cursor = body.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    const total = LIST_MAX_LIMIT + 5;
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size).toBe(total);
+
+    // Same ids in the same insertion order as the unpaged listing.
+    const all = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.bulkHostId}`,
+      subtasksGet,
+    );
+    expect(seen).toEqual((all.body.subtasks ?? []).map((row) => row.id));
+  });
+
+  it("clamps the page size at LIST_MAX_LIMIT instead of honouring the client", async () => {
+    const overSized = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.bulkHostId}&limit=${LIST_MAX_LIMIT + 500}`,
+      subtasksGet,
+    );
+    expect(overSized.status).toBe(200);
+    expect(overSized.body.subtasks).toHaveLength(LIST_MAX_LIMIT);
+    expect(typeof overSized.body.nextCursor).toBe("string");
+
+    const rest = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.bulkHostId}&limit=${LIST_MAX_LIMIT}&cursor=${encodeURIComponent(String(overSized.body.nextCursor))}`,
+      subtasksGet,
+    );
+    expect(rest.body.subtasks).toHaveLength(5);
+    expect(rest.body.nextCursor).toBeNull();
+  });
+
+  it("filters by q and isCompleted, alone and combined with paging", async () => {
+    const urgent = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&q=urgent`,
+      subtasksGet,
+    );
+    expect(urgent.body.subtasks).toHaveLength(3); // stored upper-case "URGENT"
+
+    const done = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&isCompleted=true`,
+      subtasksGet,
+    );
+    expect(done.body.subtasks).toHaveLength(3);
+    expect(done.body.subtasks!.every((row) => (row as { isCompleted?: boolean }).isCompleted)).toBe(
+      true,
+    );
+
+    const open = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&isCompleted=false`,
+      subtasksGet,
+    );
+    expect(open.body.subtasks).toHaveLength(4);
+
+    // Filters apply to the unpaged shape too (opt-in contract is additive only
+    // on the page params), and combine with limit/cursor.
+    const combined = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&q=urgent&isCompleted=true&limit=2`,
+      subtasksGet,
+    );
+    expect(Object.keys(combined.body)).toEqual(["subtasks", "nextCursor"]);
+    expect(combined.body.subtasks).toHaveLength(2);
+    expect(typeof combined.body.nextCursor).toBe("string");
+  });
+
+  it("rejects malformed page params and cursors with a 400 of the house shape", async () => {
+    const zero = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&limit=0`,
+      subtasksGet,
+    );
+    expect(zero.status).toBe(400);
+    expect(zero.body).toEqual({ error: "Invalid subtask list query." });
+
+    const junk = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&limit=abc`,
+      subtasksGet,
+    );
+    expect(junk.status).toBe(400);
+
+    const triState = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&isCompleted=maybe`,
+      subtasksGet,
+    );
+    expect(triState.status).toBe(400);
+    expect(triState.body).toEqual({ error: "Invalid subtask list query." });
+
+    const cursor = await getJsonSafe(
+      `/api/subtasks?taskId=${listsFixture.subtaskHostId}&limit=5&cursor=bm90LWEtY3Vyc29y`,
+      subtasksGet,
+    );
+    expect(cursor.status).toBe(400);
+    expect(cursor.body).toEqual({ error: "Invalid cursor." });
+  });
+
+  it("rejects an unauthenticated request before touching the table (401)", async () => {
+    mockCookieState.reset();
+    const res = await subtasksGet(
+      apiRequest(`/api/subtasks?taskId=${listsFixture.subtaskHostId}&limit=5`),
+    );
+    expect(res.status).toBe(401);
   });
 });
 

@@ -1,5 +1,6 @@
 import { Prisma, TaskStatus } from "@prisma/client";
 import { HttpError } from "@/lib/api-error";
+import { withQueryTimeout } from "@/lib/db-resilience";
 import { prisma } from "@/lib/prisma";
 import {
   calculateTimePeriodDates,
@@ -214,27 +215,44 @@ export function buildAttendanceWhereInput(
   return { AND: clauses.filter((clause) => Object.keys(clause).length > 0) };
 }
 
+/**
+ * RB-01: the two report queries run under a generous but finite deadline. An
+ * export over the maximum span is the slowest thing this app does, so it gets
+ * its own budget instead of the default 8s — and, unlike a hung query, the
+ * caller gets a 504 it can act on (narrow the range) rather than a request that
+ * never answers.
+ */
+export const EXPORT_QUERY_TIMEOUT_MS = 20_000;
+
 export function fetchExportTasks(
   window: ExportDateWindow,
   jobIds: number[],
   projectIds: number[],
 ): Promise<ExportTaskRecord[]> {
-  return prisma.task.findMany({
-    where: buildTaskWhereInput(window, jobIds, projectIds),
-    select: TASK_SELECT,
-    orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
-  });
+  return withQueryTimeout(
+    () =>
+      prisma.task.findMany({
+        where: buildTaskWhereInput(window, jobIds, projectIds),
+        select: TASK_SELECT,
+        orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
+      }),
+    { label: "export task fetch", timeoutMs: EXPORT_QUERY_TIMEOUT_MS },
+  );
 }
 
 export function fetchAttendanceRecords(
   window: ExportDateWindow,
   jobIds: number[],
 ): Promise<ExportAttendanceRecord[]> {
-  return prisma.jobAttendance.findMany({
-    where: buildAttendanceWhereInput(window, jobIds),
-    select: ATTENDANCE_SELECT,
-    orderBy: { checkInTime: "asc" },
-  });
+  return withQueryTimeout(
+    () =>
+      prisma.jobAttendance.findMany({
+        where: buildAttendanceWhereInput(window, jobIds),
+        select: ATTENDANCE_SELECT,
+        orderBy: { checkInTime: "asc" },
+      }),
+    { label: "export attendance fetch", timeoutMs: EXPORT_QUERY_TIMEOUT_MS },
+  );
 }
 
 export function groupExportTasks(

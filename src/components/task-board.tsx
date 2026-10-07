@@ -3,7 +3,7 @@
 import { formatElapsed } from "@/lib/business-time";
 import { useMemo, useState } from "react";
 import { useStoredState } from "@/hooks/use-stored-state";
-import { useApiMutation, useKeyedApiMutation } from "@/hooks/use-api-mutation";
+import { readApiError, useApiMutation, useKeyedApiMutation } from "@/hooks/use-api-mutation";
 import { LazyRichTextEditor as RichTextEditor } from "./rich-text-editor-lazy";
 import { RichTextDisplay } from "./rich-text-display";
 import { TaskActionModal } from "./task-action-modal";
@@ -28,7 +28,12 @@ type Task = {
   subtasks: SubTask[];
 };
 
-// Keyed busy flag for the create form; task operations key themselves by task id.
+/** MF-05 UI adoption: one client page of `/api/tasks`. Mirrors LIST_DEFAULT_LIMIT. */
+const TASK_PAGE_SIZE = 50;
+
+type TaskBrowse = { tasks: Task[]; nextCursor: string | null };
+
+/** Keyed busy flag for the create form; task operations key themselves by task id. */
 const CREATE_KEY = "create";
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
@@ -117,15 +122,17 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     if (!ok) return;
     setTitle("");
     setDescription("");
+    void refreshActiveSearch();
   }
 
   async function runAction(taskId: number, action: "complete" | "cancel" | "resume" | "hold") {
     if (action === "resume" || action === "hold") {
-      await requestBoard(taskId, "/api/tasks", {
+      const ok = await requestBoard(taskId, "/api/tasks", {
         method: "PATCH",
         body: { taskId, action },
         fallbackError: "Failed to update task.",
       });
+      if (ok) void refreshActiveSearch();
       return;
     }
 
@@ -150,6 +157,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     // typed details available for retry.
     if (ok) {
       setModalAction(null);
+      void refreshActiveSearch();
     }
   }
 
@@ -171,9 +179,97 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     }
   }
 
-  const inProgress = tasks.filter((task) => task.status === "in_progress");
-  const onHold = tasks.filter((task) => task.status === "on_hold");
-  const finished = tasks.filter((task) => task.status === "completed" || task.status === "cancelled");
+  /* ------------------------------------------------------------------ *
+   * MF-05 UI adoption (opt-in, client fetch path only).
+   *
+   * The default view deliberately stays exactly what the server renders: the
+   * full `tasks` prop, no pagination, no extra fetch — the Playwright board
+   * marker relies on server-rendered rows and the e2e seeds stay untouched.
+   * Only when the operator searches does the board switch to the paged
+   * /api/tasks contract (`q` + `limit` + keyset `cursor`), and "Load more"
+   * continues that cursor walk. Clearing the search returns to the
+   * server-rendered list.
+   * ------------------------------------------------------------------ */
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearch, setActiveSearch] = useState<string | null>(null);
+  const [browse, setBrowse] = useState<TaskBrowse | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+
+  async function fetchTaskPage(term: string, cursor: string | null): Promise<TaskBrowse> {
+    const params = new URLSearchParams();
+    params.set("projectId", String(projectId));
+    params.set("limit", String(TASK_PAGE_SIZE));
+    if (term) params.set("q", term);
+    if (cursor) params.set("cursor", cursor);
+    const response = await fetch(`/api/tasks?${params.toString()}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(await readApiError(response, "Failed to load tasks."));
+    }
+    const data = (await response.json()) as { tasks?: Task[]; nextCursor?: string | null };
+    return { tasks: data.tasks ?? [], nextCursor: data.nextCursor ?? null };
+  }
+
+  function clearSearch() {
+    setSearchInput("");
+    setActiveSearch(null);
+    setBrowse(null);
+    setBrowseError(null);
+  }
+
+  async function runSearch(term: string) {
+    const trimmed = term.trim();
+    if (!trimmed) {
+      clearSearch();
+      return;
+    }
+    setBrowsing(true);
+    setBrowseError(null);
+    try {
+      setBrowse(await fetchTaskPage(trimmed, null));
+      setActiveSearch(trimmed);
+    } catch (cause) {
+      setBrowseError(cause instanceof Error ? cause.message : "Failed to load tasks.");
+    } finally {
+      setBrowsing(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!browse?.nextCursor) return;
+    setBrowsing(true);
+    setBrowseError(null);
+    try {
+      const page = await fetchTaskPage(activeSearch ?? "", browse.nextCursor);
+      setBrowse({ tasks: [...browse.tasks, ...page.tasks], nextCursor: page.nextCursor });
+    } catch (cause) {
+      setBrowseError(cause instanceof Error ? cause.message : "Failed to load more tasks.");
+    } finally {
+      setBrowsing(false);
+    }
+  }
+
+  /**
+   * A successful mutation refreshed the server props; when a search is active
+   * the rendered rows come from the client browse snapshot instead, so the
+   * search is re-issued to keep that snapshot honest.
+   */
+  async function refreshActiveSearch() {
+    if (activeSearch !== null) {
+      await runSearch(activeSearch);
+    }
+  }
+
+  const visibleTasks = browse ? browse.tasks : tasks;
+
+  // MF-05: the three sections render the same slice the server sent when no
+  // search is active, and the paged client snapshot when one is — the grouping
+  // rules themselves are unchanged from the pre-search board.
+  const inProgress = visibleTasks.filter((task) => task.status === "in_progress");
+  const onHold = visibleTasks.filter((task) => task.status === "on_hold");
+  const finished = visibleTasks.filter(
+    (task) => task.status === "completed" || task.status === "cancelled",
+  );
 
   function renderTaskSection(title: string, tasks: Task[], isFinished: boolean) {
     if (tasks.length === 0) return null;
@@ -452,6 +548,77 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           </div>
         </div>
       </form>
+
+      {/* MF-05 opt-in search: typing here switches the board from the full
+          server-rendered list to the paged /api/tasks contract; clearing it
+          returns to the default no-paging view. */}
+      <div className="rounded-2xl border border-surface-border bg-surface p-4 shadow-xl backdrop-blur-xl">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runSearch(searchInput);
+          }}
+        >
+          <label htmlFor={`task-search-${projectId}`} className="sr-only">
+            Search tasks by title
+          </label>
+          <input
+            id={`task-search-${projectId}`}
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search tasks by title…"
+            className="min-w-0 flex-1 rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2 text-sm text-zinc-900 outline-none transition-all placeholder:text-zinc-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-blue-500 dark:focus:bg-zinc-800 dark:focus:ring-blue-900/30"
+            disabled={browsing}
+          />
+          <button
+            type="submit"
+            disabled={browsing || !searchInput.trim()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-blue-700 to-indigo-700 px-4 py-2 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+          >
+            Search
+          </button>
+          {activeSearch !== null ? (
+            <button
+              type="button"
+              onClick={clearSearch}
+              disabled={browsing}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-2 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
+            >
+              Clear
+            </button>
+          ) : null}
+        </form>
+        {browse ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+            <span>
+              {browse.tasks.length} match{browse.tasks.length === 1 ? "" : "es"}
+              {activeSearch ? ` for “${activeSearch}”` : ""}
+            </span>
+            {browse.nextCursor ? (
+              <button
+                type="button"
+                onClick={() => void loadMore()}
+                disabled={browsing}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200/60 bg-blue-50/60 px-3 py-1.5 text-xs font-medium text-blue-700 transition-all hover:bg-blue-100/70 disabled:opacity-50 dark:border-blue-800/40 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/30"
+              >
+                {browsing ? "Loading…" : "Load more"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {browse && browse.tasks.length === 0 && !browsing ? (
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            No tasks in this project match the search.
+          </p>
+        ) : null}
+        {browseError ? (
+          <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-400">
+            {browseError}
+          </p>
+        ) : null}
+      </div>
 
       {error ? (
         <div className="flex items-center gap-2 rounded-xl border border-red-200/50 bg-red-50/70 px-4 py-3 text-sm text-red-700 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
