@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Card, PageHeader } from "@/components/ui/card";
 
 interface ModalShellProps {
   isOpen: boolean;
@@ -30,22 +31,21 @@ export function ModalShell({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/20 bg-white/80 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
+      <Card variant="glass-strong" className="relative max-h-[90vh] w-full max-w-2xl overflow-hidden">
         <div className="absolute inset-0 bg-linear-to-br from-blue-500/10 to-indigo-500/10 opacity-50" />
 
         <div className="relative max-h-[90vh] overflow-y-auto p-6">
-          <div className="mb-6 flex items-center gap-3">
-            <div
-              className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg ${iconClassName}`}
-            >
-              {icon}
-            </div>
-            <h2 className="text-xl font-semibold text-zinc-800 dark:text-zinc-100">{title}</h2>
-          </div>
+          <PageHeader
+            level={2}
+            title={title}
+            icon={icon}
+            iconClassName={iconClassName}
+            titleClassName="text-xl font-semibold text-zinc-800 dark:text-zinc-100"
+          />
 
           {children}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
@@ -58,12 +58,7 @@ export function ModalCancelButton({
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClose}
-      disabled={disabled}
-      className="rounded-xl border border-zinc-200/50 bg-white/50 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
-    >
+    <button type="button" onClick={onClose} disabled={disabled} className="btn-secondary">
       Cancel
     </button>
   );

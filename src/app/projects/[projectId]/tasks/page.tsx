@@ -127,7 +127,7 @@ export default async function TasksPage({ params }: Props) {
         <div className="mb-6">
           <Link
             href={`/jobs/${project.jobId}/projects`}
-            className="group inline-flex items-center gap-2 text-sm font-medium text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            className="group inline-flex items-center gap-2 text-sm font-medium text-blue-700 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <svg className="h-4 w-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -136,7 +136,7 @@ export default async function TasksPage({ params }: Props) {
           </Link>
           <div className="mt-4 flex items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
+              <h1 className="text-3xl font-bold bg-linear-to-r from-blue-700 to-indigo-700 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
                 {project.name}
               </h1>
               <p className="mt-2 text-zinc-600 dark:text-zinc-400">

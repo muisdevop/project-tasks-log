@@ -169,7 +169,7 @@ export function GlobalBreakWidget() {
   if (pathname === "/login") return null;
 
   return (
-    <div className="fixed right-6 top-6 z-50">
+    <div className="fixed bottom-3 right-3 z-50 max-w-[calc(100vw-1.5rem)] md:bottom-auto md:right-6 md:top-6 md:max-w-none">
       {activeBreak ? (
         <div
           className={`overflow-hidden rounded-2xl border border-white/20 shadow-2xl backdrop-blur-xl transition-all ${
@@ -178,15 +178,15 @@ export function GlobalBreakWidget() {
               : "bg-orange-500/90 dark:bg-orange-600/90"
           }`}
         >
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20">
               <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-white">{activeBreak.name}</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-2xl font-bold text-white tabular-nums">
                 {remainingSeconds !== null
                   ? formatElapsed(remainingSeconds)
                   : formatElapsed(elapsedSeconds)}
@@ -195,7 +195,7 @@ export function GlobalBreakWidget() {
             <button
               onClick={endBreak}
               disabled={loading}
-              className="ml-4 rounded-xl bg-white/20 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/30 disabled:opacity-50"
+              className="ml-auto shrink-0 rounded-xl bg-white/20 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/30 disabled:opacity-50"
             >
               {loading ? "Ending..." : "End Break"}
             </button>
@@ -223,9 +223,10 @@ export function GlobalBreakWidget() {
         <div className="relative">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/80 px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white/95 hover:shadow-xl dark:border-white/10 dark:bg-slate-900/80 dark:text-zinc-200 dark:hover:bg-slate-900/95"
+            aria-expanded={isExpanded}
+            className="flex items-center gap-2 rounded-xl border border-surface-border bg-surface-strong px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white/95 hover:shadow-xl dark:text-zinc-200 dark:hover:bg-slate-900/95"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-orange-500 to-amber-500 text-white">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-orange-500 to-amber-500 text-white">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -234,7 +235,7 @@ export function GlobalBreakWidget() {
           </button>
 
           {isExpanded && (
-            <div className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-white/20 bg-white/80 p-5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
+            <div className="absolute bottom-full right-0 mb-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-surface-border bg-surface-strong p-5 shadow-2xl backdrop-blur-xl md:bottom-auto md:top-full md:mb-0 md:mt-2">
               <h3 className="mb-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100">Select Break Type</h3>
               {!activeJobId ? (
                 <div className="mb-3 rounded-xl border border-amber-200/60 bg-amber-50/80 p-3 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-300">
@@ -258,7 +259,7 @@ export function GlobalBreakWidget() {
               <button
                 onClick={startBreak}
                 disabled={!activeJobId || !selectedBreak || loading}
-                className="w-full rounded-xl bg-linear-to-r from-orange-500 to-amber-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
+                className="w-full rounded-xl bg-linear-to-r from-orange-700 to-amber-700 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
               >
                 {loading ? "Starting..." : "Start Break"}
               </button>

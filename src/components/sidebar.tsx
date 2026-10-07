@@ -3,13 +3,23 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { resolveActiveJobId } from "@/lib/navigation";
 import { GlobalBreakWidget } from "./global-break-widget";
 import { useStoredState } from "@/hooks/use-stored-state";
+import { useMediaQuery } from "@/hooks/use-media-query";
+
+// Tailwind v4 default `md` breakpoint: the sidebar is docked at md and up, an
+// off-canvas drawer below it.
+const MD_AND_UP = "(min-width: 768px)";
+const SIDEBAR_ID = "app-sidebar";
+const MAIN_CONTENT_ID = "main-content";
 
 interface SidebarProps {
   username?: string | null;
+  /** Drawer visibility below md; ignored at md+ where the sidebar is docked. */
+  open?: boolean;
+  isDesktop?: boolean;
 }
 
 interface Job {
@@ -56,7 +66,23 @@ function LogoutIcon({ className }: { className?: string }) {
   );
 }
 
-export function Sidebar({ username }: SidebarProps) {
+function MenuIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6l12 12M6 18L18 6" />
+    </svg>
+  );
+}
+
+export function Sidebar({ username, open = true, isDesktop = true }: SidebarProps) {
   const SIDEBAR_JOBS_CACHE_KEY = "sidebar-jobs-cache";
   const SIDEBAR_PROJECTS_CACHE_KEY = "sidebar-projects-cache";
   const pathname = usePathname();
@@ -191,8 +217,19 @@ export function Sidebar({ username }: SidebarProps) {
   }));
   const displayName = profileName || username || null;
 
+  // Closed drawer below md: `invisible` removes its tab stops from the DOM the
+  // instant it slides out, so nothing has to be unmounted (BG-02 safe).
+  const drawerHidden = !isDesktop && !open;
+
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur-xl dark:bg-slate-950/95">
+    <aside
+      id={SIDEBAR_ID}
+      aria-label="Main navigation"
+      aria-hidden={drawerHidden || undefined}
+      className={`fixed left-0 top-14 z-55 flex h-[calc(100dvh-3.5rem)] w-64 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur-xl transition-transform duration-200 ease-out dark:bg-slate-950/95 md:top-0 md:h-screen md:z-40 ${
+        open ? "visible translate-x-0" : "invisible -translate-x-full md:visible md:translate-x-0"
+      }`}
+    >
       {/* Logo Section */}
       <div className="flex h-16 items-center border-b border-white/10 px-6">
         <Link href="/dashboard" className="flex items-center gap-3">
@@ -222,7 +259,7 @@ export function Sidebar({ username }: SidebarProps) {
         <div className="mt-4">
           <div className="flex items-center justify-between px-4 py-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Jobs</span>
+              <span className="text-xs font-semibold uppercase tracking-widest text-slate-600">Jobs</span>
               <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-xs text-slate-400">{jobs.length}</span>
             </div>
             <Link
@@ -236,9 +273,9 @@ export function Sidebar({ username }: SidebarProps) {
 
           <div className="mt-2 space-y-1">
             {loading ? (
-              <div className="px-4 py-2 text-sm text-slate-500">Loading jobs...</div>
+              <div className="px-4 py-2 text-sm text-slate-600">Loading jobs...</div>
             ) : jobs.length === 0 ? (
-              <div className="px-4 py-2 text-sm text-slate-500">No jobs yet</div>
+              <div className="px-4 py-2 text-sm text-slate-600">No jobs yet</div>
             ) : (
               jobsForProjects.map((job) => (
                 <div key={job.id}>
@@ -284,13 +321,13 @@ export function Sidebar({ username }: SidebarProps) {
                           >
                             <ProjectsIcon className="h-4 w-4" />
                             <span className="flex-1 text-left">Projects</span>
-                            <span className="rounded bg-slate-800/50 px-1.5 py-0.5 text-xs text-slate-500">
+                            <span className="rounded bg-slate-800/50 px-1.5 py-0.5 text-xs text-slate-600">
                               {job.projects.length}
                             </span>
                           </Link>
                           <button
                             onClick={() => toggleProjectsMenu(job.id)}
-                            className="rounded p-1.5 text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-300"
+                            className="rounded p-1.5 text-slate-600 transition-colors hover:bg-white/10 hover:text-slate-300"
                             title="Toggle project list"
                           >
                             <svg
@@ -309,7 +346,7 @@ export function Sidebar({ username }: SidebarProps) {
                         {expandedProjectsMenu.includes(job.id) && (
                           <div className="ml-6 space-y-1">
                             {job.projects.length === 0 ? (
-                              <div className="px-3 py-2 text-xs text-slate-500">No projects</div>
+                              <div className="px-3 py-2 text-xs text-slate-600">No projects</div>
                             ) : (
                               job.projects.map((project) => (
                                 <Link
@@ -442,12 +479,98 @@ export function SidebarLayout({
   children: React.ReactNode;
   username?: string | null;
 }) {
+  const pathname = usePathname();
+  const isDesktop = useMediaQuery(MD_AND_UP);
+  const [navOpen, setNavOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+
+  // navOpen alone would stay "true" if the viewport grows past md while the
+  // drawer is open; gating on the breakpoint keeps the desktop shell inert.
+  const drawerOpen = !isDesktop && navOpen;
+
+  useEffect(() => {
+    if (!pathname) return;
+    const dismiss = () => setNavOpen(false);
+    dismiss();
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+
+    // Focus stays on the trigger: this is a disclosure (aria-expanded), not a
+    // dialog, and Chrome drops focus() on nodes that only became visible in the
+    // commit currently being flushed.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const close = () => {
+      setNavOpen(false);
+      toggleRef.current?.focus();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [drawerOpen]);
+
+  function handleNavToggle() {
+    if (drawerOpen) {
+      setNavOpen(false);
+      toggleRef.current?.focus();
+      return;
+    }
+    setNavOpen(true);
+  }
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar username={username} />
+      <a
+        href={`#${MAIN_CONTENT_ID}`}
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[80] focus:rounded-xl focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-slate-900 focus:shadow-xl dark:focus:bg-slate-900 dark:focus:text-white"
+      >
+        Skip to content
+      </a>
+
+      {/* Only present below md; the drawer starts under this bar so the trigger
+          stays reachable while the drawer is open. */}
+      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-slate-900/10 bg-white/90 px-3 backdrop-blur-md md:hidden dark:border-white/10 dark:bg-slate-950/90">
+        <button
+          ref={toggleRef}
+          type="button"
+          onClick={handleNavToggle}
+          aria-expanded={drawerOpen}
+          aria-controls={SIDEBAR_ID}
+          aria-label={drawerOpen ? "Close main navigation" : "Open main navigation"}
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-900/10 text-slate-700 transition-colors hover:bg-slate-900/5 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/10"
+        >
+          {drawerOpen ? <CloseIcon className="h-5 w-5" /> : <MenuIcon className="h-5 w-5" />}
+        </button>
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900/5 ring-1 ring-slate-900/10 dark:bg-white/10 dark:ring-white/15">
+            <Image src="/logo-new.svg" alt="" width={18} height={18} className="h-4 w-4" />
+          </div>
+          <span className="text-sm font-bold text-slate-900 dark:text-white">GID Task Flow</span>
+        </Link>
+      </header>
+
+      {drawerOpen && (
+        <div
+          aria-hidden="true"
+          onClick={handleNavToggle}
+          className="fixed bottom-0 left-0 right-0 top-14 z-52 bg-slate-950/50 backdrop-blur-sm md:hidden"
+        />
+      )}
+
+      <Sidebar username={username} open={navOpen} isDesktop={isDesktop} />
       <GlobalBreakWidget />
-      <main className="flex-1 pl-64">
-        <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-8 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10">
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex-1 pt-14 outline-none md:pl-64 md:pt-0">
+        <div className="min-h-[calc(100vh-3.5rem)] bg-linear-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-4 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10 sm:p-6 md:min-h-screen md:p-8">
           {children}
         </div>
       </main>

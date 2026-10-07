@@ -1,4 +1,4 @@
-import { ExportPageContent } from "@/components/export-page-content";
+import { ExportPageLoader } from "@/components/export-page-loader";
 import { SidebarLayout } from "@/components/sidebar";
 import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -12,7 +12,7 @@ export default async function ExportPage() {
   return (
     <SidebarLayout username={username}>
       <div className="mx-auto w-full max-w-4xl">
-        <ExportPageContent />
+        <ExportPageLoader />
       </div>
     </SidebarLayout>
   );

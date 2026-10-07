@@ -1,67 +1,79 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { readApiError, useKeyedApiMutation } from "@/hooks/use-api-mutation";
 import { ConfirmDialog } from "./confirm-dialog";
 
-type SubTask = {
+export type SubTask = {
   id: number;
-  taskId: number;
   title: string;
   isCompleted: boolean;
-  createdAt: string;
-  updatedAt: string;
 };
 
 interface SubTasksProps {
   taskId: number;
   taskStatus: string;
+  /**
+   * Subtasks already present on the parent task payload (PF-06). When supplied,
+   * the list renders straight from props and skips the mount fetch.
+   */
+  initialSubtasks?: SubTask[];
 }
 
 type LoadResult = { ok: true; subtasks: SubTask[] } | { ok: false; error: string };
+
+// Keyed busy flag for the add form; item mutations key themselves by subtask id.
+const ADD_KEY = "add";
+
+const LOAD_FAILURE = "Failed to load subtasks";
 
 // Module scope so the effect can call it without a component-body setter chain.
 async function loadSubtasks(taskId: number): Promise<LoadResult> {
   try {
     const response = await fetch(`/api/subtasks?taskId=${taskId}`, { cache: "no-store" });
-    if (response.ok) {
-      const data = await response.json();
-      return { ok: true, subtasks: (data.subtasks || []) as SubTask[] };
+    if (!response.ok) {
+      return { ok: false, error: await readApiError(response, LOAD_FAILURE) };
     }
-    const data = await response.json().catch(() => ({}));
-    return { ok: false, error: data.error || "Failed to load subtasks" };
+    const data = (await response.json()) as { subtasks?: SubTask[] };
+    return { ok: true, subtasks: data.subtasks ?? [] };
   } catch {
-    return { ok: false, error: "Failed to load subtasks" };
+    return { ok: false, error: LOAD_FAILURE };
   }
 }
 
-export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
-  const [subtasks, setSubtasks] = useState<SubTask[]>([]);
+export function SubTasks({ taskId, taskStatus, initialSubtasks }: SubTasksProps) {
+  const [subtasks, setSubtasks] = useState<SubTask[]>(() => initialSubtasks ?? []);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const {
+    mutate,
+    isBusy,
+    error,
+    setError,
+  } = useKeyedApiMutation<string | number>();
 
   const isInProgress = taskStatus === "in_progress";
+  const hasSeededSubtasks = initialSubtasks !== undefined;
 
   // Hooks must run unconditionally (BG-01); the early return lives below.
   // The component renders null while the task is not in progress, so no reset
-  // is needed — the list reloads when it becomes active again.
+  // is needed — subtasks only change through this list, which refreshes itself.
+  // PF-06: rows already on the parent payload need no mount fetch.
   useEffect(() => {
-    if (!isInProgress) return;
+    if (!isInProgress || hasSeededSubtasks) return;
     const run = async () => {
       const result = await loadSubtasks(taskId);
       if (result.ok) setSubtasks(result.subtasks);
       else setError(result.error);
     };
     void run();
-  }, [isInProgress, taskId]);
+  }, [hasSeededSubtasks, isInProgress, taskId, setError]);
 
   const refresh = useCallback(async () => {
     const result = await loadSubtasks(taskId);
     if (result.ok) setSubtasks(result.subtasks);
     else setError(result.error);
-  }, [taskId]);
+  }, [setError, taskId]);
 
   if (!isInProgress) {
     return null;
@@ -81,74 +93,52 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    const ok = await mutate(ADD_KEY, "/api/subtasks", {
+      method: "POST",
+      body: {
+        taskId,
+        title: trimmedTitle,
+      },
+      fallbackError: "Failed to add subtask",
+      refresh: false,
+    });
 
-    try {
-      const response = await fetch("/api/subtasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskId,
-          title: trimmedTitle,
-        }),
-      });
+    if (!ok) return;
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Failed to add subtask");
-        return;
-      }
-
-      setNewSubtaskTitle("");
-      await refresh();
-    } catch {
-      setError("Failed to add subtask");
-    } finally {
-      setLoading(false);
-    }
+    setNewSubtaskTitle("");
+    await refresh();
   }
 
   async function toggleSubtask(id: number, isCompleted: boolean) {
-    setError(null);
-    try {
-      const response = await fetch("/api/subtasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, isCompleted }),
-      });
+    const ok = await mutate(id, "/api/subtasks", {
+      method: "PATCH",
+      body: { id, isCompleted },
+      fallbackError: "Failed to update subtask",
+      refresh: false,
+    });
 
-      if (response.ok) {
-        await refresh();
-      } else {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Failed to update subtask");
-      }
-    } catch {
-      setError("Failed to update subtask");
+    if (ok) {
+      await refresh();
     }
   }
 
   async function confirmDeleteSubtask() {
     if (pendingDeleteId === null) return;
-    setDeleting(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/subtasks?id=${pendingDeleteId}`, { method: "DELETE" });
-      if (response.ok) {
-        setPendingDeleteId(null);
-        await refresh();
-      } else {
-        const data = await response.json().catch(() => ({}));
-        setError(data.error || "Failed to delete subtask");
-      }
-    } catch {
-      setError("Failed to delete subtask");
-    } finally {
-      setDeleting(false);
-    }
+
+    const ok = await mutate(pendingDeleteId, `/api/subtasks?id=${pendingDeleteId}`, {
+      method: "DELETE",
+      fallbackError: "Failed to delete subtask",
+      refresh: false,
+    });
+
+    if (!ok) return;
+
+    setPendingDeleteId(null);
+    await refresh();
   }
 
+  const adding = isBusy(ADD_KEY);
+  const deleting = pendingDeleteId !== null && isBusy(pendingDeleteId);
   const completedCount = subtasks.filter(st => st.isCompleted).length;
   const totalCount = subtasks.length;
 
@@ -168,7 +158,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
         </div>
         <div className="h-1.5 w-16 overflow-hidden rounded-full bg-violet-200/50 dark:bg-violet-800/30">
           <div 
-            className="h-full rounded-full bg-linear-to-r from-violet-500 to-purple-500 transition-all duration-300"
+            className="h-full rounded-full bg-linear-to-r from-violet-700 to-purple-700 transition-all duration-300"
             style={{ width: totalCount > 0 ? `${(completedCount / totalCount) * 100}%` : '0%' }}
           />
         </div>
@@ -217,14 +207,14 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
           onChange={(e) => setNewSubtaskTitle(e.target.value)}
           placeholder="Add a subtask..."
           className="flex-1 rounded-lg border border-zinc-200/50 bg-white/50 px-3 py-1.5 text-sm text-zinc-700 outline-none transition-all placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500 dark:focus:bg-zinc-800 dark:focus:ring-violet-900/30"
-          disabled={loading}
+          disabled={adding}
         />
         <button
           type="submit"
-          disabled={loading || !newSubtaskTitle.trim()}
-          className="inline-flex items-center gap-1 rounded-lg bg-linear-to-r from-violet-500 to-purple-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-violet-500/30 transition-all hover:shadow-lg hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+          disabled={adding || !newSubtaskTitle.trim()}
+          className="inline-flex items-center gap-1 rounded-lg bg-linear-to-r from-violet-700 to-purple-700 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-violet-500/30 transition-all hover:shadow-lg hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
         >
-          {loading ? (
+          {adding ? (
             <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -239,7 +229,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
       </form>
 
       {error && (
-        <div className="flex items-center gap-2 rounded-lg border border-red-200/50 bg-red-50/70 p-2 text-sm text-red-600 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
+        <div className="flex items-center gap-2 rounded-lg border border-red-200/50 bg-red-50/70 p-2 text-sm text-red-700 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -251,7 +241,16 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
     <ConfirmDialog
       isOpen={pendingDeleteId !== null}
       title="Delete subtask"
-      message="This removes the subtask from the task permanently. This cannot be undone."
+      message={
+        <div className="space-y-3">
+          <p>This removes the subtask from the task permanently. This cannot be undone.</p>
+          {error && (
+            <p className="text-xs font-medium text-red-700 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      }
       confirmLabel="Delete"
       busy={deleting}
       onConfirm={confirmDeleteSubtask}

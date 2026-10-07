@@ -1,14 +1,14 @@
 "use client";
 
 import { formatElapsed } from "@/lib/business-time";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useStoredState } from "@/hooks/use-stored-state";
-import { RichTextEditor } from "./rich-text-editor";
+import { useApiMutation, useKeyedApiMutation } from "@/hooks/use-api-mutation";
+import { LazyRichTextEditor as RichTextEditor } from "./rich-text-editor-lazy";
 import { RichTextDisplay } from "./rich-text-display";
 import { TaskActionModal } from "./task-action-modal";
 import { LogNotesModal } from "./log-notes-modal";
-import { SubTasks } from "./subtasks";
+import { SubTasks, type SubTask } from "./subtasks";
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -25,26 +25,29 @@ type Task = {
   completionOutput: string | null;
   cancellationReason: string | null;
   logNotes: string | null;
-  subtasks: {
-    id: number;
-    title: string;
-    isCompleted: boolean;
-  }[];
+  subtasks: SubTask[];
 };
 
+// Keyed busy flag for the create form; task operations key themselves by task id.
+const CREATE_KEY = "create";
+
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
-  const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
-  const [modalLoading, setModalLoading] = useState(false);
-  const [modalError, setModalError] = useState<string | null>(null);
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
   const [logNotesError, setLogNotesError] = useState<string | null>(null);
-  // BG-04: pending state is tracked per task id so two parallel operations
-  // cannot lose each other's busy flag.
-  const [busyTaskIds, setBusyTaskIds] = useState<number[]>([]);
+  // BG-04: board-level requests (create, hold/resume, notes) stay busy per task
+  // id so two parallel operations cannot lose each other's busy flag.
+  const { mutate: requestBoard, isBusy, error } = useKeyedApiMutation<string | number>();
+  // UX-01: the action modal keeps its own pending/error pair so a failure leaves
+  // it mounted with the draft intact instead of surfacing behind the backdrop.
+  const {
+    mutate: requestAction,
+    pending: modalLoading,
+    error: modalError,
+    setError: setModalError,
+  } = useApiMutation();
 
   // BG-02: collapse state lives in Web Storage. The arrays (not Sets, which do
   // not survive JSON) are the stored shape, and the first render always matches
@@ -106,89 +109,47 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    const response = await fetch("/api/tasks", {
+    const ok = await requestBoard(CREATE_KEY, "/api/tasks", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, title, description }),
+      body: { projectId, title, description },
+      fallbackError: "Failed to create task.",
     });
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to create task.");
-      return;
-    }
+    if (!ok) return;
     setTitle("");
     setDescription("");
-    router.refresh();
-  }
-
-  function markBusy(taskId: number, busy: boolean) {
-    setBusyTaskIds((prev) =>
-      busy ? Array.from(new Set([...prev, taskId])) : prev.filter((id) => id !== taskId),
-    );
-  }
-
-  async function readError(response: Response, fallback: string): Promise<string> {
-    const data = (await response.json().catch(() => ({}))) as { error?: string };
-    return data.error ?? fallback;
   }
 
   async function runAction(taskId: number, action: "complete" | "cancel" | "resume" | "hold") {
     if (action === "resume" || action === "hold") {
-      markBusy(taskId, true);
-      setError(null);
-      try {
-        const response = await fetch("/api/tasks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId, action }),
-        });
-        if (!response.ok) {
-          setError(await readError(response, "Failed to update task."));
-        } else {
-          router.refresh();
-        }
-      } catch {
-        setError("Failed to update task.");
-      } finally {
-        markBusy(taskId, false);
-      }
-    } else {
-      setModalError(null);
-      setModalAction({ type: action, taskId });
+      await requestBoard(taskId, "/api/tasks", {
+        method: "PATCH",
+        body: { taskId, action },
+        fallbackError: "Failed to update task.",
+      });
+      return;
     }
+
+    setModalError(null);
+    setModalAction({ type: action, taskId });
   }
 
   async function handleModalConfirm(details: string) {
     if (!modalAction) return;
 
-    setModalLoading(true);
-    setModalError(null);
+    const ok = await requestAction("/api/tasks", {
+      method: "PATCH",
+      body: {
+        taskId: modalAction.taskId,
+        action: modalAction.type,
+        details: details,
+      },
+      fallbackError: "Failed to update task.",
+    });
 
-    try {
-      const response = await fetch("/api/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskId: modalAction.taskId,
-          action: modalAction.type,
-          details: details,
-        }),
-      });
-
-      if (!response.ok) {
-        // UX-01: keep the modal open with the typed details intact so the user
-        // can retry instead of losing the work output they wrote.
-        setModalError(await readError(response, "Failed to update task."));
-        return;
-      }
-
+    // UX-01: only a success unmounts the modal, so a failed attempt keeps the
+    // typed details available for retry.
+    if (ok) {
       setModalAction(null);
-      router.refresh();
-    } catch {
-      setModalError("Failed to update task.");
-    } finally {
-      setModalLoading(false);
     }
   }
 
@@ -196,27 +157,17 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     if (!logNotesTask) return;
 
     const { taskId } = logNotesTask;
-    markBusy(taskId, true);
     setLogNotesError(null);
 
-    try {
-      const response = await fetch("/api/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, action: "log-notes", notes: notes }),
-      });
+    const ok = await requestBoard(taskId, "/api/tasks", {
+      method: "PATCH",
+      body: { taskId, action: "log-notes", notes: notes },
+      fallbackError: "Failed to save notes.",
+      onFail: setLogNotesError,
+    });
 
-      if (!response.ok) {
-        setLogNotesError(await readError(response, "Failed to save notes."));
-        return;
-      }
-
+    if (ok) {
       setLogNotesTask(null);
-      router.refresh();
-    } catch {
-      setLogNotesError("Failed to save notes.");
-    } finally {
-      markBusy(taskId, false);
     }
   }
 
@@ -231,7 +182,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     const sortedDates = Object.keys(groupedTasks).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
     return (
-      <section className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
+      <section className="group relative overflow-hidden rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl">
         <div className="absolute inset-0 bg-linear-to-br from-violet-500/5 to-purple-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         
         <div className="relative">
@@ -277,11 +228,11 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                       })}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      <span className="text-xs text-zinc-600 dark:text-zinc-400">
                         {dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}
                       </span>
                       <svg 
-                        className={`w-4 h-4 text-zinc-500 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
+                        className={`w-4 h-4 text-zinc-600 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
                         fill="currentColor" 
                         viewBox="0 0 20 20"
                       >
@@ -303,7 +254,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                           >
                             <p className="font-semibold text-zinc-800 dark:text-zinc-100">{task.title}</p>
                             <svg
-                              className={`h-4 w-4 text-zinc-500 transition-transform ${isTaskCollapsed ? "" : "rotate-180"}`}
+                              className={`h-4 w-4 text-zinc-600 transition-transform ${isTaskCollapsed ? "" : "rotate-180"}`}
                               fill="currentColor"
                               viewBox="0 0 20 20"
                             >
@@ -315,8 +266,13 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                             <>
                           <RichTextDisplay content={task.description} className="mt-2 text-sm text-zinc-600 dark:text-zinc-300" />
                           
-                          {/* Subtasks - only for in-progress tasks */}
-                          <SubTasks taskId={task.id} taskStatus={task.status} />
+                          {/* Subtasks - only for in-progress tasks. PF-06: the rows
+                              ride in on the task payload, so no per-task fetch. */}
+                          <SubTasks
+                            taskId={task.id}
+                            taskStatus={task.status}
+                            initialSubtasks={task.subtasks}
+                          />
                           
                           {task.logNotes ? (
                             <div className="mt-3 rounded-lg border border-blue-200/50 bg-blue-50/50 p-3 dark:border-blue-800/30 dark:bg-blue-900/20">
@@ -338,7 +294,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                             <div className="mt-3 flex flex-wrap gap-2">
                               <button
                                 onClick={() => runAction(task.id, "complete")}
-                                disabled={busyTaskIds.includes(task.id)}
+                                disabled={isBusy(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -348,7 +304,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "hold")}
-                                disabled={busyTaskIds.includes(task.id)}
+                                disabled={isBusy(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-amber-500/30 transition-all hover:shadow-lg hover:shadow-amber-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -358,8 +314,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "cancel")}
-                                disabled={busyTaskIds.includes(task.id)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
+                                disabled={isBusy(task.id)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-700 to-rose-700 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -368,7 +324,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => setLogNotesTask({ taskId: task.id, notes: "" })}
-                                disabled={busyTaskIds.includes(task.id)}
+                                disabled={isBusy(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -383,7 +339,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                             <div className="mt-3 flex flex-wrap gap-2">
                               <button
                                 onClick={() => runAction(task.id, "resume")}
-                                disabled={busyTaskIds.includes(task.id)}
+                                disabled={isBusy(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-indigo-500/30 transition-all hover:shadow-lg hover:shadow-indigo-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -394,8 +350,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "cancel")}
-                                disabled={busyTaskIds.includes(task.id)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
+                                disabled={isBusy(task.id)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-700 to-rose-700 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -408,7 +364,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                           {task.status !== "in_progress" ? (
                             <>
                               {task.endedAt ? (
-                                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                                <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
                                   Ended: {formatDateTime(task.endedAt)}
                                 </p>
                               ) : null}
@@ -427,7 +383,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               {task.status === "cancelled" ? (
                                 <button
                                   onClick={() => runAction(task.id, "resume")}
-                                  disabled={busyTaskIds.includes(task.id)}
+                                  disabled={isBusy(task.id)}
                                   className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/50 bg-white/50 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
                                 >
                                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -458,7 +414,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       {/* Create Task Form - Glassmorphism */}
       <form
         onSubmit={createTask}
-        className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70"
+        className="group relative overflow-hidden rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl"
       >
         <div className="absolute inset-0 bg-linear-to-br from-blue-500/10 to-indigo-500/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         
@@ -488,8 +444,8 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             </div>
             <button
               type="submit"
-              disabled={!title.trim()}
-              className="rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+              disabled={!title.trim() || isBusy(CREATE_KEY)}
+              className="rounded-xl bg-linear-to-r from-blue-700 to-indigo-700 px-6 py-2.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
             >
               Create Task
             </button>
@@ -498,7 +454,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       </form>
 
       {error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-red-200/50 bg-red-50/70 px-4 py-3 text-sm text-red-600 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
+        <div className="flex items-center gap-2 rounded-xl border border-red-200/50 bg-red-50/70 px-4 py-3 text-sm text-red-700 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -534,7 +490,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           onClose={() => setLogNotesTask(null)}
           onConfirm={handleLogNotes}
           initialNotes={logNotesTask.notes}
-          loading={busyTaskIds.includes(logNotesTask.taskId)}
+          loading={isBusy(logNotesTask.taskId)}
           error={logNotesError}
         />
       ) : null}

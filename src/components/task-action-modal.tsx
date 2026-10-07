@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { RichTextEditor } from "./rich-text-editor";
+import { LazyRichTextEditor as RichTextEditor } from "./rich-text-editor-lazy";
 import { ModalShell, ModalCancelButton, ModalSpinner } from "./modal-shell";
+import { StatusBanner } from "@/components/ui/status-banner";
 
 interface TaskActionModalProps {
   isOpen: boolean;
@@ -56,16 +57,9 @@ export function TaskActionModal({
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {error ? (
-          <p
-            role="alert"
-            className="rounded-xl border border-red-200/60 bg-red-50/70 px-4 py-2.5 text-sm text-red-600 dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-400"
-          >
-            {error}
-          </p>
-        ) : null}
+        {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
         <div>
-          <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label className="field-label mb-2">
             Details
           </label>
           <div className="rounded-xl border border-zinc-200/50 bg-white/50 p-1 dark:border-zinc-700/50 dark:bg-zinc-800/50">
@@ -82,11 +76,7 @@ export function TaskActionModal({
           <button
             type="submit"
             disabled={loading}
-            className={`rounded-xl px-5 py-2.5 text-sm font-medium text-white shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 ${
-              confirmText === "Complete"
-                ? "bg-linear-to-r from-emerald-500 to-green-500 shadow-emerald-500/30 hover:shadow-emerald-500/40"
-                : "bg-linear-to-r from-red-500 to-rose-500 shadow-red-500/30 hover:shadow-red-500/40"
-            }`}
+            className={confirmText === "Complete" ? "btn-success" : "btn-danger"}
           >
             {loading ? (
               <span className="flex items-center gap-2">

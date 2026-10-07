@@ -65,7 +65,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
         openOnClick: false,
         linkOnPaste: true,
         HTMLAttributes: {
-          class: "text-blue-600 hover:text-blue-800 underline dark:text-blue-400 dark:hover:text-blue-300",
+          class: "text-blue-700 hover:text-blue-800 underline dark:text-blue-400 dark:hover:text-blue-300",
           rel: "noopener noreferrer nofollow",
           target: "_blank",
         },
@@ -261,7 +261,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
       </div>
 
       {linkError && (
-        <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
+        <p className="text-xs font-medium text-red-700 dark:text-red-400" role="alert">
           Invalid URL. {linkError}
         </p>
       )}

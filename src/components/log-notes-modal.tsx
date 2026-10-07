@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { RichTextEditor } from "./rich-text-editor";
+import { LazyRichTextEditor as RichTextEditor } from "./rich-text-editor-lazy";
 import { ModalShell, ModalCancelButton, ModalSpinner } from "./modal-shell";
+import { StatusBanner } from "@/components/ui/status-banner";
 
 interface LogNotesModalProps {
   isOpen: boolean;
@@ -48,16 +49,9 @@ export function LogNotesModal({
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {error ? (
-          <p
-            role="alert"
-            className="rounded-xl border border-red-200/60 bg-red-50/70 px-4 py-2.5 text-sm text-red-600 dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-400"
-          >
-            {error}
-          </p>
-        ) : null}
+        {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
         <div>
-          <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label className="field-label mb-2">
             Progress Notes
           </label>
           <div className="rounded-xl border border-zinc-200/50 bg-white/50 p-1 dark:border-zinc-700/50 dark:bg-zinc-800/50">
@@ -71,11 +65,7 @@ export function LogNotesModal({
 
         <div className="flex justify-end gap-3 pt-4">
           <ModalCancelButton onClose={onClose} disabled={loading} />
-          <button
-            type="submit"
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-500 to-indigo-500 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <button type="submit" disabled={loading} className="btn-primary">
             {loading ? (
               <>
                 <ModalSpinner />

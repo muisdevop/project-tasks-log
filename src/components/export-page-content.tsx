@@ -286,7 +286,7 @@ export function ExportPageContent() {
   }
 
   return (
-    <div className="rounded-3xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
+    <div className="rounded-3xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
           Export Activity Report
@@ -327,7 +327,7 @@ export function ExportPageContent() {
                   value="day"
                   checked={timePeriod === "day"}
                   onChange={() => setTimePeriod("day")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Day (Today)
@@ -341,7 +341,7 @@ export function ExportPageContent() {
                   value="week"
                   checked={timePeriod === "week"}
                   onChange={() => setTimePeriod("week")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Week (Current)
@@ -355,7 +355,7 @@ export function ExportPageContent() {
                   value="month"
                   checked={timePeriod === "month"}
                   onChange={() => setTimePeriod("month")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Month (Current)
@@ -370,7 +370,7 @@ export function ExportPageContent() {
                     value="duration"
                     checked={timePeriod === "duration"}
                     onChange={() => setTimePeriod("duration")}
-                    className="h-4 w-4 text-blue-600"
+                    className="h-4 w-4 text-blue-700"
                   />
                   <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                     Custom Duration
@@ -387,7 +387,7 @@ export function ExportPageContent() {
                           value="preset"
                           checked={durationMode === "preset"}
                           onChange={() => setDurationMode("preset")}
-                          className="h-4 w-4 text-blue-600"
+                          className="h-4 w-4 text-blue-700"
                         />
                         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
                           Presets
@@ -420,7 +420,7 @@ export function ExportPageContent() {
                           value="custom"
                           checked={durationMode === "custom"}
                           onChange={() => setDurationMode("custom")}
-                          className="h-4 w-4 text-blue-600"
+                          className="h-4 w-4 text-blue-700"
                         />
                         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
                           Custom Range
@@ -465,7 +465,7 @@ export function ExportPageContent() {
               Select Jobs
             </h2>
             {jobs.length === 0 ? (
-              <p className="text-sm text-zinc-500">No jobs available</p>
+              <p className="text-sm text-zinc-600">No jobs available</p>
             ) : (
               <div className="space-y-2">
                 <label className="flex items-center gap-2 rounded-lg border-2 border-blue-300/50 bg-blue-50/50 p-2 dark:border-blue-500/30 dark:bg-blue-900/20">
@@ -473,7 +473,7 @@ export function ExportPageContent() {
                     type="checkbox"
                     checked={allJobsSelected}
                     onChange={toggleAllJobs}
-                    className="h-4 w-4 text-blue-600"
+                    className="h-4 w-4 text-blue-700"
                   />
                   <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     All Jobs
@@ -485,7 +485,7 @@ export function ExportPageContent() {
                       type="checkbox"
                       checked={selectedJobs.includes(job.id)}
                       onChange={() => toggleJob(job.id)}
-                      className="h-4 w-4 text-blue-600"
+                      className="h-4 w-4 text-blue-700"
                     />
                     <span className="text-sm text-zinc-700 dark:text-zinc-300">
                       {job.name}
@@ -502,9 +502,9 @@ export function ExportPageContent() {
               Select Projects
             </h2>
             {selectedJobs.length === 0 ? (
-              <p className="text-sm text-zinc-500">Select a job first to see available projects</p>
+              <p className="text-sm text-zinc-600">Select a job first to see available projects</p>
             ) : filteredProjects.length === 0 ? (
-              <p className="text-sm text-zinc-500">No projects available for selected job{selectedJobs.length > 1 ? 's' : ''}</p>
+              <p className="text-sm text-zinc-600">No projects available for selected job{selectedJobs.length > 1 ? 's' : ''}</p>
             ) : (
               <div className="space-y-3 max-h-64 overflow-y-auto">
                 {filteredProjects.length > 0 && (
@@ -513,7 +513,7 @@ export function ExportPageContent() {
                       type="checkbox"
                       checked={allProjectsSelected}
                       onChange={toggleAllProjects}
-                      className="h-4 w-4 text-blue-600"
+                      className="h-4 w-4 text-blue-700"
                     />
                     <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                       All Projects
@@ -535,7 +535,7 @@ export function ExportPageContent() {
                             type="checkbox"
                             checked={selectedProjects.includes(project.id)}
                             onChange={() => toggleProject(project.id)}
-                            className="h-4 w-4 text-blue-600"
+                            className="h-4 w-4 text-blue-700"
                           />
                           <span className="text-sm text-zinc-700 dark:text-zinc-300">
                             {project.name}
@@ -562,7 +562,7 @@ export function ExportPageContent() {
                   value="date"
                   checked={groupBy === "date"}
                   onChange={() => setGroupBy("date")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm text-zinc-700 dark:text-zinc-300">
                   By Date
@@ -575,7 +575,7 @@ export function ExportPageContent() {
                   value="job"
                   checked={groupBy === "job"}
                   onChange={() => setGroupBy("job")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm text-zinc-700 dark:text-zinc-300">
                   By Job
@@ -588,7 +588,7 @@ export function ExportPageContent() {
                   value="project"
                   checked={groupBy === "project"}
                   onChange={() => setGroupBy("project")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm text-zinc-700 dark:text-zinc-300">
                   By Project
@@ -613,7 +613,7 @@ export function ExportPageContent() {
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
               Manage title options from Account Settings.
             </p>
           </div>

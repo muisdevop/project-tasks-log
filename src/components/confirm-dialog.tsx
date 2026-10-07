@@ -61,11 +61,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
-              tone === "danger"
-                ? "bg-linear-to-r from-red-500 to-rose-600 shadow-red-500/30 hover:shadow-lg hover:shadow-red-500/40"
-                : "bg-linear-to-r from-blue-500 to-indigo-600 shadow-blue-500/30 hover:shadow-lg hover:shadow-indigo-500/40"
-            }`}
+            className={tone === "danger" ? "btn-danger" : "btn-primary"}
           >
             {busy && <ModalSpinner />}
             {confirmLabel}
@@ -126,7 +122,7 @@ function InputDialogForm({
         }}
       >
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label className="field-label">
             {label}
           </label>
           <input
@@ -135,16 +131,12 @@ function InputDialogForm({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={placeholder}
-            className="w-full rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2 text-sm text-zinc-700 outline-none transition-all placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-200 dark:focus:border-blue-500 dark:focus:ring-blue-900/30"
+            className="field-input mt-0"
           />
         </div>
         <div className="flex justify-end gap-3">
           <ModalCancelButton onClose={onClose} />
-          <button
-            type="submit"
-            disabled={!trimmed}
-            className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-500 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
-          >
+          <button type="submit" disabled={!trimmed} className="btn-primary">
             {confirmLabel}
           </button>
         </div>

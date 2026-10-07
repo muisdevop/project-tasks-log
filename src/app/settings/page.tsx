@@ -2,7 +2,10 @@ import { SidebarLayout } from "@/components/sidebar";
 import { PasswordChangeForm } from "@/components/password-change-form";
 import { UserProfileForm } from "@/components/user-profile-form";
 import { ReportTitleOptionsManager } from "@/components/report-title-options-manager";
+import { PageHeader } from "@/components/ui/card";
+import { StatusBanner } from "@/components/ui/status-banner";
 import { prisma } from "@/lib/prisma";
+import { ensureSettingsRow } from "@/lib/auth";
 import { getSessionUsername } from "@/lib/session";
 import { redirect } from "next/navigation";
 import Link from "next/link";
@@ -13,13 +16,9 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  await prisma.userSettings.upsert({
-    where: { id: 1 },
-    update: {},
-    create: {
-      id: 1,
-    },
-  });
+  // ST-02: the settings row is guaranteed by the shared bootstrap helper (also
+  // used at startup), so this page can no longer race a missing row.
+  await ensureSettingsRow();
 
   const [profile] = await prisma.$queryRaw<
     Array<{
@@ -33,14 +32,13 @@ export default async function SettingsPage() {
   return (
     <SidebarLayout username={username}>
       <div className="mx-auto w-full max-w-2xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400">
-            Account Settings
-          </h1>
-          <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-            Manage your account security and preferences
-          </p>
-        </div>
+        <PageHeader
+          level={1}
+          className="mb-8"
+          title="Account Settings"
+          titleClassName="text-3xl font-bold bg-linear-to-r from-blue-700 to-indigo-700 bg-clip-text text-transparent dark:from-blue-400 dark:to-indigo-400"
+          description="Manage your account security and preferences"
+        />
 
         <div className="space-y-6">
           <UserProfileForm
@@ -57,26 +55,16 @@ export default async function SettingsPage() {
           {/* Password Change */}
           <PasswordChangeForm />
 
-          {/* Work Schedule Info */}
-          <div className="rounded-2xl border border-blue-200/30 bg-blue-50/30 p-6 dark:border-blue-900/30 dark:bg-blue-900/20">
-            <div className="flex items-start gap-3">
-              <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/50">
-                <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 dark:text-white">Work Schedule & Breaks</h3>
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                  Work schedules and break rules are now managed per-job. Visit the{" "}
-                  <Link href="/jobs" className="font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
-                    Jobs page
-                  </Link>
-                  {" "}to configure work hours and breaks for each job.
-                </p>
-              </div>
-            </div>
-          </div>
+          <StatusBanner tone="info">
+            <span className="font-semibold">Work Schedule &amp; Breaks</span>
+            <span className="block">
+              Work schedules and break rules are now managed per-job. Visit the{" "}
+              <Link href="/jobs" className="font-medium underline">
+                Jobs page
+              </Link>{" "}
+              to configure work hours and breaks for each job.
+            </span>
+          </StatusBanner>
         </div>
       </div>
     </SidebarLayout>

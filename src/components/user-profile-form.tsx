@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useApiMutation } from "@/hooks/use-api-mutation";
+import { Card, PageHeader } from "@/components/ui/card";
+import { StatusBanner } from "@/components/ui/status-banner";
 
 type UserProfile = {
   fullName: string;
@@ -34,23 +36,23 @@ export function UserProfileForm({ initial }: { initial: UserProfile }) {
   }
 
   return (
-    <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
-      <div className="mb-6 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-indigo-500 to-blue-600 text-white shadow-lg">
+    <Card className="p-6">
+      <PageHeader
+        level={2}
+        title="User Profile"
+        description="Update your personal and professional details."
+        iconClassName="bg-linear-to-br from-indigo-500 to-blue-600"
+        icon={
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A9.974 9.974 0 0012 20c2.5 0 4.785-.918 6.531-2.435M15 11a3 3 0 11-6 0 3 3 0 016 0zm6 1a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">User Profile</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">Update your personal and professional details.</p>
-        </div>
-      </div>
+        }
+      />
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label htmlFor="fullName" className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label htmlFor="fullName" className="field-label">
               Full name
             </label>
             <input
@@ -60,12 +62,12 @@ export function UserProfileForm({ initial }: { initial: UserProfile }) {
               onChange={(event) => setFullName(event.target.value)}
               maxLength={120}
               placeholder="Jane Doe"
-              className="w-full rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-3 text-zinc-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-indigo-500 dark:focus:bg-zinc-800 dark:focus:ring-indigo-900/30"
+              className="field-input"
             />
           </div>
 
           <div>
-            <label htmlFor="title" className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label htmlFor="title" className="field-label">
               Title
             </label>
             <input
@@ -75,13 +77,13 @@ export function UserProfileForm({ initial }: { initial: UserProfile }) {
               onChange={(event) => setTitle(event.target.value)}
               maxLength={120}
               placeholder="Senior Engineer"
-              className="w-full rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-3 text-zinc-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-indigo-500 dark:focus:bg-zinc-800 dark:focus:ring-indigo-900/30"
+              className="field-input"
             />
           </div>
         </div>
 
         <div>
-          <label htmlFor="email" className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label htmlFor="email" className="field-label">
             Email
           </label>
           <input
@@ -91,12 +93,12 @@ export function UserProfileForm({ initial }: { initial: UserProfile }) {
             onChange={(event) => setEmail(event.target.value)}
             maxLength={255}
             placeholder="you@example.com"
-            className="w-full rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-3 text-zinc-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-indigo-500 dark:focus:bg-zinc-800 dark:focus:ring-indigo-900/30"
+            className="field-input"
           />
         </div>
 
         <div>
-          <label htmlFor="bio" className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <label htmlFor="bio" className="field-label">
             Bio
           </label>
           <textarea
@@ -106,32 +108,18 @@ export function UserProfileForm({ initial }: { initial: UserProfile }) {
             maxLength={2000}
             rows={4}
             placeholder="Short introduction for your profile..."
-            className="w-full rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-3 text-zinc-900 outline-none transition-all focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-indigo-500 dark:focus:bg-zinc-800 dark:focus:ring-indigo-900/30"
+            className="field-input resize-y"
           />
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {error}
-          </div>
-        )}
+        {error && <StatusBanner tone="error">{error}</StatusBanner>}
 
-        {message && (
-          <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-400">
-            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-            {message}
-          </div>
-        )}
+        {message && <StatusBanner tone="success">{message}</StatusBanner>}
 
         <button
           type="submit"
           disabled={saving}
-          className="w-full rounded-xl bg-linear-to-r from-indigo-500 to-blue-600 px-4 py-3 font-medium text-white shadow-lg shadow-indigo-500/30 transition-all hover:shadow-xl hover:shadow-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+          className="btn-primary w-full"
         >
           {saving ? (
             <span className="flex items-center justify-center gap-2">
@@ -146,6 +134,6 @@ export function UserProfileForm({ initial }: { initial: UserProfile }) {
           )}
         </button>
       </form>
-    </div>
+    </Card>
   );
 }

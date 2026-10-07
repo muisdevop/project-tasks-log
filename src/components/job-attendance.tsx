@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useApiMutation } from "@/hooks/use-api-mutation";
 import { formatElapsed } from "@/lib/business-time";
 import { ConfirmDialog } from "./confirm-dialog";
 
@@ -43,11 +44,15 @@ const ACTION_TEXT: Record<PendingAction, { label: string; confirm: string; failu
 
 export function JobAttendance({ jobId }: JobAttendanceProps) {
   const [attendance, setAttendance] = useState<AttendanceRecord | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [notes, setNotes] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const {
+    mutate,
+    pending: isLoading,
+    error: actionError,
+    setError: setActionError,
+  } = useApiMutation();
 
   // Initial load: fetch-on-mount bootstrap so no state is set synchronously in the effect.
   useEffect(() => {
@@ -86,43 +91,32 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
   async function submitAttendance(action: PendingAction) {
     if (isLoading) return;
 
-    setActionError(null);
-    setIsLoading(true);
-
     const trimmedNotes = notes.trim();
-    try {
-      const response = await fetch("/api/attendance", {
-        method: action === "checkin" ? "POST" : "PATCH",
-        headers: { "Content-Type": "application/json" },
-        // `notes` is optional on the API; omit it when blank so the payload stays
-        // within the schema (it rejects an explicit null).
-        body: JSON.stringify({ jobId, ...(trimmedNotes ? { notes: trimmedNotes } : {}) }),
-      });
-
-      const data = (await response.json().catch(() => ({}))) as AttendanceResponse;
-
-      if (response.ok) {
+    await mutate<AttendanceResponse>("/api/attendance", {
+      method: action === "checkin" ? "POST" : "PATCH",
+      // The attendance row comes back in the body and drives local state, so
+      // there is nothing for a router refresh to re-read (and it would discard
+      // the running elapsed timer).
+      refresh: false,
+      // `notes` is optional on the API; omit it when blank so the payload stays
+      // within the schema (it rejects an explicit null).
+      body: { jobId, ...(trimmedNotes ? { notes: trimmedNotes } : {}) },
+      fallbackError: ACTION_TEXT[action].failure,
+      onSuccess: (data) => {
         setAttendance(data.attendance ?? null);
         setNotes("");
         setPendingAction(null);
-      } else {
-        setActionError(data.error || ACTION_TEXT[action].failure);
-      }
-    } catch (err) {
-      console.error(`${ACTION_TEXT[action].failure}:`, err);
-      setActionError(ACTION_TEXT[action].failure);
-    } finally {
-      setIsLoading(false);
-    }
+      },
+    });
   }
 
   const hasCheckedOutToday = Boolean(attendance?.checkOutTime);
 
   return (
-    <div className="rounded-2xl border border-white/20 bg-white/80 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
+    <div className="rounded-2xl border border-surface-border bg-surface-strong p-4 shadow-lg backdrop-blur-xl">
       <div className="flex items-center gap-2 mb-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20">
-          <svg className="h-4 w-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
@@ -132,14 +126,14 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
       {isCheckedIn ? (
         <div className="space-y-3">
           <div className="text-center p-3 rounded-xl bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-            <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-1">Checked In</p>
+            <p className="text-xs text-green-700 dark:text-green-400 font-medium mb-1">Checked In</p>
             <p className="text-2xl font-bold text-green-700 dark:text-green-300 tabular-nums">
               {formatElapsed(elapsedSeconds)}
             </p>
-            <p className="text-xs text-green-600 dark:text-green-400 mt-1">Current session</p>
+            <p className="text-xs text-green-700 dark:text-green-400 mt-1">Current session</p>
           </div>
 
-          <div className="text-xs text-slate-500 dark:text-slate-400">
+          <div className="text-xs text-slate-600 dark:text-slate-400">
             <p>Check-in: {new Date(attendance!.checkInTime).toLocaleTimeString()}</p>
           </div>
 
@@ -160,7 +154,7 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
               className="w-full resize-none rounded-xl border border-slate-200/60 bg-white/60 px-3 py-2 text-sm text-slate-700 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 dark:border-slate-700/60 dark:bg-slate-800/50 dark:text-slate-100 dark:focus:border-indigo-500 dark:focus:bg-slate-800 dark:focus:ring-indigo-900/30"
             />
             {attendance?.notes && !notes.trim() && (
-              <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-400">
                 Saved notes: {attendance.notes}
               </p>
             )}
@@ -199,10 +193,10 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
             <p className="text-xl font-bold text-slate-800 dark:text-slate-200 tabular-nums">
               {formatElapsed(attendance!.totalWorkSeconds)}
             </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Total work time</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Total work time</p>
           </div>
 
-          <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+          <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
             <p>Check-in: {new Date(attendance!.checkInTime).toLocaleTimeString()}</p>
             <p>Check-out: {new Date(attendance!.checkOutTime!).toLocaleTimeString()}</p>
             {attendance?.notes && (
@@ -290,7 +284,7 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
                   </p>
                 )}
                 {actionError && (
-                  <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
+                  <p className="text-xs font-medium text-red-700 dark:text-red-400" role="alert">
                     {actionError}
                   </p>
                 )}
