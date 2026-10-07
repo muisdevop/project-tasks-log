@@ -1,0 +1,172 @@
+# MF-01 / PM-04: CI pipeline matching AGENTS.md's definition of done
+# (install -> lint -> typecheck -> tests -> coverage -> build -> bundle
+# budget -> docker build -> boot on BOTH sqlite and postgres with a health
+# check and a login smoke request). Script names below are the real ones in
+# package.json (lint, typecheck, test:coverage, build, bundle:budget).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, tests, build, bundle budget
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: production
+      DB_PROVIDER: sqlite
+      DATABASE_URL: file:./ci.db
+      SESSION_SECRET: ci-only-secret-not-used-at-runtime-0123456
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate --schema prisma/schema.sqlite.prisma
+      - name: SQLite/Postgres schema parity
+        run: npm run db:parity
+      - name: OpenAPI document matches the routes
+        run: npm run docs:openapi:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npx vitest run
+      - name: Coverage (thresholds in vitest.config.ts)
+        run: npx vitest run --coverage
+      - name: Build
+        run: npm run build
+      - name: Bundle budget
+        run: npm run bundle:budget
+
+  docker-build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t stl-ci:latest .
+      - name: Save image for smoke jobs
+        run: docker save stl-ci:latest | gzip > stl-ci.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stl-ci-image
+          path: stl-ci.tar.gz
+
+  smoke:
+    name: Boot container (${{ matrix.db }})
+    runs-on: ubuntu-latest
+    needs: docker-build
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres]
+    env:
+      SESSION_SECRET: ci-smoke-session-secret-0123456789-abcd
+      SMOKE_PASSWORD: ci-smoke-password
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: stl-ci-image
+      - name: Load image
+        run: gunzip -c stl-ci.tar.gz | docker load
+
+      - name: Create bcrypt hash for login smoke
+        id: hash
+        run: |
+          HASH=$(docker run --rm -e SMOKE_PASSWORD="$SMOKE_PASSWORD" --entrypoint node stl-ci:latest \
+            -e "console.log(require('bcryptjs').hashSync(process.env.SMOKE_PASSWORD, 12))")
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Run container (sqlite)
+        if: matrix.db == 'sqlite'
+        run: |
+          docker volume create smoke-sqlite-data
+          docker run -d --name stl-smoke -p 3000:3000 \
+            -v smoke-sqlite-data:/data \
+            -e DB_PROVIDER=sqlite \
+            -e SESSION_SECRET="$SESSION_SECRET" \
+            -e APP_USERNAME=admin \
+            -e APP_PASSWORD_HASH='${{ steps.hash.outputs.hash }}' \
+            stl-ci:latest
+
+      - name: Run container (postgres)
+        if: matrix.db == 'postgres'
+        run: |
+          docker network create smoke-net
+          docker run -d --name stl-pg --network smoke-net \
+            -e POSTGRES_DB=tasklogger -e POSTGRES_USER=tasklogger -e POSTGRES_PASSWORD=tasklogger \
+            postgres:16-alpine
+          # wait for pg_isready before starting the app
+          for i in $(seq 1 30); do
+            docker exec stl-pg pg_isready -U tasklogger -d tasklogger && break
+            sleep 2
+          done
+          docker run -d --name stl-smoke --network smoke-net -p 3000:3000 \
+            -e DB_PROVIDER=postgres \
+            -e DATABASE_URL=postgresql://tasklogger:tasklogger@stl-pg:5432/tasklogger?schema=public \
+            -e SESSION_SECRET="$SESSION_SECRET" \
+            -e APP_USERNAME=admin \
+            -e APP_PASSWORD_HASH='${{ steps.hash.outputs.hash }}' \
+            stl-ci:latest
+
+      - name: Wait for /api/health + verify Docker HEALTHCHECK
+        run: |
+          ok=false
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then ok=true; break; fi
+            echo "waiting..."
+            sleep 3
+          done
+          $ok || { docker logs stl-smoke; exit 1; }
+          echo
+          # AR-06: the image-level HEALTHCHECK must report healthy too.
+          for i in $(seq 1 20); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' stl-smoke)
+            echo "container health: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 5
+          done
+          docker inspect stl-smoke; exit 1
+
+      - name: Login smoke request
+        run: |
+          code=$(curl -sS -o /tmp/login.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:3000/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"admin\",\"password\":\"$SMOKE_PASSWORD\"}")
+          cat /tmp/login.json
+          echo "HTTP $code"
+          [ "$code" = "200" ]
+          # wrong password must be rejected
+          bad=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST http://127.0.0.1:3000/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"admin\",\"password\":\"wrong-password\"}")
+          [ "$bad" = "401" ]
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs stl-smoke
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f stl-smoke stl-pg || true
+          docker volume rm smoke-sqlite-data || true
+          docker network rm smoke-net || true

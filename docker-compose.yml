@@ -1,3 +1,21 @@
+# AR-08: GID Task Flow - local/demo compose.
+#
+# Defaults run SQLite only (plain `docker compose up`). To test Postgres:
+#   DB_PROVIDER=postgres docker compose --profile postgres up
+#
+# DATABASE_URL is intentionally NOT baked into the image (AR-06/AR-08). The
+# container entrypoint resolves it in this order:
+#   DATABASE_URL (if non-empty) > DATABASE_URL_POSTGRES (postgres) or
+#   DATABASE_URL_SQLITE (sqlite, default file:/data/dev.db).
+# Postgres users simply set DB_PROVIDER=postgres and/or DATABASE_URL - there is
+# no stale SQLite default to fight. An explicit empty value means "derive from
+# the provider-specific URL below" (that is why DATABASE_URL defaults to "").
+#
+# NOTE (Coolify): Coolify appends a random suffix to container names, so never
+# rely on a fixed container-name DNS alias; the DB host must always come from
+# DATABASE_URL(_POSTGRES) env. The `postgres` host below is the compose SERVICE
+# name, valid only on this compose project's network.
+
 services:
   app:
     build:
@@ -5,30 +23,51 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    restart: unless-stopped # AR-08: match the postgres service policy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
       DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      # AR-08: empty by default = let the entrypoint pick DATABASE_URL_SQLITE /
+      # DATABASE_URL_POSTGRES below. Set a full URL here to override everything.
       DATABASE_URL: ${DATABASE_URL:-}
       DATABASE_URL_SQLITE: ${DATABASE_URL_SQLITE:-file:/data/dev.db}
       DATABASE_URL_POSTGRES: ${DATABASE_URL_POSTGRES:-postgresql://tasklogger:tasklogger@postgres:5432/tasklogger?schema=public}
       APP_USERNAME: ${APP_USERNAME:-admin}
-      APP_PASSWORD: ${APP_PASSWORD:-admin123}
-      SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
+      # SEC-03 startup checks REJECT plaintext APP_PASSWORD and known-default
+      # SESSION_SECRET in production, so the demo defaults below are a bcrypt
+      # hash of "admin123" and a unique non-default secret. CHANGE BOTH for
+      # any real deployment (npm run password:hash -- "<password>").
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      # Compose interpolation: literal `$` in the bcrypt hash is written `$$`.
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:-$$2b$$12$$5ug74480wp8xsK9uOwkNte7CegjAMFlMzojvVEvautu2AbIO9G64u}
+      SESSION_SECRET: ${SESSION_SECRET:-local-compose-only-rotate-me-please}
     volumes:
       - tasklogger-data:/data
     depends_on:
+      # AR-08: consistent healthcheck/depends_on; postgres is only present when
+      # the `postgres` profile is enabled, so the dependency is optional.
       postgres:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    # AR-08: example resource limits so one runaway chromium/PDF burst cannot
+    # starve the host. Tune to your box; `deploy` is respected by docker
+    # compose (v2) and Coolify.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
 
   postgres:
     image: postgres:16-alpine
+    profiles: ["postgres"] # AR-08: opt-in; plain `docker compose up` = sqlite
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tasklogger}
@@ -45,4 +84,3 @@ services:
 volumes:
   tasklogger-data:
   tasklogger-postgres-data:
-
