@@ -2,8 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { safeRedirectTarget } from "@/lib/navigation";
 
-export function LoginForm() {
+interface LoginFormProps {
+  /** Where to go after a successful login, set by /login?next= (UX-05). */
+  next?: string | string[];
+  /** True when no login credential exists yet on this install (UX-06). */
+  setupRequired?: boolean;
+}
+
+export function LoginForm({ next, setupRequired = false }: LoginFormProps) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -15,21 +23,28 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Login failed.");
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "Login failed.");
+        return;
+      }
+
+      // The target is validated client-side too, so a hand-edited ?next= can
+      // never bounce the user off-site.
+      router.push(safeRedirectTarget(next));
+      router.refresh();
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
@@ -41,8 +56,28 @@ export function LoginForm() {
         </div>
         
         <form onSubmit={onSubmit} className="px-8 py-6 space-y-6">
+          {setupRequired ? (
+            <div
+              role="status"
+              className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 space-y-1"
+            >
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                This instance has no login configured yet.
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Set <code>APP_PASSWORD_HASH</code> (run{" "}
+                <code>npm run password:hash -- &quot;password&quot;</code>) or,{" "}
+                for local development only, <code>APP_PASSWORD</code>, restart the
+                app, then sign in as <code>APP_USERNAME</code> (default: admin).
+              </p>
+            </div>
+          ) : null}
+
           {error ? (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+            <div
+              role="alert"
+              className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3"
+            >
               <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
             </div>
           ) : null}

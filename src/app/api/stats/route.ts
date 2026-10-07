@@ -69,6 +69,7 @@ export async function GET() {
         total: 0,
         completed: 0,
         inProgress: 0,
+        onHold: 0,
         cancelled: 0,
         withSubtasks: 0,
         withoutSubtasks: 0,
@@ -106,6 +107,8 @@ export async function GET() {
             stats.taskStats.completed++;
           } else if (task.status === "in_progress") {
             stats.taskStats.inProgress++;
+          } else if (task.status === "on_hold") {
+            stats.taskStats.onHold++;
           } else if (task.status === "cancelled") {
             stats.taskStats.cancelled++;
           }

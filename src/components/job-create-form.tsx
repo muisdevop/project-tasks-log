@@ -14,9 +14,19 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
   const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
-    if (window.location.hash === "#new-job") {
-      setShowForm(true);
-    }
+    // Deep link support: the sidebar "+" points at /jobs#new-job. The value is
+    // read from a subscription callback (an external system) rather than set
+    // synchronously in the effect body, so the first render still matches the
+    // server markup and React does not cascade a render.
+    const openIfHashTargeted = () => {
+      if (window.location.hash === "#new-job") {
+        setShowForm(true);
+      }
+    };
+
+    openIfHashTargeted();
+    window.addEventListener("hashchange", openIfHashTargeted);
+    return () => window.removeEventListener("hashchange", openIfHashTargeted);
   }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {

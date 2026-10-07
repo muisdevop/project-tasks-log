@@ -45,3 +45,8 @@ next-env.d.ts
 
 # local sqlite db
 dev.db
+
+# archives and scratch files (PM-01: repository snapshots must never be committed)
+*.zip
+*.tar.gz
+.tmp-*

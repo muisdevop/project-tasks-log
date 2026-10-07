@@ -12,6 +12,8 @@ interface TaskActionModalProps {
   placeholder: string;
   confirmText: string;
   loading?: boolean;
+  /** Failure from the previous attempt; the modal stays open so the draft survives (UX-01). */
+  error?: string | null;
 }
 
 export function TaskActionModal({
@@ -22,13 +24,15 @@ export function TaskActionModal({
   placeholder,
   confirmText,
   loading = false,
+  error = null,
 }: TaskActionModalProps) {
   const [details, setDetails] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // The draft is intentionally kept: the parent only unmounts this modal on
+    // success, so a failed mutation leaves the typed details available.
     onConfirm(details);
-    setDetails("");
   }
 
   return (
@@ -52,6 +56,14 @@ export function TaskActionModal({
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-200/60 bg-red-50/70 px-4 py-2.5 text-sm text-red-600 dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-400"
+          >
+            {error}
+          </p>
+        ) : null}
         <div>
           <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
             Details

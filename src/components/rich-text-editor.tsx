@@ -5,6 +5,8 @@ import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { InputDialog } from "./confirm-dialog";
 
 interface RichTextEditorProps {
   value: string;
@@ -12,8 +14,23 @@ interface RichTextEditorProps {
   placeholder?: string;
 }
 
+// Mirrors the Link extension's `validate` rule below.
+const ALLOWED_HREF_PATTERN = /^https?:\/\//;
+const URL_REQUIREMENT = "Must start with http://, https://, mailto:, or /";
+
+function isAllowedLinkHref(href: string): boolean {
+  return (
+    ALLOWED_HREF_PATTERN.test(href) ||
+    /^mailto:/.test(href) ||
+    /^\//.test(href)
+  );
+}
+
 export function RichTextEditor({ value, onChange, placeholder = "Enter description..." }: RichTextEditorProps) {
   const [isFocused, setIsFocused] = useState(false);
+  const [isLinkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkInitialValue, setLinkInitialValue] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -52,9 +69,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
           rel: "noopener noreferrer nofollow",
           target: "_blank",
         },
-        validate: (href) => {
-          return /^https?:\/\//.test(href) || /^mailto:/.test(href) || /^\//.test(href);
-        },
+        validate: (href) => isAllowedLinkHref(href),
       }),
       Underline.configure({
         HTMLAttributes: {
@@ -89,20 +104,33 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
     return null;
   }
 
-  const setLink = () => {
+  const openLinkDialog = () => {
     const previousUrl = editor.getAttributes("link").href;
-    const url = window.prompt("Enter URL (https:// required):", previousUrl);
-    if (url === null) return;
-    if (url === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    setLinkInitialValue(typeof previousUrl === "string" ? previousUrl : "");
+    setLinkError(null);
+    setLinkDialogOpen(true);
+  };
+
+  const closeLinkDialog = () => {
+    setLinkDialogOpen(false);
+    setLinkError(null);
+  };
+
+  // UI-08: replaces window.prompt()/alert(); the dialog stays open on an invalid
+  // value so the typed URL is not lost.
+  const submitLinkUrl = (url: string) => {
+    const sanitizedUrl = url.trim();
+    if (isAllowedLinkHref(sanitizedUrl)) {
+      editor.chain().focus().extendMarkRange("link").setLink({ href: sanitizedUrl }).run();
+      closeLinkDialog();
     } else {
-      const sanitizedUrl = url.trim();
-      if (/^https?:\/\//.test(sanitizedUrl) || /^mailto:/.test(sanitizedUrl) || /^\//.test(sanitizedUrl)) {
-        editor.chain().focus().extendMarkRange("link").setLink({ href: sanitizedUrl }).run();
-      } else {
-        alert("Invalid URL. Must start with http://, https://, mailto:, or /");
-      }
+      setLinkError(URL_REQUIREMENT);
     }
+  };
+
+  const removeLink = () => {
+    editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    closeLinkDialog();
   };
 
   return (
@@ -207,7 +235,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
         {/* Link - with security validation */}
         <button
           type="button"
-          onClick={setLink}
+          onClick={openLinkDialog}
           className={`p-2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
             editor.isActive("link") ? "bg-zinc-300 dark:bg-zinc-600 text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
           }`}
@@ -217,7 +245,26 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
           </svg>
         </button>
+        {editor.isActive("link") && (
+          <button
+            type="button"
+            onClick={removeLink}
+            className="p-2 rounded text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700 transition-colors"
+            title="Remove Link"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656M10 14l4-4m3 5a4 4 0 005.656-5.656" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4l16 16" />
+            </svg>
+          </button>
+        )}
       </div>
+
+      {linkError && (
+        <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
+          Invalid URL. {linkError}
+        </p>
+      )}
 
       {/* Editor Content */}
       <div 
@@ -226,6 +273,25 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
       >
         <EditorContent editor={editor} />
       </div>
+
+      {/* Portaled to document.body: the editor is hosted inside modals whose
+          backdrop-blur makes them the containing block for fixed descendants, which
+          would otherwise clip the dialog. */}
+      {isLinkDialogOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <InputDialog
+            isOpen
+            title={linkError ? "Invalid URL" : "Add Link"}
+            label="URL (http://, https://, mailto:, or /)"
+            initialValue={linkInitialValue}
+            placeholder="https://example.com"
+            confirmLabel="Apply Link"
+            onSubmit={submitLinkUrl}
+            onClose={closeLinkDialog}
+          />,
+          document.body,
+        )}
     </div>
   );
 }

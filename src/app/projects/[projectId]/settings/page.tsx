@@ -35,7 +35,7 @@ export default async function ProjectSettingsPage({ params }: Props) {
   }
 
   return (
-    <SidebarLayout username={username} projectName={project.name}>
+    <SidebarLayout username={username}>
       <div className="mx-auto w-full max-w-2xl">
         <div className="mb-6">
           <Link

@@ -19,27 +19,28 @@ export function ReportTitleOptionsManager() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchTitles();
-  }, []);
-
-  async function fetchTitles() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/report-titles", { cache: "no-store" });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Failed to load title options.");
+    // Mount-only bootstrap declared inside the effect. `loading` starts true
+    // and `error` starts null, so no reset is needed before the request and
+    // every setState below runs after an await instead of in the effect body.
+    const loadTitles = async () => {
+      try {
+        const res = await fetch("/api/report-titles", { cache: "no-store" });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "Failed to load title options.");
+        }
+        const data = (await res.json()) as ReportTitlesResponse;
+        setOptions(data.options || []);
+        setDefaultTitle(data.defaultTitle || "");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load title options.");
+      } finally {
+        setLoading(false);
       }
-      const data = (await res.json()) as ReportTitlesResponse;
-      setOptions(data.options || []);
-      setDefaultTitle(data.defaultTitle || "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load title options.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    };
+
+    void loadTitles();
+  }, []);
 
   async function patch(payload: Record<string, string>) {
     setSaving(true);

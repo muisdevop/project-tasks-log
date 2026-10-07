@@ -5,10 +5,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { resolveActiveJobId } from "@/lib/navigation";
+import { GlobalBreakWidget } from "./global-break-widget";
+import { useStoredState } from "@/hooks/use-stored-state";
 
 interface SidebarProps {
   username?: string | null;
-  projectName?: string | null;
 }
 
 interface Job {
@@ -55,99 +56,47 @@ function LogoutIcon({ className }: { className?: string }) {
   );
 }
 
-export function Sidebar({ username, projectName }: SidebarProps) {
+export function Sidebar({ username }: SidebarProps) {
   const SIDEBAR_JOBS_CACHE_KEY = "sidebar-jobs-cache";
   const SIDEBAR_PROJECTS_CACHE_KEY = "sidebar-projects-cache";
   const pathname = usePathname();
   const router = useRouter();
-  const [jobs, setJobs] = useState<Job[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const cached = sessionStorage.getItem(SIDEBAR_JOBS_CACHE_KEY);
-      return cached ? (JSON.parse(cached) as Job[]) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [projects, setProjects] = useState<Project[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const cached = sessionStorage.getItem(SIDEBAR_PROJECTS_CACHE_KEY);
-      return cached ? (JSON.parse(cached) as Project[]) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [expandedJobs, setExpandedJobs] = useState<number[]>([]);
-  const [expandedProjectsMenu, setExpandedProjectsMenu] = useState<number[]>([]);
+
+  // Storage-backed state: the first render always matches server markup (BG-02).
+  const [jobs, setJobs] = useStoredState<Job[]>(SIDEBAR_JOBS_CACHE_KEY, [], "session");
+  const [projects, setProjects] = useStoredState<Project[]>(
+    SIDEBAR_PROJECTS_CACHE_KEY,
+    [],
+    "session",
+  );
+  const [expandedJobs, setExpandedJobs] = useStoredState<number[]>(
+    "sidebar-expanded-jobs",
+    [],
+  );
+  const [expandedProjectsMenu, setExpandedProjectsMenu] = useStoredState<number[]>(
+    "sidebar-expanded-projects",
+    [],
+  );
   const [profileName, setProfileName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(() => jobs.length === 0 && projects.length === 0);
-
-  useEffect(() => {
-    try {
-      const savedExpandedJobs = localStorage.getItem("sidebar-expanded-jobs");
-      const savedExpandedProjects = localStorage.getItem("sidebar-expanded-projects");
-
-      if (savedExpandedJobs) {
-        const parsed = JSON.parse(savedExpandedJobs) as number[];
-        if (Array.isArray(parsed)) setExpandedJobs(parsed);
-      }
-
-      if (savedExpandedProjects) {
-        const parsed = JSON.parse(savedExpandedProjects) as number[];
-        if (Array.isArray(parsed)) setExpandedProjectsMenu(parsed);
-      }
-    } catch {
-      // Ignore malformed local storage values.
-    }
-
-    fetchJobsAndProjects();
-    fetchProfile();
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("sidebar-expanded-jobs", JSON.stringify(expandedJobs));
-  }, [expandedJobs]);
-
-  useEffect(() => {
-    localStorage.setItem("sidebar-expanded-projects", JSON.stringify(expandedProjectsMenu));
-  }, [expandedProjectsMenu]);
-
-  useEffect(() => {
-    const activeJobId = resolveActiveJobId(pathname, projects);
-    if (!activeJobId) return;
-
-    setExpandedJobs((prev) => (prev.includes(activeJobId) ? prev : [...prev, activeJobId]));
-
-    const isProjectPage =
-      (pathname.startsWith("/projects/") && pathname.includes("/tasks")) ||
-      /^\/jobs\/\d+\/projects$/.test(pathname);
-    if (isProjectPage) {
-      setExpandedProjectsMenu((prev) =>
-        prev.includes(activeJobId) ? prev : [...prev, activeJobId],
-      );
-    }
-  }, [pathname, projects]);
+  const [loading, setLoading] = useState(true);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   async function fetchJobsAndProjects() {
     try {
       const [jobsRes, projectsRes] = await Promise.all([
-        fetch("/api/jobs"),
-        fetch("/api/projects"),
+        fetch("/api/jobs", { cache: "no-store" }),
+        fetch("/api/projects", { cache: "no-store" }),
       ]);
 
       if (jobsRes.ok) {
         const jobsData = (await jobsRes.json()) as { jobs?: Job[] };
-        const nextJobs = jobsData.jobs || [];
-        setJobs(nextJobs);
-        sessionStorage.setItem(SIDEBAR_JOBS_CACHE_KEY, JSON.stringify(nextJobs));
+        setJobs(jobsData.jobs || []);
       }
 
       if (projectsRes.ok) {
         const projectsData = (await projectsRes.json()) as { projects?: Project[] };
-        const nextProjects = projectsData.projects || [];
-        setProjects(nextProjects);
-        sessionStorage.setItem(SIDEBAR_PROJECTS_CACHE_KEY, JSON.stringify(nextProjects));
+        setProjects(projectsData.projects || []);
       }
     } catch (error) {
       console.error("Failed to fetch jobs and projects:", error);
@@ -170,6 +119,58 @@ export function Sidebar({ username, projectName }: SidebarProps) {
     }
   }
 
+  useEffect(() => {
+    const bootstrap = async () => {
+      await Promise.all([fetchJobsAndProjects(), fetchProfile()]);
+    };
+    void bootstrap();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only bootstrap
+  }, []);
+
+  useEffect(() => {
+    const activeJobId = resolveActiveJobId(pathname, projects);
+    if (!activeJobId) return;
+
+    if (!expandedJobs.includes(activeJobId)) {
+      setExpandedJobs((prev) => (prev.includes(activeJobId) ? prev : [...prev, activeJobId]));
+    }
+
+    const isProjectPage =
+      (pathname.startsWith("/projects/") && pathname.includes("/tasks")) ||
+      /^\/jobs\/\d+\/projects$/.test(pathname);
+    if (isProjectPage && !expandedProjectsMenu.includes(activeJobId)) {
+      setExpandedProjectsMenu((prev) =>
+        prev.includes(activeJobId) ? prev : [...prev, activeJobId],
+      );
+    }
+  }, [
+    pathname,
+    projects,
+    expandedJobs,
+    expandedProjectsMenu,
+    setExpandedJobs,
+    setExpandedProjectsMenu,
+  ]);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setLogoutError(data.error || "Failed to sign out. Please try again.");
+        return;
+      }
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      setLogoutError("Failed to sign out. Please try again.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   function toggleJobExpand(jobId: number) {
     setExpandedJobs((prev) => {
       if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
@@ -182,12 +183,6 @@ export function Sidebar({ username, projectName }: SidebarProps) {
       if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
       return [...prev, jobId];
     });
-  }
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
   }
 
   const jobsForProjects = jobs.map((job) => ({
@@ -398,11 +393,23 @@ export function Sidebar({ username, projectName }: SidebarProps) {
             </div>
             <button
               type="button"
-              onClick={logout}
-              className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/5 hover:text-red-400"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/5 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
               title="Logout"
             >
-              <LogoutIcon className="h-5 w-5" />
+              {loggingOut ? (
+                <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+              ) : (
+                <LogoutIcon className="h-5 w-5" />
+              )}
             </button>
           </div>
         ) : (
@@ -416,27 +423,28 @@ export function Sidebar({ username, projectName }: SidebarProps) {
             Login
           </Link>
         )}
+        {logoutError && (
+          <p className="mt-2 text-xs text-red-400" role="alert">
+            {logoutError}
+          </p>
+        )}
       </div>
 
     </aside>
   );
 }
 
-import { GlobalBreakWidget } from "./global-break-widget";
-
 // Layout wrapper component
-export function SidebarLayout({ 
-  children, 
+export function SidebarLayout({
+  children,
   username,
-  projectName
-}: { 
-  children: React.ReactNode; 
+}: {
+  children: React.ReactNode;
   username?: string | null;
-  projectName?: string | null;
 }) {
   return (
     <div className="flex min-h-screen">
-      <Sidebar username={username} projectName={projectName} />
+      <Sidebar username={username} />
       <GlobalBreakWidget />
       <main className="flex-1 pl-64">
         <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 p-8 dark:from-slate-950 dark:via-blue-950/20 dark:to-indigo-950/10">

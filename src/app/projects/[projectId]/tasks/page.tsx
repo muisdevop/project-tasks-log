@@ -122,7 +122,7 @@ export default async function TasksPage({ params }: Props) {
   }
 
   return (
-    <SidebarLayout username={username} projectName={project.name}>
+    <SidebarLayout username={username}>
       <div className="mx-auto w-full max-w-5xl">
         <div className="mb-6">
           <Link

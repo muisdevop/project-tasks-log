@@ -80,11 +80,11 @@ export function JobProjectsSection({
         >
           <div className="space-y-4">
             <div>
-              <label htmlFor="project-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              <label htmlFor="new-project-name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 Project Name
               </label>
               <input
-                id="project-name"
+                id="new-project-name"
                 type="text"
                 value={name}
                 onChange={(event) => setName(event.target.value)}

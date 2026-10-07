@@ -15,6 +15,21 @@ function getSecret(): Uint8Array | null {
 
 const publicPaths = ["/login", "/api/auth/login", "/api/health", "/_next", "/favicon.ico"];
 
+/**
+ * Sends the visitor to the login page while remembering where they were headed
+ * (UX-05). Only same-site relative paths are forwarded, and the login page is
+ * never echoed back as a `next` target.
+ */
+function redirectToLogin(request: NextRequest): NextResponse {
+  const loginUrl = new URL("/login", request.url);
+  const { pathname, search } = request.nextUrl;
+  const target = `${pathname}${search}`;
+  if (target !== "/" && !pathname.startsWith("/login")) {
+    loginUrl.searchParams.set("next", target);
+  }
+  return NextResponse.redirect(loginUrl);
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (publicPaths.some((path) => pathname.startsWith(path))) {
@@ -23,7 +38,7 @@ export async function proxy(request: NextRequest) {
 
   const token = request.cookies.get(COOKIE_NAME)?.value;
   if (!token) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return redirectToLogin(request);
   }
 
   const secret = getSecret();
@@ -36,7 +51,7 @@ export async function proxy(request: NextRequest) {
     await jwtVerify(token, secret);
     return NextResponse.next();
   } catch {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return redirectToLogin(request);
   }
 }
 

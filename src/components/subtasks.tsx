@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ConfirmDialog } from "./confirm-dialog";
 
 type SubTask = {
   id: number;
@@ -16,31 +17,54 @@ interface SubTasksProps {
   taskStatus: string;
 }
 
+type LoadResult = { ok: true; subtasks: SubTask[] } | { ok: false; error: string };
+
+// Module scope so the effect can call it without a component-body setter chain.
+async function loadSubtasks(taskId: number): Promise<LoadResult> {
+  try {
+    const response = await fetch(`/api/subtasks?taskId=${taskId}`, { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      return { ok: true, subtasks: (data.subtasks || []) as SubTask[] };
+    }
+    const data = await response.json().catch(() => ({}));
+    return { ok: false, error: data.error || "Failed to load subtasks" };
+  } catch {
+    return { ok: false, error: "Failed to load subtasks" };
+  }
+}
+
 export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
   const [subtasks, setSubtasks] = useState<SubTask[]>([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Only show subtasks for in-progress tasks
-  if (taskStatus !== "in_progress") {
-    return null;
-  }
+  const isInProgress = taskStatus === "in_progress";
 
+  // Hooks must run unconditionally (BG-01); the early return lives below.
+  // The component renders null while the task is not in progress, so no reset
+  // is needed — the list reloads when it becomes active again.
   useEffect(() => {
-    fetchSubtasks();
+    if (!isInProgress) return;
+    const run = async () => {
+      const result = await loadSubtasks(taskId);
+      if (result.ok) setSubtasks(result.subtasks);
+      else setError(result.error);
+    };
+    void run();
+  }, [isInProgress, taskId]);
+
+  const refresh = useCallback(async () => {
+    const result = await loadSubtasks(taskId);
+    if (result.ok) setSubtasks(result.subtasks);
+    else setError(result.error);
   }, [taskId]);
 
-  async function fetchSubtasks() {
-    try {
-      const response = await fetch(`/api/subtasks?taskId=${taskId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setSubtasks(data.subtasks || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch subtasks:", err);
-    }
+  if (!isInProgress) {
+    return null;
   }
 
   async function addSubtask(e: React.FormEvent) {
@@ -57,8 +81,6 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
       return;
     }
 
-    console.log("Adding subtask:", { taskId, title: trimmedTitle });
-
     setLoading(true);
     setError(null);
 
@@ -74,15 +96,13 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        console.error("Subtask creation error:", data);
         setError(data.error || "Failed to add subtask");
         return;
       }
 
       setNewSubtaskTitle("");
-      fetchSubtasks();
-    } catch (err) {
-      console.error("Subtask creation exception:", err);
+      await refresh();
+    } catch {
       setError("Failed to add subtask");
     } finally {
       setLoading(false);
@@ -90,6 +110,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
   }
 
   async function toggleSubtask(id: number, isCompleted: boolean) {
+    setError(null);
     try {
       const response = await fetch("/api/subtasks", {
         method: "PATCH",
@@ -98,23 +119,33 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
       });
 
       if (response.ok) {
-        fetchSubtasks();
+        await refresh();
+      } else {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || "Failed to update subtask");
       }
-    } catch (err) {
-      console.error("Failed to update subtask:", err);
+    } catch {
+      setError("Failed to update subtask");
     }
   }
 
-  async function deleteSubtask(id: number) {
-    if (!confirm("Are you sure you want to delete this subtask?")) return;
-
+  async function confirmDeleteSubtask() {
+    if (pendingDeleteId === null) return;
+    setDeleting(true);
+    setError(null);
     try {
-      const response = await fetch(`/api/subtasks?id=${id}`, { method: "DELETE" });
+      const response = await fetch(`/api/subtasks?id=${pendingDeleteId}`, { method: "DELETE" });
       if (response.ok) {
-        fetchSubtasks();
+        setPendingDeleteId(null);
+        await refresh();
+      } else {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || "Failed to delete subtask");
       }
-    } catch (err) {
-      console.error("Failed to delete subtask:", err);
+    } catch {
+      setError("Failed to delete subtask");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -122,6 +153,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
   const totalCount = subtasks.length;
 
   return (
+    <>
     <div className="mt-3 space-y-3 rounded-xl border border-violet-200/50 bg-violet-50/30 p-4 backdrop-blur-sm dark:border-violet-800/30 dark:bg-violet-900/20">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -165,7 +197,7 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
                 {subtask.title}
               </span>
               <button
-                onClick={() => deleteSubtask(subtask.id)}
+                onClick={() => setPendingDeleteId(subtask.id)}
                 className="rounded p-1 text-red-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 title="Delete subtask"
               >
@@ -215,5 +247,16 @@ export function SubTasks({ taskId, taskStatus }: SubTasksProps) {
         </div>
       )}
     </div>
+
+    <ConfirmDialog
+      isOpen={pendingDeleteId !== null}
+      title="Delete subtask"
+      message="This removes the subtask from the task permanently. This cannot be undone."
+      confirmLabel="Delete"
+      busy={deleting}
+      onConfirm={confirmDeleteSubtask}
+      onClose={() => setPendingDeleteId(null)}
+    />
+    </>
   );
 }

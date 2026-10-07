@@ -85,9 +85,23 @@ export const breakUpdateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+/**
+ * Payload for logging a finished break (UX-03). The client only states which
+ * break was taken and when it started; the record itself is written by the
+ * server in one transaction, so a break can never be half-logged.
+ */
+export const breakLogSchema = z.object({
+  jobId: z.number().int().positive(),
+  // Optional: when the user is on a project page, log the break there.
+  projectId: z.number().int().positive().optional(),
+  name: z.string().trim().min(1).max(100),
+  startedAt: z.string().datetime(),
+});
+
 export const attendanceSchema = z.object({
   jobId: z.number().int().positive(),
-  notes: z.string().trim().max(2000).optional(),
+  // nullish: the client sends an explicit `notes: null` when no note is typed.
+  notes: z.string().trim().max(2000).nullish(),
 });
 
 export const exportQuerySchema = z.object({

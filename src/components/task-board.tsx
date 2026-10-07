@@ -2,7 +2,8 @@
 
 import { formatElapsed } from "@/lib/business-time";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
+import { useStoredState } from "@/hooks/use-stored-state";
 import { RichTextEditor } from "./rich-text-editor";
 import { RichTextDisplay } from "./rich-text-display";
 import { TaskActionModal } from "./task-action-modal";
@@ -32,102 +33,59 @@ type Task = {
 };
 
 export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
-  const TASK_COLLAPSE_STORAGE_KEY = `task-board-collapsed-tasks:${projectId}`;
-  const FINISHED_DATE_EXPANDED_STORAGE_KEY = `task-board-expanded-finished-dates:${projectId}`;
-  const IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY = `task-board-collapsed-progress-dates:${projectId}`;
-
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
-  const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<number>>(new Set());
-  const [collapsedInProgressDates, setCollapsedInProgressDates] = useState<Set<string>>(new Set());
-  const [expandedFinishedDates, setExpandedFinishedDates] = useState<Set<string>>(new Set());
+  const [logNotesError, setLogNotesError] = useState<string | null>(null);
+  // BG-04: pending state is tracked per task id so two parallel operations
+  // cannot lose each other's busy flag.
+  const [busyTaskIds, setBusyTaskIds] = useState<number[]>([]);
 
-  useEffect(() => {
-    try {
-      const collapsedTasksRaw = localStorage.getItem(TASK_COLLAPSE_STORAGE_KEY);
-      if (collapsedTasksRaw) {
-        const parsed = JSON.parse(collapsedTasksRaw) as number[];
-        setCollapsedTaskIds(new Set(parsed));
-      }
+  // BG-02: collapse state lives in Web Storage. The arrays (not Sets, which do
+  // not survive JSON) are the stored shape, and the first render always matches
+  // server markup because the value is seeded from the empty fallback.
+  const [collapsedTaskList, setCollapsedTaskList] = useStoredState<number[]>(
+    `task-board-collapsed-tasks:${projectId}`,
+    [],
+  );
+  const [collapsedProgressDateList, setCollapsedProgressDates] = useStoredState<string[]>(
+    `task-board-collapsed-progress-dates:${projectId}`,
+    [],
+  );
+  const [expandedFinishedDateList, setExpandedFinishedDates] = useStoredState<string[]>(
+    `task-board-expanded-finished-dates:${projectId}`,
+    [],
+  );
 
-      const collapsedProgressDatesRaw = localStorage.getItem(IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY);
-      if (collapsedProgressDatesRaw) {
-        const parsed = JSON.parse(collapsedProgressDatesRaw) as string[];
-        setCollapsedInProgressDates(new Set(parsed));
-      }
+  const collapsedTaskIds = useMemo(() => new Set(collapsedTaskList), [collapsedTaskList]);
+  const collapsedInProgressDates = useMemo(
+    () => new Set(collapsedProgressDateList),
+    [collapsedProgressDateList],
+  );
+  const expandedFinishedDates = useMemo(
+    () => new Set(expandedFinishedDateList),
+    [expandedFinishedDateList],
+  );
 
-      const expandedFinishedDatesRaw = localStorage.getItem(FINISHED_DATE_EXPANDED_STORAGE_KEY);
-      if (expandedFinishedDatesRaw) {
-        const parsed = JSON.parse(expandedFinishedDatesRaw) as string[];
-        setExpandedFinishedDates(new Set(parsed));
-      }
-    } catch {
-      // Ignore invalid persisted collapse state.
-    }
-  }, [
-    TASK_COLLAPSE_STORAGE_KEY,
-    IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY,
-    FINISHED_DATE_EXPANDED_STORAGE_KEY,
-  ]);
-
-  useEffect(() => {
-    localStorage.setItem(TASK_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsedTaskIds)));
-  }, [TASK_COLLAPSE_STORAGE_KEY, collapsedTaskIds]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY,
-      JSON.stringify(Array.from(collapsedInProgressDates)),
-    );
-  }, [IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY, collapsedInProgressDates]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      FINISHED_DATE_EXPANDED_STORAGE_KEY,
-      JSON.stringify(Array.from(expandedFinishedDates)),
-    );
-  }, [FINISHED_DATE_EXPANDED_STORAGE_KEY, expandedFinishedDates]);
+  function toggleValue<T>(list: T[], value: T): T[] {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  }
 
   function toggleDateCollapse(date: string, isFinished: boolean) {
     if (isFinished) {
-      setExpandedFinishedDates((prev) => {
-        const newSet = new Set(prev);
-        if (newSet.has(date)) {
-          newSet.delete(date);
-        } else {
-          newSet.add(date);
-        }
-        return newSet;
-      });
+      setExpandedFinishedDates((prev) => toggleValue(prev, date));
     } else {
-      setCollapsedInProgressDates(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(date)) {
-          newSet.delete(date);
-        } else {
-          newSet.add(date);
-        }
-        return newSet;
-      });
+      setCollapsedProgressDates((prev) => toggleValue(prev, date));
     }
   }
 
   function toggleTaskCollapse(taskId: number) {
-    setCollapsedTaskIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) {
-        next.delete(taskId);
-      } else {
-        next.add(taskId);
-      }
-      return next;
-    });
+    setCollapsedTaskList((prev) => toggleValue(prev, taskId));
   }
 
   function taskGroupDate(task: Task, isFinished: boolean): string {
@@ -164,22 +122,39 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     router.refresh();
   }
 
+  function markBusy(taskId: number, busy: boolean) {
+    setBusyTaskIds((prev) =>
+      busy ? Array.from(new Set([...prev, taskId])) : prev.filter((id) => id !== taskId),
+    );
+  }
+
+  async function readError(response: Response, fallback: string): Promise<string> {
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
+    return data.error ?? fallback;
+  }
+
   async function runAction(taskId: number, action: "complete" | "cancel" | "resume" | "hold") {
     if (action === "resume" || action === "hold") {
-      setBusyTaskId(taskId);
+      markBusy(taskId, true);
       setError(null);
-      const response = await fetch("/api/tasks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, action }),
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "Failed to update task.");
+      try {
+        const response = await fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, action }),
+        });
+        if (!response.ok) {
+          setError(await readError(response, "Failed to update task."));
+        } else {
+          router.refresh();
+        }
+      } catch {
+        setError("Failed to update task.");
+      } finally {
+        markBusy(taskId, false);
       }
-      setBusyTaskId(null);
-      router.refresh();
     } else {
+      setModalError(null);
       setModalAction({ type: action, taskId });
     }
   }
@@ -188,52 +163,61 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     if (!modalAction) return;
 
     setModalLoading(true);
-    setError(null);
-    
-    const response = await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        taskId: modalAction.taskId, 
-        action: modalAction.type,
-        details: details 
-      }),
-    });
-    
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to update task.");
+    setModalError(null);
+
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: modalAction.taskId,
+          action: modalAction.type,
+          details: details,
+        }),
+      });
+
+      if (!response.ok) {
+        // UX-01: keep the modal open with the typed details intact so the user
+        // can retry instead of losing the work output they wrote.
+        setModalError(await readError(response, "Failed to update task."));
+        return;
+      }
+
+      setModalAction(null);
+      router.refresh();
+    } catch {
+      setModalError("Failed to update task.");
+    } finally {
+      setModalLoading(false);
     }
-    
-    setModalLoading(false);
-    setModalAction(null);
-    router.refresh();
   }
 
   async function handleLogNotes(notes: string) {
     if (!logNotesTask) return;
 
-    setBusyTaskId(logNotesTask.taskId);
-    setError(null);
-    
-    const response = await fetch("/api/tasks", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        taskId: logNotesTask.taskId, 
-        action: "log-notes",
-        notes: notes 
-      }),
-    });
+    const { taskId } = logNotesTask;
+    markBusy(taskId, true);
+    setLogNotesError(null);
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to save notes.");
+    try {
+      const response = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, action: "log-notes", notes: notes }),
+      });
+
+      if (!response.ok) {
+        setLogNotesError(await readError(response, "Failed to save notes."));
+        return;
+      }
+
+      setLogNotesTask(null);
+      router.refresh();
+    } catch {
+      setLogNotesError("Failed to save notes.");
+    } finally {
+      markBusy(taskId, false);
     }
-    
-    setBusyTaskId(null);
-    setLogNotesTask(null);
-    router.refresh();
   }
 
   const inProgress = tasks.filter((task) => task.status === "in_progress");
@@ -354,7 +338,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                             <div className="mt-3 flex flex-wrap gap-2">
                               <button
                                 onClick={() => runAction(task.id, "complete")}
-                                disabled={busyTaskId === task.id}
+                                disabled={busyTaskIds.includes(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -364,7 +348,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "hold")}
-                                disabled={busyTaskId === task.id}
+                                disabled={busyTaskIds.includes(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-amber-500/30 transition-all hover:shadow-lg hover:shadow-amber-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -374,7 +358,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "cancel")}
-                                disabled={busyTaskId === task.id}
+                                disabled={busyTaskIds.includes(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -384,7 +368,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => setLogNotesTask({ taskId: task.id, notes: "" })}
-                                disabled={busyTaskId === task.id}
+                                disabled={busyTaskIds.includes(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -399,7 +383,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                             <div className="mt-3 flex flex-wrap gap-2">
                               <button
                                 onClick={() => runAction(task.id, "resume")}
-                                disabled={busyTaskId === task.id}
+                                disabled={busyTaskIds.includes(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-indigo-500/30 transition-all hover:shadow-lg hover:shadow-indigo-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -410,7 +394,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               </button>
                               <button
                                 onClick={() => runAction(task.id, "cancel")}
-                                disabled={busyTaskId === task.id}
+                                disabled={busyTaskIds.includes(task.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -443,7 +427,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
                               {task.status === "cancelled" ? (
                                 <button
                                   onClick={() => runAction(task.id, "resume")}
-                                  disabled={busyTaskId === task.id}
+                                  disabled={busyTaskIds.includes(task.id)}
                                   className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/50 bg-white/50 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
                                 >
                                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -497,8 +481,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             />
             <div className="rounded-xl border border-zinc-200/50 bg-white/50 p-1 dark:border-zinc-700/50 dark:bg-zinc-800/50">
               <RichTextEditor
-                key={`task-desc-${title}`}
-                value={description}
+                                value={description}
                 onChange={setDescription}
                 placeholder="Description (optional)"
               />
@@ -527,26 +510,34 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       {renderTaskSection("On Hold / In Review", onHold, false)}
       {renderTaskSection("Completed and Cancelled", finished, true)}
       
-      <TaskActionModal
-        isOpen={modalAction !== null}
-        onClose={() => setModalAction(null)}
-        onConfirm={handleModalConfirm}
-        title={modalAction?.type === "complete" ? "Complete Task" : "Cancel Task"}
-        placeholder={modalAction?.type === "complete" 
-          ? "Describe work performed and any outputs..." 
-          : "Reason for cancelling this task..."
-        }
-        confirmText={modalAction?.type === "complete" ? "Complete" : "Cancel"}
-        loading={modalLoading}
-      />
-      
-      <LogNotesModal
-        isOpen={logNotesTask !== null}
-        onClose={() => setLogNotesTask(null)}
-        onConfirm={handleLogNotes}
-        initialNotes={logNotesTask?.notes || ""}
-        loading={busyTaskId === logNotesTask?.taskId}
-      />
+      {/* Mount-only rendering resets each modal draft when it reopens (UX-01). */}
+      {modalAction ? (
+        <TaskActionModal
+          isOpen
+          onClose={() => setModalAction(null)}
+          onConfirm={handleModalConfirm}
+          title={modalAction.type === "complete" ? "Complete Task" : "Cancel Task"}
+          placeholder={
+            modalAction.type === "complete"
+              ? "Describe work performed and any outputs..."
+              : "Reason for cancelling this task..."
+          }
+          confirmText={modalAction.type === "complete" ? "Complete" : "Cancel"}
+          loading={modalLoading}
+          error={modalError}
+        />
+      ) : null}
+
+      {logNotesTask ? (
+        <LogNotesModal
+          isOpen
+          onClose={() => setLogNotesTask(null)}
+          onConfirm={handleLogNotes}
+          initialNotes={logNotesTask.notes}
+          loading={busyTaskIds.includes(logNotesTask.taskId)}
+          error={logNotesError}
+        />
+      ) : null}
     </div>
   );
 }

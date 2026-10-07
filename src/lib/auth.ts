@@ -126,3 +126,38 @@ export async function requireAuth(): Promise<string> {
   }
   return username;
 }
+
+/**
+ * True when at least one credential source could authenticate a login: a stored
+ * hash, APP_PASSWORD_HASH, or APP_PASSWORD. Used for the first-run setup banner
+ * so a fresh install explains itself instead of returning a bare 500 (UX-06).
+ */
+export async function isLoginConfigured(): Promise<boolean> {
+  try {
+    const settings = await prisma.userSettings.findUnique({
+      where: { id: 1 },
+      select: { passwordHash: true },
+    });
+    if (settings?.passwordHash) return true;
+  } catch {
+    // Database unreachable: fall through to the env check so callers still get
+    // an answer instead of throwing during render.
+  }
+
+  return Boolean(
+    getPasswordHashIfAvailable() || process.env.APP_PASSWORD?.trim(),
+  );
+}
+
+/**
+ * Idempotent bootstrap step: the app keeps exactly one settings row (id 1) and
+ * several flows assume it exists. Creating it at startup means a fresh volume on
+ * either database provider never starts out "missing its own configuration".
+ */
+export async function ensureSettingsRow(): Promise<void> {
+  await prisma.userSettings.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { id: 1 },
+  });
+}

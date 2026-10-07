@@ -1,6 +1,7 @@
 "use client";
 
 import DOMPurify from "isomorphic-dompurify";
+import { hasRichTextContent } from "@/lib/rich-text";
 
 interface RichTextDisplayProps {
   content: string | null;
@@ -8,7 +9,9 @@ interface RichTextDisplayProps {
 }
 
 export function RichTextDisplay({ content, className = "" }: RichTextDisplayProps) {
-  if (!content || content.trim() === "<p></p>") {
+  // Visible-text check instead of comparing against one hardcoded empty markup
+  // string, so "<p><br></p>", "&nbsp;" and multi-paragraph blanks all collapse.
+  if (!content || !hasRichTextContent(content)) {
     return null;
   }
 

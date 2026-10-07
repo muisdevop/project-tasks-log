@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { formatElapsed } from "@/lib/business-time";
+import { resolveActiveJobId } from "@/lib/navigation";
+import { useStoredState } from "@/hooks/use-stored-state";
+import {
+  ACTIVE_BREAK_KEY,
+  logFinishedBreak,
+  type ActiveBreak,
+} from "@/lib/breaks";
 
 type BreakType = {
   id: number;
@@ -13,140 +20,107 @@ type BreakType = {
   isActive: boolean;
 };
 
-type ActiveBreak = {
-  id: number;
-  breakTypeId: number;
-  jobId: number;
-  startTime: Date;
-  duration: number | null;
-  name: string;
-};
+type ProjectRef = { id: number; name?: string; jobId: number };
+
+type ProjectsResponse = { projects?: ProjectRef[] };
+type BreaksResponse = { breaks?: BreakType[] };
+
+const PROJECTS_CACHE_KEY = "break-widget-projects-cache";
 
 export function GlobalBreakWidget() {
   const router = useRouter();
   const pathname = usePathname();
   const [breaks, setBreaks] = useState<BreakType[]>([]);
-  const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(null);
   const [selectedBreak, setSelectedBreak] = useState<number | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [breakError, setBreakError] = useState<string | null>(null);
 
-  const resolveActiveJobId = useCallback(async () => {
-    const jobMatch = pathname?.match(/^\/jobs\/(\d+)/);
-    if (jobMatch) {
-      const parsed = Number(jobMatch[1]);
-      if (Number.isInteger(parsed) && parsed > 0) {
-        setActiveJobId(parsed);
-        return parsed;
-      }
-    }
+  // Storage-backed so the first client render matches server markup (BG-02) and an
+  // in-progress break survives reloads; useStoredState syncs it from localStorage.
+  const [activeBreak, setActiveBreak] = useStoredState<ActiveBreak | null>(ACTIVE_BREAK_KEY, null);
+  const [projects, setProjects] = useStoredState<ProjectRef[]>(PROJECTS_CACHE_KEY, [], "session");
 
-    const projectMatch = pathname?.match(/^\/projects\/(\d+)\/(tasks|settings)/);
-    if (projectMatch) {
-      const projectId = Number(projectMatch[1]);
-      if (Number.isInteger(projectId) && projectId > 0) {
-        try {
-          const response = await fetch(`/api/projects/${projectId}`);
-          if (response.ok) {
-            const data = await response.json();
-            const jobId = Number(data.project?.jobId);
-            if (Number.isInteger(jobId) && jobId > 0) {
-              setActiveJobId(jobId);
-              return jobId;
-            }
-          }
-        } catch (err) {
-          console.error("Failed to resolve job context from project:", err);
+  // AR-04: job context is derived from the pathname with the shared resolver, which
+  // only recognizes job/project-task routes (no local regex that also matches /settings).
+  const activeJobId = resolveActiveJobId(pathname ?? "", projects);
+
+  // Project list backing the resolver; fetched once so navigation stays instant.
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const response = await fetch("/api/projects", { cache: "no-store" });
+        if (response.ok) {
+          const data = (await response.json()) as ProjectsResponse;
+          setProjects(data.projects ?? []);
         }
+      } catch (err) {
+        console.error("Failed to load projects for break context:", err);
       }
-    }
+    };
 
-    setActiveJobId(null);
-    return null;
-  }, [pathname]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("activeBreak");
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      setActiveBreak({
-        ...parsed,
-        startTime: new Date(parsed.startTime),
-      });
-    }
-  }, []);
+    void run();
+  }, [setProjects]);
 
   useEffect(() => {
+    if (!activeJobId) return;
+
     let cancelled = false;
 
-    async function loadBreakContext() {
-      const jobId = await resolveActiveJobId();
-      if (cancelled) return;
-      if (!jobId) {
-        setBreaks([]);
-        setSelectedBreak(null);
-        return;
+    const run = async () => {
+      try {
+        const response = await fetch(`/api/breaks?jobId=${activeJobId}`);
+        const data = response.ok ? ((await response.json()) as BreaksResponse) : null;
+        if (cancelled) return;
+        setBreaks((data?.breaks ?? []).filter((breakType) => breakType.isActive));
+      } catch (err) {
+        console.error("Failed to fetch breaks:", err);
+        if (!cancelled) setBreaks([]);
       }
-      await fetchBreaks(jobId);
-    }
+    };
 
-    loadBreakContext();
+    void run();
 
     return () => {
       cancelled = true;
     };
-  }, [resolveActiveJobId]);
+  }, [activeJobId]);
 
   useEffect(() => {
-    if (!activeBreak) {
-      setElapsedSeconds(0);
-      return;
-    }
+    if (!activeBreak) return;
 
-    const interval = setInterval(() => {
-      const elapsed = Math.floor((new Date().getTime() - activeBreak.startTime.getTime()) / 1000);
-      setElapsedSeconds(elapsed);
-    }, 1000);
+    const startTime = new Date(activeBreak.startTime).getTime();
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    };
+
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
 
     return () => clearInterval(interval);
   }, [activeBreak]);
 
-  async function fetchBreaks(jobId: number) {
-    try {
-      const response = await fetch(`/api/breaks?jobId=${jobId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setBreaks(data.breaks?.filter((b: BreakType) => b.isActive) || []);
-      } else {
-        setBreaks([]);
-      }
-    } catch (err) {
-      console.error("Failed to fetch breaks:", err);
-      setBreaks([]);
-    }
-  }
-
-  async function startBreak() {
+  function startBreak() {
     if (!selectedBreak || !activeJobId) return;
 
     const breakType = breaks.find((b) => b.id === selectedBreak);
     if (!breakType) return;
 
     setLoading(true);
+    setBreakError(null);
 
     const newBreak: ActiveBreak = {
       id: Date.now(),
       breakTypeId: breakType.id,
       jobId: activeJobId,
-      startTime: new Date(),
+      startTime: new Date().toISOString(),
       duration: breakType.duration,
       name: breakType.name,
     };
 
+    // useStoredState mirrors this into localStorage for the overlay and reloads.
     setActiveBreak(newBreak);
-    localStorage.setItem("activeBreak", JSON.stringify(newBreak));
 
     // Dispatch event to notify break-pause-overlay
     window.dispatchEvent(new CustomEvent("breakStarted", { detail: newBreak }));
@@ -157,70 +131,34 @@ export function GlobalBreakWidget() {
   }
 
   async function endBreak() {
-    if (!activeBreak) return;
+    if (!activeBreak || loading) return;
 
     setLoading(true);
+    setBreakError(null);
 
-    // Calculate actual break duration
-    const actualDuration = Math.floor((new Date().getTime() - activeBreak.startTime.getTime()) / 1000);
+    // One server call, one transaction: the break task is created already
+    // completed, so it can never be left half-written (UX-03).
+    const result = await logFinishedBreak(activeBreak, pathname);
 
-    // Create a break task in the current project; fallback to the first project in the job.
-    const projectMatch = pathname?.match(/\/projects\/(\d+)\/tasks/);
-    let projectId: number | null = projectMatch ? parseInt(projectMatch[1]) : null;
-
-    if (!projectId && activeBreak.jobId) {
-      try {
-        const projectsRes = await fetch("/api/projects");
-        if (projectsRes.ok) {
-          const data = await projectsRes.json();
-          const firstProject = (data.projects || []).find((project: { id: number; jobId: number }) => project.jobId === activeBreak.jobId);
-          projectId = firstProject?.id ?? null;
-        }
-      } catch (err) {
-        console.error("Failed to resolve project for break logging:", err);
-      }
-    }
-
-    if (projectId) {
-      try {
-        const response = await fetch("/api/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            title: `${activeBreak.name} Break`,
-            description: `Break duration: ${formatElapsed(actualDuration)}`,
-            startedAt: activeBreak.startTime.toISOString(),
-          }),
-        });
-
-        if (response.ok) {
-          const taskData = await response.json();
-          await fetch("/api/tasks", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              taskId: taskData.task.id,
-              action: "complete",
-              details: `Break completed. Duration: ${formatElapsed(actualDuration)}`,
-              elapsedSeconds: actualDuration,
-            }),
-          });
-        }
-      } catch (err) {
-        console.error("Failed to log break:", err);
-      }
+    if (!result.ok) {
+      // Keep the break active so the timer and a retry are still available.
+      setBreakError(result.error);
+      setLoading(false);
+      return;
     }
 
     setActiveBreak(null);
-    localStorage.removeItem("activeBreak");
 
     // Dispatch event to notify break-pause-overlay
     window.dispatchEvent(new CustomEvent("breakEnded"));
 
     setLoading(false);
+    // Re-read server data instead of a full page reload, which would discard the
+    // in-memory state of every board on the route.
     router.refresh();
   }
+
+  const visibleBreaks = activeJobId ? breaks : [];
 
   const remainingSeconds = activeBreak?.duration
     ? Math.max(0, activeBreak.duration * 60 - elapsedSeconds)
@@ -262,6 +200,14 @@ export function GlobalBreakWidget() {
               {loading ? "Ending..." : "End Break"}
             </button>
           </div>
+          {breakError && (
+            <p
+              role="alert"
+              className="bg-white/15 px-4 py-2 text-xs font-medium text-white"
+            >
+              {breakError}
+            </p>
+          )}
           {remainingSeconds !== null && (
             <div className="h-1 bg-white/20">
               <div
@@ -302,7 +248,7 @@ export function GlobalBreakWidget() {
                 className="mb-3 w-full rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2.5 text-sm outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-orange-500 dark:focus:bg-zinc-800 dark:focus:ring-orange-900/30"
               >
                 <option value="">Choose a break...</option>
-                {breaks.map((breakType) => (
+                {visibleBreaks.map((breakType) => (
                   <option key={breakType.id} value={breakType.id}>
                     {breakType.name}
                     {breakType.duration && ` (${breakType.duration} min)`}

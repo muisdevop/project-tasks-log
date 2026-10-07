@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type ProjectBreakdown = {
   projectId: number;
@@ -29,6 +30,12 @@ type Stats = {
     total: number;
     completed: number;
     inProgress: number;
+    /**
+     * /api/stats currently buckets completed / in_progress / cancelled only.
+     * Optional so the dashboard picks the number up automatically once the
+     * API reports it; until then it is derived from the total (see below).
+     */
+    onHold?: number;
     cancelled: number;
     withSubtasks: number;
     withoutSubtasks: number;
@@ -58,21 +65,23 @@ export function DashboardStats() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchStats();
-  }, []);
+    // Mount-only bootstrap declared inside the effect: every setState runs
+    // after an await, so no render cascades from the effect body itself.
+    const loadStats = async () => {
+      try {
+        const response = await fetch("/api/stats");
+        if (!response.ok) throw new Error("Failed to fetch statistics");
+        const data = await response.json();
+        setStats(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load statistics");
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  async function fetchStats() {
-    try {
-      const response = await fetch("/api/stats");
-      if (!response.ok) throw new Error("Failed to fetch statistics");
-      const data = await response.json();
-      setStats(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load statistics");
-    } finally {
-      setLoading(false);
-    }
-  }
+    void loadStats();
+  }, []);
 
   if (loading) {
     return (
@@ -93,6 +102,20 @@ export function DashboardStats() {
   if (!stats) {
     return null;
   }
+
+  // UX-08: TaskStatus has exactly four values (in_progress / on_hold /
+  // completed / cancelled) but /api/stats only buckets three of them, so
+  // on_hold is derived from the total. The distribution therefore adds up to
+  // Total and agrees with the task board instead of silently disagreeing.
+  const onHoldCount =
+    stats.taskStats.onHold ??
+    Math.max(
+      0,
+      stats.taskStats.total -
+        stats.taskStats.completed -
+        stats.taskStats.inProgress -
+        stats.taskStats.cancelled,
+    );
 
   return (
     <div className="space-y-8">
@@ -152,7 +175,13 @@ export function DashboardStats() {
               {stats.jobStats.map((job) => (
                 <tr key={job.jobId} className="transition-colors hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30">
                   <td className="px-6 py-4 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    {job.jobName}
+                    {/* UX-08: the row is now a real navigation target. */}
+                    <Link
+                      href={`/jobs/${job.jobId}`}
+                      className="transition-colors hover:text-blue-600 hover:underline dark:hover:text-blue-400"
+                    >
+                      {job.jobName}
+                    </Link>
                   </td>
                   <td className="px-6 py-4 text-sm text-zinc-700 dark:text-zinc-300">
                     {job.projectCount}
@@ -239,7 +268,7 @@ export function DashboardStats() {
             Task Status Distribution
           </h2>
         </div>
-        <div className="grid grid-cols-2 gap-4 p-6 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 p-6 sm:grid-cols-3 xl:grid-cols-5">
           <TaskStatusCard
             label="Completed"
             count={stats.taskStats.completed}
@@ -251,6 +280,12 @@ export function DashboardStats() {
             count={stats.taskStats.inProgress}
             color="bg-amber-100/80 dark:bg-amber-900/30"
             textColor="text-amber-700 dark:text-amber-300"
+          />
+          <TaskStatusCard
+            label="On Hold"
+            count={onHoldCount}
+            color="bg-slate-100/80 dark:bg-slate-800/50"
+            textColor="text-slate-700 dark:text-slate-300"
           />
           <TaskStatusCard
             label="Cancelled"

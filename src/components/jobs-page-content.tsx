@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { JobCreateForm } from "@/components/job-create-form";
 import Link from "next/link";
 import type { Job } from "@prisma/client";
@@ -8,24 +8,41 @@ import type { Job } from "@prisma/client";
 export function JobsPageContent() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // UX-04: a failed load is tracked apart from "no jobs yet", so an account
+  // that already has data is never told to create its first job.
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchJobs = async () => {
+  // Every setState here runs after an await, so calling it from the mount
+  // effect (and from the Retry button) does not cascade a render.
+  const fetchJobs = useCallback(async () => {
     try {
       const response = await fetch("/api/jobs");
-      if (response.ok) {
-        const data = await response.json();
-        setJobs(data.jobs || []);
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? `Jobs request failed (${response.status}).`);
       }
-    } catch (error) {
-      console.error("Failed to fetch jobs:", error);
+      const data = await response.json();
+      setJobs(data.jobs || []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load jobs.");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchJobs();
-  }, []);
+    const bootstrap = async () => {
+      await fetchJobs();
+    };
+    void bootstrap();
+  }, [fetchJobs]);
+
+  const retryFetchJobs = () => {
+    setError(null);
+    setIsLoading(true);
+    void fetchJobs();
+  };
 
   return (
     <div className="space-y-8">
@@ -50,6 +67,23 @@ export function JobsPageContent() {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
           </svg>
           Loading jobs...
+        </div>
+      ) : error ? (
+        <div
+          role="alert"
+          className="rounded-2xl border border-red-200/60 bg-red-50/80 p-6 shadow-xl backdrop-blur-xl dark:border-red-800/40 dark:bg-red-900/20"
+        >
+          <p className="text-base font-semibold text-red-700 dark:text-red-300">
+            Jobs could not be loaded
+          </p>
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>
+          <button
+            type="button"
+            onClick={retryFetchJobs}
+            className="mt-4 rounded-xl border border-red-300 bg-white/70 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-white dark:border-red-700/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+          >
+            Retry
+          </button>
         </div>
       ) : jobs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-blue-300/70 bg-blue-50/70 p-10 text-center text-blue-700 dark:border-blue-700/60 dark:bg-blue-950/30 dark:text-blue-300">

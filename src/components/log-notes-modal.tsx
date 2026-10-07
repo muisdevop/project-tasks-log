@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { RichTextEditor } from "./rich-text-editor";
 import { ModalShell, ModalCancelButton, ModalSpinner } from "./modal-shell";
 
@@ -10,29 +10,29 @@ interface LogNotesModalProps {
   onConfirm: (notes: string) => void;
   initialNotes?: string;
   loading?: boolean;
+  /** Failure from the previous attempt; the modal stays open so the draft survives (UX-01). */
+  error?: string | null;
 }
 
+/**
+ * Callers mount this component only while it is open, so the draft seeded from
+ * `initialNotes` in useState() is fresh on every open — no reset effect needed.
+ */
 export function LogNotesModal({
   isOpen,
   onClose,
   onConfirm,
   initialNotes = "",
   loading = false,
+  error = null,
 }: LogNotesModalProps) {
   const [notes, setNotes] = useState(initialNotes);
-
-  useEffect(() => {
-    if (isOpen) {
-      setNotes(initialNotes);
-    }
-  }, [initialNotes, isOpen]);
 
   if (!isOpen) return null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     onConfirm(notes);
-    setNotes("");
   }
 
   return (
@@ -48,6 +48,14 @@ export function LogNotesModal({
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-200/60 bg-red-50/70 px-4 py-2.5 text-sm text-red-600 dark:border-red-800/40 dark:bg-red-900/20 dark:text-red-400"
+          >
+            {error}
+          </p>
+        ) : null}
         <div>
           <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
             Progress Notes

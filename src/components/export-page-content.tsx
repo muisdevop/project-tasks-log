@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   calculateTimePeriodDates,
   calculateDurationPreset,
+  localDateKey,
   type GroupByOption,
 } from "@/lib/export-helpers";
 
@@ -32,16 +33,22 @@ export function ExportPageContent() {
   const [timePeriod, setTimePeriod] = useState<TimePeriodOption>("day");
   const [durationMode, setDurationMode] = useState<"preset" | "custom">("preset");
   const [durationPreset, setDurationPreset] = useState<7 | 30 | 90>(7);
-  const [customRangeStart, setCustomRangeStart] = useState<string>("");
-  const [customRangeEnd, setCustomRangeEnd] = useState<string>("");
+  // Seeded lazily from the local calendar (see localDateKey) so the date inputs
+  // never render an empty value and never drift because of UTC trimming.
+  const [customRangeStart, setCustomRangeStart] = useState<string>(() => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    return localDateKey(sevenDaysAgo);
+  });
+  const [customRangeEnd, setCustomRangeEnd] = useState<string>(() =>
+    localDateKey(new Date()),
+  );
 
   // Job and project filters
   const [jobs, setJobs] = useState<Job[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedJobs, setSelectedJobs] = useState<number[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
-  const [allJobsSelected, setAllJobsSelected] = useState(false);
-  const [allProjectsSelected, setAllProjectsSelected] = useState(false);
 
   // Grouping option
   const [groupBy, setGroupBy] = useState<GroupByOption>("date");
@@ -57,123 +64,115 @@ export function ExportPageContent() {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Computed values for intelligent filtering
-  const filteredProjects = selectedJobs.length === 0 
-    ? [] 
-    : projects.filter((p) => selectedJobs.includes(p.jobId));
+  const filteredProjects = useMemo(
+    () =>
+      selectedJobs.length === 0
+        ? []
+        : projects.filter((p) => selectedJobs.includes(p.jobId)),
+    [projects, selectedJobs],
+  );
 
   // Group filtered projects by job
-  const projectsByJob = filteredProjects.reduce((acc, proj) => {
-    const job = jobs.find((j) => j.id === proj.jobId);
-    const jobName = job?.name || "Unknown Job";
-    if (!acc[jobName]) {
-      acc[jobName] = [];
-    }
-    acc[jobName].push(proj);
-    return acc;
-  }, {} as Record<string, Project[]>);
+  const projectsByJob = useMemo(
+    () =>
+      filteredProjects.reduce((acc, proj) => {
+        const job = jobs.find((j) => j.id === proj.jobId);
+        const jobName = job?.name || "Unknown Job";
+        if (!acc[jobName]) {
+          acc[jobName] = [];
+        }
+        acc[jobName].push(proj);
+        return acc;
+      }, {} as Record<string, Project[]>),
+    [filteredProjects, jobs],
+  );
+
+  // The "select all" checkboxes are derived from the current selection instead of
+  // being stored, so they can never drift out of sync with the filtered list.
+  const allJobsSelected =
+    jobs.length > 0 && jobs.every((job) => selectedJobs.includes(job.id));
+  const allProjectsSelected =
+    filteredProjects.length > 0 &&
+    filteredProjects.every((p) => selectedProjects.includes(p.id));
 
   useEffect(() => {
-    fetchData();
-    // Set default date range based on today
-    const today = new Date().toISOString().split("T")[0];
-    setCustomRangeEnd(today);
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
-    setCustomRangeStart(sevenDaysAgo);
-  }, []);
+    // Declared inside the effect so state only changes once a response settles —
+    // the mount effect body performs no synchronous setState.
+    async function loadOptions() {
+      try {
+        const [jobRes, projRes, titleRes] = await Promise.all([
+          fetch("/api/jobs"),
+          fetch("/api/projects"),
+          fetch("/api/report-titles"),
+        ]);
 
-  // Sync "All Projects" checkbox state based on filtered projects
-  useEffect(() => {
-    if (filteredProjects.length === 0) {
-      setAllProjectsSelected(false);
-    } else {
-      const allFiltered = filteredProjects.every((p) => selectedProjects.includes(p.id));
-      setAllProjectsSelected(allFiltered);
-    }
-  }, [filteredProjects, selectedProjects]);
-
-  async function fetchData() {
-    try {
-      const [jobRes, projRes, titleRes] = await Promise.all([
-        fetch("/api/jobs"),
-        fetch("/api/projects"),
-        fetch("/api/report-titles"),
-      ]);
-
-      if (jobRes.ok) {
-        const data = await jobRes.json();
-        const jobList = data.jobs || [];
+        let jobList: Job[] = [];
+        if (jobRes.ok) {
+          const data = (await jobRes.json()) as { jobs?: Job[] };
+          jobList = data.jobs ?? [];
+        }
         setJobs(jobList);
         // Default: select all jobs
-        setSelectedJobs(jobList.map((j: Job) => j.id));
-        setAllJobsSelected(true);
-      }
+        setSelectedJobs(jobList.map((j) => j.id));
 
-      if (projRes.ok) {
-        const data = await projRes.json();
-        const projList = data.projects || [];
+        let projList: Project[] = [];
+        if (projRes.ok) {
+          const data = (await projRes.json()) as { projects?: Project[] };
+          projList = data.projects ?? [];
+        }
         setProjects(projList);
         // Default: select all projects
-        setSelectedProjects(projList.map((p: Project) => p.id));
-        setAllProjectsSelected(true);
-      }
+        setSelectedProjects(projList.map((p) => p.id));
 
-      if (titleRes.ok) {
-        const data = (await titleRes.json()) as ReportTitlesResponse;
-        const options = data.options && data.options.length > 0 ? data.options : ["Activity Report"];
-        const fallback = options[0];
-        setReportTitleOptions(options);
-        setSelectedReportTitle(
-          data.defaultTitle && options.includes(data.defaultTitle)
-            ? data.defaultTitle
-            : fallback,
-        );
-      } else {
-        setReportTitleOptions(["Activity Report"]);
-        setSelectedReportTitle("Activity Report");
+        if (titleRes.ok) {
+          const data = (await titleRes.json()) as ReportTitlesResponse;
+          const options =
+            data.options && data.options.length > 0
+              ? data.options
+              : ["Activity Report"];
+          setReportTitleOptions(options);
+          setSelectedReportTitle(
+            data.defaultTitle && options.includes(data.defaultTitle)
+              ? data.defaultTitle
+              : options[0],
+          );
+        } else {
+          setReportTitleOptions(["Activity Report"]);
+          setSelectedReportTitle("Activity Report");
+        }
+      } catch {
+        setError("Failed to load jobs, projects, or report title options");
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setError("Failed to load jobs, projects, or report title options");
-    } finally {
-      setLoading(false);
     }
-  }
 
+    void loadOptions();
+  }, []);
 
   function toggleJob(jobId: number) {
-    setSelectedJobs((prev) => {
-      const newSelected = prev.includes(jobId)
-        ? prev.filter((id) => id !== jobId)
-        : [...prev, jobId];
-      
-      // Auto-adjust project selection: deselect projects from deselected jobs
-      setSelectedProjects((projPrev) =>
-        projPrev.filter((projId) => {
-          const proj = projects.find((p) => p.id === projId);
-          return proj && newSelected.includes(proj.jobId);
-        })
-      );
-      
-      return newSelected;
-    });
-    setAllJobsSelected(false);
+    const nextJobs = selectedJobs.includes(jobId)
+      ? selectedJobs.filter((id) => id !== jobId)
+      : [...selectedJobs, jobId];
+
+    setSelectedJobs(nextJobs);
+    // Auto-adjust project selection: drop projects belonging to deselected jobs.
+    setSelectedProjects((prev) =>
+      prev.filter((projId) => {
+        const proj = projects.find((p) => p.id === projId);
+        return proj !== undefined && nextJobs.includes(proj.jobId);
+      }),
+    );
   }
 
   function toggleAllJobs() {
     if (allJobsSelected) {
       setSelectedJobs([]);
-      setAllJobsSelected(false);
       setSelectedProjects([]);
-      setAllProjectsSelected(false);
     } else {
-      const allIds = jobs.map((j) => j.id);
-      setSelectedJobs(allIds);
-      setAllJobsSelected(true);
+      setSelectedJobs(jobs.map((j) => j.id));
       // Automatically select all projects from these jobs
-      const allProjectIds = projects.map((p) => p.id);
-      setSelectedProjects(allProjectIds);
-      setAllProjectsSelected(true);
+      setSelectedProjects(projects.map((p) => p.id));
     }
   }
 
@@ -181,20 +180,16 @@ export function ExportPageContent() {
     setSelectedProjects((prev) =>
       prev.includes(projectId)
         ? prev.filter((id) => id !== projectId)
-        : [...prev, projectId]
+        : [...prev, projectId],
     );
-    setAllProjectsSelected(false);
   }
 
   function toggleAllProjects() {
     if (allProjectsSelected) {
       setSelectedProjects([]);
-      setAllProjectsSelected(false);
     } else {
       // Select only filtered projects (from selected jobs)
-      const allFilteredIds = filteredProjects.map((p) => p.id);
-      setSelectedProjects(allFilteredIds);
-      setAllProjectsSelected(true);
+      setSelectedProjects(filteredProjects.map((p) => p.id));
     }
   }
 

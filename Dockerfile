@@ -23,7 +23,6 @@ COPY prisma.config.ts ./
 COPY src ./src
 COPY next.config.ts ./
 COPY tsconfig.json ./
-COPY tailwind.config.* ./
 COPY postcss.config.* ./
 COPY public ./public
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { ConfirmDialog } from "./confirm-dialog";
 
 type BreakType = {
   id: number;
@@ -22,6 +24,13 @@ const BREAK_TYPES = [
   "Custom"
 ];
 
+async function loadBreaksFromApi(jobId: number): Promise<BreakType[]> {
+  const response = await fetch(`/api/breaks?jobId=${jobId}`);
+  if (!response.ok) throw new Error("Failed to fetch breaks");
+  const data = await response.json();
+  return data.breaks || [];
+}
+
 export function BreaksConfig({ jobId }: { jobId: number }) {
   const [breaks, setBreaks] = useState<BreakType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,21 +43,30 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
     isActive: true,
   });
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<BreakType | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    fetchBreaks();
+    // Fetch-on-mount bootstrap: the async work lives inside the effect so no state
+    // is set synchronously in the effect body.
+    const run = async () => {
+      try {
+        setBreaks(await loadBreaksFromApi(jobId));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load breaks");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void run();
   }, [jobId]);
 
-  async function fetchBreaks() {
+  async function refreshBreaks() {
     try {
-      const response = await fetch(`/api/breaks?jobId=${jobId}`);
-      if (!response.ok) throw new Error("Failed to fetch breaks");
-      const data = await response.json();
-      setBreaks(data.breaks || []);
+      setBreaks(await loadBreaksFromApi(jobId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load breaks");
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -73,21 +91,27 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
 
       setFormData({ name: "", type: "Custom", duration: 15 as number | null, isOneTime: false, isActive: true });
       setEditingId(null);
-      fetchBreaks();
+      await refreshBreaks();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save break");
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm("Are you sure you want to delete this break?")) return;
+  // UI-08: the native confirm() is replaced by ConfirmDialog, which keeps the form
+  // state intact and lets a failed delete be retried from the dialog.
+  async function handleDelete(breakType: BreakType) {
+    setError(null);
+    setDeleting(true);
 
     try {
-      const response = await fetch(`/api/breaks?id=${id}`, { method: "DELETE" });
+      const response = await fetch(`/api/breaks?id=${breakType.id}`, { method: "DELETE" });
       if (!response.ok) throw new Error("Failed to delete break");
-      fetchBreaks();
+      setPendingDelete(null);
+      await refreshBreaks();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete break");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -288,7 +312,7 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
                       Edit
                     </button>
                     <button
-                      onClick={() => handleDelete(breakType.id)}
+                      onClick={() => setPendingDelete(breakType)}
                       className="rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40"
                     >
                       Delete
@@ -300,6 +324,40 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
           )}
         </div>
       </div>
+
+      {/* Portaled so this card's backdrop-blur (which makes it the containing block
+          for fixed descendants) cannot clip the dialog. */}
+      {pendingDelete !== null &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <ConfirmDialog
+            isOpen
+            title="Delete Break"
+            tone="danger"
+            confirmLabel="Delete Break"
+            busy={deleting}
+            message={
+              <div className="space-y-3">
+                <p>
+                  Are you sure you want to delete{" "}
+                  <span className="font-semibold">{pendingDelete.name}</span>? Existing break logs are
+                  kept; the break type is removed from future sessions.
+                </p>
+                {error && (
+                  <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
+                    {error}
+                  </p>
+                )}
+              </div>
+            }
+            onConfirm={() => void handleDelete(pendingDelete)}
+            onClose={() => {
+              setPendingDelete(null);
+              setError(null);
+            }}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
