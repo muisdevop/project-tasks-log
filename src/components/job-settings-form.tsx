@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useApiMutation } from "@/hooks/use-api-mutation";
 import { BreaksConfig } from "./breaks-config";
 import { PageHeader, SectionCard } from "@/components/ui/card";
 import { StatusBanner } from "@/components/ui/status-banner";
@@ -27,15 +27,15 @@ const allDays = [
 ];
 
 export function JobSettingsForm({ job }: { job: JobSettings }) {
-  const router = useRouter();
   const [name, setName] = useState(job.name);
   const [workStart, setWorkStart] = useState(job.workStart);
   const [workEnd, setWorkEnd] = useState(job.workEnd);
   const [workDays, setWorkDays] = useState<number[]>(
     Array.isArray(job.workDays) ? (job.workDays as number[]) : [1, 2, 3, 4, 5]
   );
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // UI-04: the shared hook owns the pending flag, the error banner and the
+  // post-save router refresh that this form used to hand-roll.
+  const { mutate, pending: saving, error } = useApiMutation();
 
   function toggleDay(day: number) {
     setWorkDays((prev) =>
@@ -45,23 +45,13 @@ export function JobSettingsForm({ job }: { job: JobSettings }) {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
-    setError(null);
+    if (saving) return;
 
-    const response = await fetch(`/api/jobs/${job.id}`, {
+    await mutate(`/api/jobs/${job.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, workStart, workEnd, workDays }),
+      body: { name, workStart, workEnd, workDays },
+      fallbackError: "Failed to save.",
     });
-    
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to save.");
-      setSaving(false);
-      return;
-    }
-    setSaving(false);
-    router.refresh();
   }
 
   return (

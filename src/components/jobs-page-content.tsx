@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { readApiError } from "@/hooks/use-api-mutation";
 import { JobCreateForm } from "@/components/job-create-form";
+import { SurfaceSection } from "@/components/ui/card";
 import Link from "next/link";
 import type { Job } from "@prisma/client";
 
@@ -46,7 +47,7 @@ export function JobsPageContent() {
 
   return (
     <div className="space-y-8">
-      <div className="rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
+      <SurfaceSection bodyClassName="p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700 dark:text-violet-400">
           Resource Planning
         </p>
@@ -56,7 +57,7 @@ export function JobsPageContent() {
         <p className="mt-2 text-zinc-600 dark:text-zinc-400">
           Create and manage jobs with custom work schedules and break rules.
         </p>
-      </div>
+      </SurfaceSection>
 
       <JobCreateForm onSuccess={fetchJobs} />
 

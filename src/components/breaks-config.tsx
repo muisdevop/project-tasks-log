@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { useKeyedApiMutation } from "@/hooks/use-api-mutation";
 import { ConfirmDialog } from "./confirm-dialog";
 import { Card, EmptyState, PageHeader, SectionCard } from "@/components/ui/card";
 import { StatusBanner } from "@/components/ui/status-banner";
@@ -26,6 +27,9 @@ const BREAK_TYPES = [
   "Custom"
 ];
 
+// Keyed busy flag for the create/update form; deletes key themselves by break id.
+const SAVE_KEY = "save";
+
 async function loadBreaksFromApi(jobId: number): Promise<BreakType[]> {
   const response = await fetch(`/api/breaks?jobId=${jobId}`);
   if (!response.ok) throw new Error("Failed to fetch breaks");
@@ -33,20 +37,23 @@ async function loadBreaksFromApi(jobId: number): Promise<BreakType[]> {
   return data.breaks || [];
 }
 
+const EMPTY_FORM = {
+  name: "",
+  type: "Custom",
+  duration: 15 as number | null, // Default 15 minutes
+  isOneTime: false,
+  isActive: true,
+};
+
 export function BreaksConfig({ jobId }: { jobId: number }) {
   const [breaks, setBreaks] = useState<BreakType[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    type: "Custom",
-    duration: 15 as number | null, // Default 15 minutes
-    isOneTime: false,
-    isActive: true,
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<BreakType | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // UI-04: the shared hook owns the save/delete pending flags (per key) and the
+  // error banner the load path also writes to.
+  const { mutate, isBusy, error, setError } = useKeyedApiMutation<string | number>();
 
   useEffect(() => {
     // Fetch-on-mount bootstrap: the async work lives inside the effect so no state
@@ -62,7 +69,8 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
     };
 
     void run();
-  }, [jobId]);
+    // `setError` is the hook's useState setter, so it is stable across renders.
+  }, [jobId, setError]);
 
   async function refreshBreaks() {
     try {
@@ -74,47 +82,37 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    if (isBusy(SAVE_KEY)) return;
 
-    try {
-      const url = editingId ? "/api/breaks" : "/api/breaks";
-      const method = editingId ? "PATCH" : "POST";
-      const body = editingId 
-        ? { ...formData, id: editingId } 
-        : { ...formData, jobId };
+    const ok = await mutate(SAVE_KEY, "/api/breaks", {
+      method: editingId ? "PATCH" : "POST",
+      body: editingId ? { ...formData, id: editingId } : { ...formData, jobId },
+      fallbackError: "Failed to save break",
+      // The list is this component's own client state (re-read below), so there
+      // is nothing for a server-component refresh to revalidate.
+      refresh: false,
+    });
 
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+    if (!ok) return;
 
-      if (!response.ok) throw new Error("Failed to save break");
-
-      setFormData({ name: "", type: "Custom", duration: 15 as number | null, isOneTime: false, isActive: true });
-      setEditingId(null);
-      await refreshBreaks();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save break");
-    }
+    setFormData(EMPTY_FORM);
+    setEditingId(null);
+    await refreshBreaks();
   }
 
   // UI-08: the native confirm() is replaced by ConfirmDialog, which keeps the form
   // state intact and lets a failed delete be retried from the dialog.
   async function handleDelete(breakType: BreakType) {
-    setError(null);
-    setDeleting(true);
+    const ok = await mutate(breakType.id, `/api/breaks?id=${breakType.id}`, {
+      method: "DELETE",
+      fallbackError: "Failed to delete break",
+      refresh: false,
+    });
 
-    try {
-      const response = await fetch(`/api/breaks?id=${breakType.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Failed to delete break");
-      setPendingDelete(null);
-      await refreshBreaks();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete break");
-    } finally {
-      setDeleting(false);
-    }
+    if (!ok) return;
+
+    setPendingDelete(null);
+    await refreshBreaks();
   }
 
   function handleEdit(breakType: BreakType) {
@@ -129,7 +127,7 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
   }
 
   function handleCancel() {
-    setFormData({ name: "", type: "Custom", duration: 15, isOneTime: false, isActive: true });
+    setFormData(EMPTY_FORM);
     setEditingId(null);
   }
 
@@ -334,7 +332,7 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
             title="Delete Break"
             tone="danger"
             confirmLabel="Delete Break"
-            busy={deleting}
+            busy={isBusy(pendingDelete.id)}
             message={
               <div className="space-y-3">
                 <p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useApiMutation } from "@/hooks/use-api-mutation";
 import { PageHeader, SectionCard } from "@/components/ui/card";
 import { StatusBanner } from "@/components/ui/status-banner";
 
@@ -11,9 +12,9 @@ interface JobCreateFormProps {
 export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  // UI-04: one shared mutation flow for the pending flag and the error banner.
+  const { mutate, pending: loading, error, setError } = useApiMutation();
 
   useEffect(() => {
     // Deep link support: the sidebar "+" points at /jobs#new-job. The value is
@@ -33,34 +34,26 @@ export function JobCreateForm({ onSuccess }: JobCreateFormProps) {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
+    if (loading) return;
 
-    try {
-      const response = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || undefined,
-        }),
-      });
+    const ok = await mutate("/api/jobs", {
+      method: "POST",
+      body: {
+        name: name.trim(),
+        description: description.trim() || undefined,
+      },
+      fallbackError: "Failed to create job",
+      // No page on `/jobs` renders the list from server props — `onSuccess`
+      // re-reads it from the API, so a router refresh would revalidate nothing.
+      refresh: false,
+    });
 
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "Failed to create job");
-        setLoading(false);
-        return;
-      }
+    if (!ok) return;
 
-      setName("");
-      setDescription("");
-      setShowForm(false);
-      onSuccess?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-      setLoading(false);
-    }
+    setName("");
+    setDescription("");
+    setShowForm(false);
+    onSuccess?.();
   }
 
   return (
