@@ -18,6 +18,22 @@ export class HttpError extends Error {
 }
 
 /**
+ * SEC-13: a zod failure is useful to the caller but its `issues` array is an
+ * internal object — it carries `expected`/`received` values, the full path and
+ * any context the schema attached. Answer with the two fields a client can act
+ * on instead: which field failed and which rule it broke. The original issue
+ * list stays server-side (the caller logs it if it wants to).
+ */
+export function fieldErrors(
+  issues: readonly { path: readonly (string | number | symbol)[]; code: string }[],
+): { field: string; rule: string }[] {
+  return issues.map((issue) => ({
+    field: issue.path.map(String).join(".") || "body",
+    rule: issue.code,
+  }));
+}
+
+/**
  * Maps thrown errors to consistent API responses:
  * - UnauthorizedError -> 401
  * - ForbiddenError    -> 403 (authenticated, wrong scope / wrong credential kind)

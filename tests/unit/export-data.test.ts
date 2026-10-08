@@ -194,11 +194,13 @@ describe("resolveExportDateWindow", () => {
     ).toThrow(`Export range exceeds the maximum of ${MAX_EXPORT_SPAN_DAYS} days.`);
   });
 
-  it("maps an unsupported period to the legacy calculation error", () => {
-    // Reachable only if a caller bypasses the query schema; keep the exact text.
+  it("maps an unsupported period to a static 400, never the internal cause", () => {
+    // Reachable only if a caller bypasses the query schema. SEC-13: the old
+    // text interpolated the RangeError itself, so the client received an
+    // internal error object; the cause is logged server-side instead.
     expect(() =>
       resolveExportDateWindow({ timePeriod: "fortnight" as "day" }),
-    ).toThrow(/^Invalid time period calculation /);
+    ).toThrow(/^Invalid time period range\.$/);
   });
 });
 

@@ -6,6 +6,10 @@ const KNOWN_DEFAULT_SECRETS = new Set([
   "session-secret",
   "your-secret-here",
   "keyboard cat",
+  // SEC-03: this value used to be docker-compose.yml's fallback. It is in a
+  // public repo, so it is a known default forever — refusing it means a copy
+  // of the old compose file can never boot a real deployment.
+  "local-compose-only-rotate-me-please",
 ]);
 
 type StartupEnv = Record<string, string | undefined>;

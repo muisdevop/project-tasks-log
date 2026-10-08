@@ -141,7 +141,11 @@ export function resolveExportDateWindow(input: {
       startDate = dates.start;
       endDate = dates.end;
     } catch (err) {
-      throw new HttpError(400, `Invalid time period calculation ${err}`);
+      // SEC-13: the cause is a server-side diagnostic, never part of the
+      // response — stringifying it here used to ship an internal error object
+      // to the client inside the 400 message.
+      console.error("[export] time period calculation failed", { timePeriod, err });
+      throw new HttpError(400, "Invalid time period range.");
     }
   }
 

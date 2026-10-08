@@ -34,14 +34,17 @@ services:
       DATABASE_URL_SQLITE: ${DATABASE_URL_SQLITE:-file:/data/dev.db}
       DATABASE_URL_POSTGRES: ${DATABASE_URL_POSTGRES:-postgresql://tasklogger:tasklogger@postgres:5432/tasklogger?schema=public}
       APP_USERNAME: ${APP_USERNAME:-admin}
-      # SEC-03 startup checks REJECT plaintext APP_PASSWORD and known-default
-      # SESSION_SECRET in production, so the demo defaults below are a bcrypt
-      # hash of "admin123" and a unique non-default secret. CHANGE BOTH for
-      # any real deployment (npm run password:hash -- "<password>").
+      # SEC-03: nothing publicly knownable is shipped as a default any more. A
+      # forgeable session key or a well-known password is exactly what the audit
+      # called out, so compose refuses to start until the operator provides
+      # their own values. Generate them once:
+      #   SESSION_SECRET=$(openssl rand -hex 32)
+      #   APP_PASSWORD_HASH="$(npm run password:hash -- 'your-password')"
+      # A committed hash of "admin123" would have been the same as no password
+      # for anyone who can read this file, so there is no demo fallback.
       APP_PASSWORD: ${APP_PASSWORD:-}
-      # Compose interpolation: literal `$` in the bcrypt hash is written `$$`.
-      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:-$$2b$$12$$5ug74480wp8xsK9uOwkNte7CegjAMFlMzojvVEvautu2AbIO9G64u}
-      SESSION_SECRET: ${SESSION_SECRET:-local-compose-only-rotate-me-please}
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:?APP_PASSWORD_HASH is required - run: npm run password:hash -- "<password>"}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required - run: openssl rand -hex 32}
     volumes:
       - tasklogger-data:/data
     depends_on:

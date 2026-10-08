@@ -39,9 +39,46 @@ tagged with the finding ids they close.
 - Coverage tooling (`@vitest/coverage-v8`), `vitest.config.ts` thresholds and
   `test:unit` / `test:integration` / `test:coverage` scripts; `npm test` now chains
   lint + typecheck so a green suite cannot hide lint errors (TC-02, TC-04).
+- `src/lib/api-tokens.ts` + `/api/tokens` (AI-02, commit `9a46388`): scoped
+  `read`/`write` bearer tokens formatted `gid_<40 hex>`, stored only as a SHA-256
+  digest with `expiresAt` / `revokedAt` / `lastUsedAt`, individually revocable, and
+  minted/listed/revoked through a cookie-only route so a token can never mint a
+  token. `ApiToken` migrations exist for both providers.
+- `src/lib/idempotency.ts` (AI-03): `Idempotency-Key` replay semantics
+  (replay / 409 on body mismatch / 400 on malformed key / 425 while in flight),
+  wired into `POST /api/tokens` today with a 5-minute window.
+- `src/lib/security-events.ts` (MF-02): one redacted JSON line per security event
+  to stderr — `login.failed`, `login.rate_limited`, `token.rejected|revoked|expired|
+  rate_limited|created|revoked_by_operator|mint_denied`, `idempotency.conflict`.
+- Rate-limit buckets beyond human login (AI-03): per-token `api` 120/min,
+  `tokens-mint` 10/5min, `tokens-list` 60/min, `anonymous` 30/min, plus a
+  per-IP rejected-bearer lock (30/5min) in `src/lib/auth.ts` so brute force stops
+  costing database lookups.
+- Opt-in keyset pagination and substring search on the list routes
+  (`GET /api/tasks`, `/api/jobs`, `/api/projects`: `limit` 1..200 default 50,
+  opaque `cursor`, `q`, plus `status`/`jobId` filters; `nextCursor` appears only
+  when pagination is requested) — byte-compatible with the old payloads otherwise (MF-05).
+- Stats aggregation memoised per process (`src/lib/stats-cache.ts`), and the
+  `/api/export` handler split into `src/lib/export-data.ts`, `export-html.ts`,
+  `export-html-styles.ts` and `pdf-render.ts` so the route holds only transport
+  concerns (AR-01, PF-03).
+- `docs/security.md`: credential resolution order, token lifecycle, CSRF posture
+  and residual risks, rate-limit budgets, idempotency rules, event redaction.
+- `docs/architecture.md`: module map, data model, invariants, and **ADR-001
+  "the product is single-user by design"** recording the MF-07 decision instead
+  of only disclaiming it.
+- `docs/CONTRIBUTING.md`: gates, branch/PR and WIP-visibility workflow,
+  semver + annotated-tag release procedure, documentation duties, repository
+  hygiene findings.
+- `.gitattributes`: `* text=auto eol=lf` plus binary overrides, so a Windows
+  checkout stops reporting phantom line-ending churn.
 - `LICENSE` (MIT) and this `CHANGELOG.md` (PM-02).
-- `.gitignore` entries for archives and scratch files; `project-tasks-log.zip` is no
-  longer in the repository's future (PM-01).
+- `.gitignore` entries for archives and scratch files, so a repository snapshot
+  can never be committed by accident (`*.zip`, `*.tar.gz`, `.tmp-*`).
+  PM-01 note: `project-tasks-log.zip` is untracked and ignored, and it was never
+  committed (`git log --all --diff-filter=A -- project-tasks-log.zip` is empty),
+  but it still sits on disk at the repo root — it holds a `dev.db` snapshot with
+  real client/project/task names, so delete it rather than leave it to rot.
 
 ### Changed
 - Elapsed time, task start times and completion outputs are computed from server
