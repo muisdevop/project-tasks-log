@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { jobUpdateSchema, toSlugKey } from "@/lib/validators";
 
 export async function GET(
@@ -18,17 +19,21 @@ export async function GET(
       return NextResponse.json({ error: "Invalid jobId." }, { status: 400 });
     }
 
-    const job = await prisma.job.findUnique({
-      where: { id: jobId },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        workStart: true,
-        workEnd: true,
-        workDays: true,
-      },
-    });
+    const job = await withReadRetry(
+      () =>
+        prisma.job.findUnique({
+          where: { id: jobId },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            workStart: true,
+            workEnd: true,
+            workDays: true,
+          },
+        }),
+      { label: "job detail" },
+    );
 
     if (!job) {
       return NextResponse.json({ error: "Job not found." }, { status: 404 });

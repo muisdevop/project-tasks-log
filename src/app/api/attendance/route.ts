@@ -13,7 +13,8 @@ import {
   resolveListLimit,
   textContains,
 } from "@/lib/validators";
-import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { HttpError, fieldErrors, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { withIdempotency } from "@/lib/idempotency";
 import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
 
@@ -80,16 +81,20 @@ async function listAttendance(request: Request, log: RequestLogContext) {
       // Get today's attendance for this job
       const { start, end } = dayBounds();
 
-      const attendance = await prisma.jobAttendance.findFirst({
-        where: {
-          jobId,
-          checkInTime: {
-            gte: start,
-            lt: end,
-          },
-        },
-        orderBy: { checkInTime: "desc" },
-      });
+      const attendance = await withReadRetry(
+        () =>
+          prisma.jobAttendance.findFirst({
+            where: {
+              jobId,
+              checkInTime: {
+                gte: start,
+                lt: end,
+              },
+            },
+            orderBy: { checkInTime: "desc" },
+          }),
+        { label: "attendance today" },
+      );
 
       return NextResponse.json({ attendance });
     }
@@ -109,11 +114,15 @@ async function listAttendance(request: Request, log: RequestLogContext) {
     if (cursor) clauses.push(keysetAfter(cursor, "checkInTime", true));
     const where = { AND: clauses } as unknown as Prisma.JobAttendanceWhereInput;
 
-    const rows = await prisma.jobAttendance.findMany({
-      where,
-      orderBy: [{ checkInTime: "desc" }, { id: "desc" }],
-      take: limit + 1,
-    });
+    const rows = await withReadRetry(
+      () =>
+        prisma.jobAttendance.findMany({
+          where,
+          orderBy: [{ checkInTime: "desc" }, { id: "desc" }],
+          take: limit + 1,
+        }),
+      { label: "attendance list" },
+    );
 
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];
@@ -149,7 +158,7 @@ async function checkIn(request: Request, log: RequestLogContext) {
     );
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid request body.", issues: parsed.error.issues },
+        { error: "Invalid request body.", fieldErrors: fieldErrors(parsed.error.issues) },
         { status: 400 },
       );
     }
@@ -243,7 +252,7 @@ async function checkOut(request: Request, log: RequestLogContext) {
     );
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid request body.", issues: parsed.error.issues },
+        { error: "Invalid request body.", fieldErrors: fieldErrors(parsed.error.issues) },
         { status: 400 },
       );
     }

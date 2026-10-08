@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -72,11 +73,15 @@ export async function GET(request: Request) {
     // Full rows (no `select`) so the unpaged payload keeps the exact field set
     // it had before pagination existed; `createdAt` is already part of that
     // payload, so the keyset sort column needs no dropField pass.
-    const rows = await prisma.subTask.findMany({
-      where,
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: paginated ? limit + 1 : undefined,
-    });
+    const rows = await withReadRetry(
+      () =>
+        prisma.subTask.findMany({
+          where,
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          take: paginated ? limit + 1 : undefined,
+        }),
+      { label: "subtasks list" },
+    );
 
     const page = paginated ? rows.slice(0, limit) : rows;
     const hasMore = paginated && rows.length > limit;

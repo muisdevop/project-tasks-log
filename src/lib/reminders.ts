@@ -301,8 +301,11 @@ const isOpenStatus = (status: string): boolean =>
  * would lose its running-long nudge, it cannot gain a wrong one.
  */
 export function isBreakTask(task: Pick<ReminderTask, "title" | "isBreak">): boolean {
-  if (task.isBreak === true) return true;
-  return /\s+break$/i.test((task.title ?? "").trim());
+  // FL-05: `isBreak` is the only authority. The old title-suffix fallback let a
+  // task merely named "… break" silently disappear from the running-time
+  // reminders, and it disagreed with src/app/api/breaks/route.ts, which now
+  // trusts the flag too.
+  return task.isBreak === true;
 }
 
 export type RemindersInput = {

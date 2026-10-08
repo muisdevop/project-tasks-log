@@ -195,9 +195,15 @@ describe("creation rules", () => {
     expect(banked!.status).toBe("on_hold");
     expect(banked!.elapsedSeconds).toBe(3600); // 11:00 -> 12:00 inside 09-17
 
-    // Title-suffix legacy rule is still honoured (FL-05).
-    const legacy = await createTask(project, "Lunch break");
-    expect((await jsonOf(legacy)).task.isBreak).toBe(true);
+    // FL-05: `isBreak` is authoritative — a break row titled WITHOUT the word
+    // "break" is still a break, and the old `" break"` title suffix is no longer
+    // consulted when deciding whether a task is a break.
+    const namedBreak = await createTask(project, "Focus Reset", { isBreak: true });
+    expect((await jsonOf(namedBreak)).task.isBreak).toBe(true);
+
+    // A NON-break task whose title merely ends in " break" is not treated as one.
+    const notABreak = await createTask(project, "Lunch break");
+    expect((await jsonOf(notABreak)).task.isBreak).toBe(false);
   });
 });
 
@@ -392,5 +398,73 @@ describe("concurrent PATCH (no lost updates / no double billing)", () => {
     const row = await prisma.task.findUnique({ where: { id } });
     expect(["completed", "on_hold"]).toContain(row!.status);
     expect(row!.elapsedSeconds).toBe(3600);
+  });
+
+  /**
+   * FL-02: the invariant the code claims is "at most one in_progress task per
+   * project". Both resumes are legal on their own (each task is on_hold), so the
+   * only thing standing between them and two running tasks is the transaction:
+   * the resume path holds every OTHER in_progress task first, then applies the
+   * status change with a guarded `updateMany`. Two different tasks are resumed
+   * concurrently here — fired together, never awaited sequentially.
+   */
+  it("two simultaneous resumes of two different tasks leave exactly one running task", async () => {
+    const projectId = await newProject();
+    const idA = (await jsonOf(await createTask(projectId, "Resume A"))).task.id as number;
+    const idB = (await jsonOf(await createTask(projectId, "Resume B"))).task.id as number;
+
+    // Both must be resumable (on_hold), and neither is running yet.
+    await patchTask({ taskId: idA, action: "hold" });
+    expect((await prisma.task.findUnique({ where: { id: idB } }))!.status).toBe("on_hold");
+    vi.setSystemTime(at(12, 0));
+
+    const [resA, resB] = await Promise.all([
+      patchTask({ taskId: idA, action: "resume" }),
+      patchTask({ taskId: idB, action: "resume" }),
+    ]);
+
+    const rowA = (await prisma.task.findUnique({ where: { id: idA } }))!;
+    const rowB = (await prisma.task.findUnique({ where: { id: idB } }))!;
+    const running = [rowA, rowB].filter((t) => t.status === "in_progress");
+
+    // The documented end state: one runner, the other displaced back to on_hold.
+    // No third outcome (both running, or a 500 that leaves the board inconsistent).
+    expect(running).toHaveLength(1);
+    const displaced = running[0] === rowA ? rowB : rowA;
+    expect(displaced.status).toBe("on_hold");
+
+    // Every request answered with a real outcome (200 or the guarded 409), and
+    // the response the client got matches the row on the board: a 200 resume of
+    // a task that is no longer running is only legal as the auto-held loser.
+    const codes = [resA.status, resB.status];
+    expect(codes.every((c) => c === 200 || c === 409)).toBe(true);
+    // Observed on the SQLite harness (single writer, so the two transactions are
+    // serialized): BOTH requests answer 200 and the second one displaces the
+    // first back to `on_hold`. That is the documented auto-hold outcome, not a
+    // rejection — the guard exists, but displacement wins before it is needed.
+    // A 409 for the loser is the other legal answer, so the statuses above are
+    // asserted as "200 or 409" while the DATA invariant is asserted exactly.
+
+    // The displaced task's worked time is banked exactly once (no double billing
+    // from interleaved transactions): each task accumulated at most the single
+    // 09:00->12:00 segment it could have run through, never twice that.
+    for (const task of [rowA, rowB]) {
+      expect(task.elapsedSeconds).toBeLessThanOrEqual(3 * 3600);
+    }
+
+    // Exactly one "resumed" event per task: the loser's own transition still
+    // happened once, and the displacement wrote a "held" event for the winner.
+    const events = await prisma.taskEvent.findMany({
+      where: { taskId: { in: [idA, idB] } },
+      orderBy: { id: "asc" },
+    });
+    expect(events.filter((e) => e.eventType === "resumed")).toHaveLength(2);
+    expect(events.filter((e) => e.eventType === "held")).toHaveLength(1);
+
+    // And the project as a whole still has a single runner.
+    const runningInProject = await prisma.task.count({
+      where: { projectId, status: "in_progress" },
+    });
+    expect(runningInProject).toBe(1);
   });
 });

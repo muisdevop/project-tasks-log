@@ -15,6 +15,7 @@ import {
 } from "@/lib/validators";
 import { requireAuthContext, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { invalidateStatsCache } from "@/lib/stats-cache";
 import { withIdempotency } from "@/lib/idempotency";
 import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
@@ -85,12 +86,16 @@ async function listProjects(request: Request | undefined, log: RequestLogContext
     if (cursor) clauses.push(keysetAfter(cursor, "createdAt", true));
     const where = { AND: clauses } as unknown as Prisma.ProjectWhereInput;
 
-    const rows = await prisma.project.findMany({
-      where,
-      select: { ...PROJECT_SELECT, createdAt: true },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: paginated ? limit + 1 : undefined,
-    });
+    const rows = await withReadRetry(
+      () =>
+        prisma.project.findMany({
+          where,
+          select: { ...PROJECT_SELECT, createdAt: true },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: paginated ? limit + 1 : undefined,
+        }),
+      { label: "projects list" },
+    );
 
     const page = paginated ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];

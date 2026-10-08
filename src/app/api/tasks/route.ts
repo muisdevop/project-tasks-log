@@ -16,7 +16,8 @@ import {
   taskListQuerySchema,
   textContains,
 } from "@/lib/validators";
-import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { HttpError, fieldErrors, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { invalidateStatsCache } from "@/lib/stats-cache";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { withIdempotency } from "@/lib/idempotency";
@@ -105,10 +106,10 @@ async function listTasks(request: Request, log: RequestLogContext) {
     // Get the project and its associated job for work schedule
     let scheduleJobId: number;
     if (hasProjectId) {
-      const project = await prisma.project.findUnique({
-        where: { id: projectId },
-        select: { jobId: true },
-      });
+      const project = await withReadRetry(
+        () => prisma.project.findUnique({ where: { id: projectId }, select: { jobId: true } }),
+        { label: "tasks project lookup" },
+      );
       if (!project) {
         throw new HttpError(404, "Project not found.");
       }
@@ -121,10 +122,10 @@ async function listTasks(request: Request, log: RequestLogContext) {
       scheduleJobId = jobId as number;
     }
 
-    const job = await prisma.job.findUnique({
-      where: { id: scheduleJobId },
-      select: scheduleSelect,
-    });
+    const job = await withReadRetry(
+      () => prisma.job.findUnique({ where: { id: scheduleJobId }, select: scheduleSelect }),
+      { label: "tasks job schedule lookup" },
+    );
 
     if (!job) {
       throw new HttpError(404, "Job not found.");
@@ -153,33 +154,37 @@ async function listTasks(request: Request, log: RequestLogContext) {
     if (cursor) clauses.push(keysetAfter(cursor, "updatedAt", true));
     const where = { AND: clauses } as unknown as Prisma.TaskWhereInput;
 
-    const rows = await prisma.task.findMany({
-      where,
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: paginated ? limit + 1 : undefined,
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        status: true,
-        elapsedSeconds: true,
-        startedAt: true,
-        endedAt: true,
-        completionOutput: true,
-        cancellationReason: true,
-        logNotes: true,
-        // Sort key for the keyset cursor; stripped from the payload below.
-        updatedAt: true,
-        subtasks: {
+    const rows = await withReadRetry(
+      () =>
+        prisma.task.findMany({
+          where,
+          orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+          take: paginated ? limit + 1 : undefined,
           select: {
             id: true,
             title: true,
-            isCompleted: true,
+            description: true,
+            status: true,
+            elapsedSeconds: true,
+            startedAt: true,
+            endedAt: true,
+            completionOutput: true,
+            cancellationReason: true,
+            logNotes: true,
+            // Sort key for the keyset cursor; stripped from the payload below.
+            updatedAt: true,
+            subtasks: {
+              select: {
+                id: true,
+                title: true,
+                isCompleted: true,
+              },
+              orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            },
           },
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        },
-      },
-    });
+        }),
+      { label: "task list" },
+    );
 
     const page = paginated ? rows.slice(0, limit) : rows;
     const hasMore = paginated && rows.length > limit;
@@ -255,7 +260,7 @@ async function createTask(request: Request, log: RequestLogContext) {
     );
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid task payload.", issues: parsed.error.issues },
+        { error: "Invalid task payload.", fieldErrors: fieldErrors(parsed.error.issues) },
         { status: 400 },
       );
     }
@@ -265,11 +270,12 @@ async function createTask(request: Request, log: RequestLogContext) {
       parsed.data,
       async () => {
         const now = new Date();
-        // FL-05: explicit isBreak flag is authoritative; the " break" title suffix
-        // is still honoured so older clients keep working until updated.
-        const isBreakTask =
-          parsed.data.isBreak === true ||
-          parsed.data.title.trim().toLowerCase().endsWith(" break");
+        // FL-05: `isBreak` is the authoritative marker for a break task. The
+        // legacy `" break"` title-suffix fallback is gone — the migration
+        // (20261007150305) backfilled `isBreak` for every old suffix row, and
+        // both break-creating paths (/api/tasks clients and /api/breaks/log)
+        // set the flag explicitly, so the title is never consulted.
+        const isBreakTask = parsed.data.isBreak === true;
         // SEC-05: client-supplied start times are ignored unless explicitly enabled.
         const allowClientStart = process.env.ALLOW_CLIENT_START_TIME === "true";
         const startedAt =
@@ -389,7 +395,7 @@ async function actOnTask(request: Request, log: RequestLogContext) {
     );
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid action payload.", issues: parsed.error.issues },
+        { error: "Invalid action payload.", fieldErrors: fieldErrors(parsed.error.issues) },
         { status: 400 },
       );
     }

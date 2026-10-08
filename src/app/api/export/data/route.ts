@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { prisma } from "@/lib/prisma";
 import { ATTENDANCE_SELECT, TASK_SELECT } from "@/lib/export-data";
 
@@ -191,51 +192,55 @@ export async function GET(request: Request) {
       breakTypes,
       taskEvents,
       attendance,
-    ] = await Promise.all([
-      prisma.userSettings.findUnique({ where: { id: 1 }, select: SETTINGS_SELECT }),
-      prisma.job.findMany({
-        where: byId,
-        select: JOB_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-      prisma.project.findMany({
-        where: byJobId,
-        select: PROJECT_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-      prisma.task.findMany({
-        where: jobId ? { project: { jobId } } : {},
-        select: RAW_TASK_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-      prisma.subTask.findMany({
-        where: jobId ? { task: { project: { jobId } } } : {},
-        select: SUBTASK_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-      prisma.breakType.findMany({
-        where: byJobId,
-        select: BREAK_TYPE_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-      prisma.taskEvent.findMany({
-        where: jobId ? { task: { project: { jobId } } } : {},
-        select: TASK_EVENT_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-      prisma.jobAttendance.findMany({
-        where: byJobId,
-        select: RAW_ATTENDANCE_SELECT,
-        orderBy: { id: "asc" },
-        take: MAX_ROWS_PER_TABLE,
-      }),
-    ]);
+    ] = await withReadRetry(
+      () =>
+        Promise.all([
+          prisma.userSettings.findUnique({ where: { id: 1 }, select: SETTINGS_SELECT }),
+          prisma.job.findMany({
+            where: byId,
+            select: JOB_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+          prisma.project.findMany({
+            where: byJobId,
+            select: PROJECT_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+          prisma.task.findMany({
+            where: jobId ? { project: { jobId } } : {},
+            select: RAW_TASK_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+          prisma.subTask.findMany({
+            where: jobId ? { task: { project: { jobId } } } : {},
+            select: SUBTASK_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+          prisma.breakType.findMany({
+            where: byJobId,
+            select: BREAK_TYPE_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+          prisma.taskEvent.findMany({
+            where: jobId ? { task: { project: { jobId } } } : {},
+            select: TASK_EVENT_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+          prisma.jobAttendance.findMany({
+            where: byJobId,
+            select: RAW_ATTENDANCE_SELECT,
+            orderBy: { id: "asc" },
+            take: MAX_ROWS_PER_TABLE,
+          }),
+        ]),
+      { label: "raw data export" },
+    );
 
     if (jobId && jobs.length === 0) {
       throw new HttpError(404, "Job not found.");

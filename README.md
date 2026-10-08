@@ -189,7 +189,7 @@ Full posture, rate-limit budgets, idempotency rules and residual risks:
 | `GET /api/export` | report download | `?timePeriod=day\|week\|month\|range&groupBy=date\|job\|project&startDate&endDate&jobIds=1,2&projectIds=3&reportTitle=` — PDF, HTML fallback, `404` when the filter matches no task, `429` while another export runs |
 
 The machine-readable contract is
-**[`docs/openapi.yaml`](docs/openapi.yaml)** — 17 paths / 35 operations, request
+**[`docs/openapi.yaml`](docs/openapi.yaml)** — 21 paths / 42 operations, request
 schemas generated straight from the zod schemas in `src/lib/validators.ts`
 (`npm run docs:openapi`; freshness checked by `npm run docs:openapi:check`).
 Known gap: `/api/tokens` is **not** in that document yet, so the generated

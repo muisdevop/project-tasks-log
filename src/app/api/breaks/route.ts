@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { breakSchema, breakUpdateSchema } from "@/lib/validators";
 import { withIdempotency } from "@/lib/idempotency";
 import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
@@ -37,39 +38,51 @@ async function listBreaks(request: Request) {
       return NextResponse.json({ error: "Invalid jobId." }, { status: 400 });
     }
 
-    const breaks = await prisma.breakType.findMany({
-      where: { jobId },
-      orderBy: [{ createdAt: "asc" }, { name: "asc" }],
-    });
+    const breaks = await withReadRetry(
+      () =>
+        prisma.breakType.findMany({
+          where: { jobId },
+          orderBy: [{ createdAt: "asc" }, { name: "asc" }],
+        }),
+      { label: "break type list" },
+    );
 
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const todaysBreakTasks = await prisma.task.findMany({
-      where: {
-        project: { jobId },
-        isBreak: true,
-        status: { in: ["completed", "cancelled"] },
-        endedAt: { gte: startOfDay, lte: endOfDay },
-      },
-      select: { title: true },
-    });
-
-    const takenBreakNames = new Set(
-      todaysBreakTasks
-        .map((task) => task.title.trim())
-        .filter((title) => title.endsWith(" Break"))
-        .map((title) => title.slice(0, -6).trim().toLowerCase()),
+    const todaysBreakTasks = await withReadRetry(
+      () =>
+        prisma.task.findMany({
+          where: {
+            project: { jobId },
+            isBreak: true,
+            status: { in: ["completed", "cancelled"] },
+            endedAt: { gte: startOfDay, lte: endOfDay },
+          },
+          select: { title: true },
+        }),
+      { label: "breaks taken today" },
     );
+
+    // FL-05: whether a task is a break is decided solely by the authoritative
+    // `isBreak` flag (the query above already filters on it). Nothing here may
+    // rely on the title *ending* in " Break" — a break row titled "Dhuhr" is a
+    // break just as much as one titled "Dhuhr Break", and a non-break task
+    // titled "... Break" is not (it never reaches this list). The only remaining
+    // title use is matching a taken break back to its BreakType *by name*, which
+    // accepts both the bare name and the "<name> Break" form the log route writes.
+    const normalize = (value: string) => value.trim().toLowerCase();
+    const takenBreakNames = new Set(todaysBreakTasks.map((task) => normalize(task.title)));
 
     const filteredBreaks = breaks.filter((breakType) => {
       if (breakType.type.toLowerCase() !== "prayer") {
         return true;
       }
 
-      return !takenBreakNames.has(breakType.name.trim().toLowerCase());
+      const name = normalize(breakType.name);
+      return !takenBreakNames.has(name) && !takenBreakNames.has(`${name} break`);
     });
 
     return NextResponse.json({ breaks: filteredBreaks });

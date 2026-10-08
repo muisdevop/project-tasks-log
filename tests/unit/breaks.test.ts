@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ACTIVE_BREAK_KEY,
   PROJECT_JOB_MISMATCH_ERROR,
+  breakIdempotencyKey,
   logFinishedBreak,
   parseActiveBreak,
   type ActiveBreak,
@@ -62,9 +63,15 @@ describe("parseActiveBreak", () => {
 
 describe("logFinishedBreak", () => {
   type FakeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
-  type FetchStub = (url: string, init?: { method?: string; body?: string }) => Promise<FakeResponse>;
+  type FetchInit = {
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+    cache?: string;
+  };
+  type FetchStub = (url: string, init?: FetchInit) => Promise<FakeResponse>;
 
-  function stubFetch(impl: (url: string, init?: { method?: string; body?: string }) => Promise<FakeResponse>) {
+  function stubFetch(impl: (url: string, init?: FetchInit) => Promise<FakeResponse>) {
     const fetchMock = vi.fn<FetchStub>(impl);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
     return fetchMock;
@@ -99,6 +106,53 @@ describe("logFinishedBreak", () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(body).not.toHaveProperty("projectId");
+  });
+
+  describe("Idempotency-Key (FL-01)", () => {
+    it("sends the header on every break POST", async () => {
+      const fetchMock = stubFetch(async () => ({ ok: true, status: 201, json: async () => ({}) }));
+
+      await logFinishedBreak(activeBreak, "/projects/8/tasks");
+
+      const headers = fetchMock.mock.calls[0][1]?.headers;
+      expect(headers?.["Idempotency-Key"]).toBe(breakIdempotencyKey(activeBreak, 8));
+      expect(headers?.["Idempotency-Key"]).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
+    });
+
+    it("is the same key for a second tab ending the same stored break", async () => {
+      const fetchMock = stubFetch(async () => ({ ok: true, status: 201, json: async () => ({}) }));
+      // Two tabs read the identical localStorage record and both hit "End Break".
+      await logFinishedBreak({ ...activeBreak }, "/projects/8/tasks");
+      await logFinishedBreak({ ...activeBreak }, "/projects/8/tasks");
+
+      const [first, second] = fetchMock.mock.calls.map((call) => call[1]?.headers?.["Idempotency-Key"]);
+      expect(first).toBe(second);
+      expect(first).toBeDefined();
+    });
+
+    it("changes the key for the project-less mismatch retry, so it is not a 409", async () => {
+      const fetchMock = stubFetch(async (_url, init) => {
+        const hasProject = JSON.parse(String(init?.body)).projectId !== undefined;
+        return hasProject
+          ? { ok: false, status: 400, json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }) }
+          : { ok: true, status: 201, json: async () => ({}) };
+      });
+
+      await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({ ok: true });
+
+      const keys = fetchMock.mock.calls.map((call) => call[1]?.headers?.["Idempotency-Key"]);
+      expect(new Set(keys).size).toBe(2);
+      expect(keys[1]).toBe(breakIdempotencyKey(activeBreak, null));
+    });
+
+    it("changes the key for a different logical break", () => {
+      expect(breakIdempotencyKey(activeBreak, 8)).not.toBe(
+        breakIdempotencyKey({ ...activeBreak, startTime: "2026-03-30T11:00:00.000Z" }, 8),
+      );
+      expect(breakIdempotencyKey(activeBreak, 8)).not.toBe(
+        breakIdempotencyKey({ ...activeBreak, breakTypeId: 3 }, 8),
+      );
+    });
   });
 
   it("surfaces the server error message on a failed response", async () => {

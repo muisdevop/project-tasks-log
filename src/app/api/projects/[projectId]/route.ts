@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { projectUpdateSchema, toNameKey } from "@/lib/validators";
 
 const PROJECT_SELECT = {
@@ -29,10 +30,14 @@ export async function GET(
     const { projectId: projectIdStr } = await params;
     const projectId = parseProjectId(projectIdStr);
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: PROJECT_SELECT,
-    });
+    const project = await withReadRetry(
+      () =>
+        prisma.project.findUnique({
+          where: { id: projectId },
+          select: PROJECT_SELECT,
+        }),
+      { label: "project detail" },
+    );
 
     if (!project) throw new HttpError(404, "Project not found.");
 

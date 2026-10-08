@@ -212,6 +212,46 @@ describe("/api/breaks CRUD", () => {
     expect(names).toContain("Tea");
     expect(names).not.toContain("Dhuhr");
   });
+
+  it("locks a prayer break by the isBreak flag, not the title suffix (FL-05)", async () => {
+    await authed();
+    await breaksPost(
+      apiRequest("/api/breaks", { method: "POST", body: { jobId: jobA, name: "Asr", type: "prayer" } }),
+    );
+    await breaksPost(
+      apiRequest("/api/breaks", { method: "POST", body: { jobId: jobA, name: "Zuhr", type: "prayer" } }),
+    );
+
+    // A break flagged row titled WITHOUT the word "break" still locks its prayer type.
+    await prisma.task.create({
+      data: {
+        projectId: projectA1,
+        title: "Asr",
+        isBreak: true,
+        status: "completed",
+        startedAt: at(11, 0),
+        endedAt: at(11, 15),
+        elapsedSeconds: 0,
+      },
+    });
+    // A NON-break task merely titled like a logged break does NOT lock its prayer type.
+    await prisma.task.create({
+      data: {
+        projectId: projectA1,
+        title: "Zuhr Break",
+        isBreak: false,
+        status: "completed",
+        startedAt: at(11, 0),
+        endedAt: at(11, 15),
+        elapsedSeconds: 0,
+      },
+    });
+
+    const res = await breaksGet(apiRequest(`/api/breaks?jobId=${jobA}`));
+    const names = ((await jsonOf(res)).breaks as Array<{ name: string }>).map((b) => b.name);
+    expect(names).not.toContain("Asr");
+    expect(names).toContain("Zuhr");
+  });
 });
 
 describe("/api/breaks/log", () => {
@@ -362,7 +402,12 @@ describe("/api/breaks/log", () => {
         ) as never) as never,
     );
 
-    const res = await logPost(apiRequest("/api/breaks/log", { method: "POST", body: logBody() }));
+    // FL-01's in-transaction dedupe would short-circuit an identical repeat of
+    // the break logged above (same project + name + start minute), so this
+    // case uses its own start minute to keep proving the ROLLBACK path.
+    const res = await logPost(
+      apiRequest("/api/breaks/log", { method: "POST", body: logBody({ startedAt: at(11, 45).toISOString() }) }),
+    );
     expect(res.status).toBe(500);
     expect(await jsonOf(res)).toEqual({ error: "Failed to log break." });
 

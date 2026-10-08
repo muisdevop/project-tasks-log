@@ -21,7 +21,7 @@ const opParams = (path: keyof Doc["paths"], method: string): unknown[] => {
 
 const paramNames = (path: keyof Doc["paths"], method: string): string[] =>
   opParams(path, method).map((p) => {
-    const obj = p as Record<string, Record<string, string>>;
+    const obj = p as { $ref?: string; name?: string };
     return obj.$ref ? obj.$ref.split("/").pop() ?? "" : obj.name ?? "";
   });
 

@@ -92,7 +92,14 @@ describe("/api/attendance auth + validation", () => {
     expect(res.status).toBe(400);
     const bad = await jsonOf(res);
     expect(bad.error).toBe("Invalid request body.");
-    expect(Array.isArray(bad.issues)).toBe(true);
+    // SEC-13: the client gets field/rule pairs only — never the raw zod issue
+    // object with its expected/received values.
+    expect(Array.isArray(bad.fieldErrors)).toBe(true);
+    expect(bad.issues).toBeUndefined();
+    for (const issue of bad.fieldErrors) {
+      expect(Object.keys(issue).sort()).toEqual(["field", "rule"]);
+      expect(typeof issue.field).toBe("string");
+    }
 
     res = await attendancePost(
       apiRequest("/api/attendance", { method: "POST", body: { jobId: 999_999 } }),

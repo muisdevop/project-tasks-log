@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { HttpError, fieldErrors, toErrorResponse } from "@/lib/api-error";
 import { exportQuerySchema } from "@/lib/validators";
 import {
   collectGroupedTasks,
@@ -78,7 +78,7 @@ export async function GET(request: Request) {
     });
     if (!parsedQuery.success) {
       return NextResponse.json(
-        { error: "Invalid export query parameters.", details: parsedQuery.error.issues },
+        { error: "Invalid export query parameters.", fieldErrors: fieldErrors(parsedQuery.error.issues) },
         { status: 400 },
       );
     }

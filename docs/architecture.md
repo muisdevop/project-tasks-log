@@ -82,9 +82,49 @@ sequence is a convention, and `docs/CONTRIBUTING.md` repeats it.
 1. **Elapsed time is server-side.** A client cannot set worked seconds;
    `startedAt` from a browser is ignored unless `ALLOW_CLIENT_START_TIME=true`.
 2. **One running task per day.** Starting a task auto-holds the previous one;
-   `hold` banks time into `on_hold`.
+   `hold` banks time into `on_hold`. The per-project version of this — at most
+   one `in_progress` task in a project — is enforced in code, not in the
+   database: `PATCH /api/tasks` (FL-02) runs the whole transition in one
+   interactive transaction that (a) holds every *other* `in_progress` task of
+   that project with its worked time banked, then (b) applies its own status
+   change with a guarded `updateMany` (`WHERE id = ? AND status IN (<legal
+   states>)`), returning 409 when that guard matches 0 rows. `POST /api/tasks`
+   and `POST /api/breaks/log` use the same hold-then-write order, so no legal
+   flow ever commits two runners.
+   `tests/integration/task-lifecycle.test.ts` proves it for two concurrent
+   resume-vs-resume requests on two different tasks of one project (fired
+   together, not sequentially): exactly one task ends `in_progress`, the other
+   is auto-held, and both transitions are billed once. Honest limits of that
+   proof: the integration harness is SQLite-only and SQLite has a single
+   writer, so the two transactions are serialized — the test shows the
+   displacement logic is correct, but it cannot exercise a Postgres
+   `READ COMMITTED` interleave, and this repo has no Postgres test harness.
+   **Why there is no `UNIQUE (projectId) WHERE status = 'in_progress'` index:**
+   the app intentionally *displaces* the running task instead of rejecting the
+   new one, so a unique index would have to be deferred to commit time —
+   Prisma cannot express partial or deferrable unique constraints in either
+   schema, and SQLite provisioning here is `prisma db push` from
+   `prisma/schema.sqlite.prisma`, which would silently drop an index written by
+   hand in migration SQL (a backstop that vanishes on the next push is worse
+   than none). On Postgres the immediate variant is actively harmful: under
+   `READ COMMITTED` two concurrent resumes can both pass the read phase, and
+   the second one's `UPDATE … status='in_progress'` would abort the whole
+   transaction with `23505` — turning today's clean auto-hold (200 + the other
+   task `on_hold`) into a 500. The guarded update plus the concurrency test
+   stay the enforcement mechanism.
 3. **A break ends as exactly one completed break task**, written transactionally
-   after banking the task that was running.
+   after banking the task that was running. FL-01 closes the double-log path
+   from both ends: the widget/overlay send a **deterministic** `Idempotency-Key`
+   derived from the stored break record (`jobId` + `breakTypeId` + start epoch-ms
+   + project scope, `breakIdempotencyKey` in `src/lib/breaks.ts`), so a second
+   tab, a double click or a retry after a timeout is answered with the original
+   response plus `Idempotency-Replayed: true` instead of a second row; and
+   `POST /api/breaks/log` additionally refuses to duplicate inside the same
+   transaction when an equivalent break task already exists (same project +
+   `<name> Break` + start minute) — it returns the existing row as an idempotent
+   200 with `Break-Deduplicated: true` rather than throwing, because the
+   caller's intent is already satisfied on the board. Proved by
+   `tests/integration/break-idempotency.test.ts`.
 4. **Destruction is opt-in and audited.** Jobs and projects are never deleted —
    archival is a flag (`isArchived`). Tasks have exactly one hard-delete route,
    `DELETE /api/tasks/{taskId}?hard=true`, which refuses unless the literal flag

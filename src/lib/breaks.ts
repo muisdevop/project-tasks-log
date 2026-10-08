@@ -48,6 +48,76 @@ export type BreakLogResult = { ok: true } | { ok: false; error: string };
 const BREAK_LOG_FALLBACK_ERROR = "Failed to log this break. Try again.";
 const BREAK_LOG_NETWORK_ERROR = "Network error while logging this break. Try again.";
 
+/**
+ * FL-01: the header name is duplicated as a literal here on purpose.
+ * `IDEMPOTENCY_HEADER` lives in `src/lib/idempotency.ts`, which imports
+ * `next/server` and `node:crypto`; this module is bundled into the client
+ * (widget + overlay), so importing the constant would pull server-only code
+ * into the browser bundle. Keep the two literals in sync.
+ */
+const IDEMPOTENCY_HEADER = "Idempotency-Key";
+
+/** Same contract the server enforces (`KEY_PATTERN` in `src/lib/idempotency.ts`). */
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+
+function keyToken(value: unknown, fallback: string): string {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string") {
+    const cleaned = value.replace(/[^A-Za-z0-9_-]/g, "");
+    if (cleaned !== "") return cleaned;
+  }
+  return fallback;
+}
+
+/**
+ * FL-01: the `Idempotency-Key` for one logical break.
+ *
+ * DERIVATION (deterministic, never random):
+ * `brk-<jobId>-<breakTypeId>-<break startTime in epoch ms>-<project scope>`
+ *
+ * Every part comes from the stored active-break record in localStorage, which
+ * is the *same object* in every tab (and survives a reload), so two tabs
+ * ending the same break — a double click, or a retry after a timeout — compute
+ * the SAME key. The server then replays the first response instead of
+ * inserting a second break row; a random `crypto.randomUUID()` per call, which
+ * is what `mcp/server.mjs` uses for its *retry* key, would be useless here
+ * because the two competing POSTs are separate user actions that must still
+ * collapse into one write.
+ *
+ * The project scope is part of the key because `logFinishedBreak` legitimately
+ * POSTs the same break twice with two different bodies (the job-mismatch retry
+ * drops `projectId`). `src/lib/idempotency.ts` fingerprints the body, so
+ * reusing one key across those two shapes would answer the retry with a 409
+ * "already used with a different body" instead of logging the break. The scope
+ * is therefore `p<projectId>` when the client names a project and `job` when
+ * it lets the server fall back to the job's earliest open project.
+ *
+ * Defensive by design: a corrupt localStorage record without `breakTypeId`
+ * falls back to the record's own `id`, and anything unusable becomes a stable
+ * placeholder — a non-deterministic fallback would silently reopen the
+ * double-log hole this key exists to close.
+ */
+export function breakIdempotencyKey(
+  activeBreak: ActiveBreak,
+  projectId: number | null,
+): string {
+  const startMs = new Date(activeBreak.startTime).getTime();
+  const key = [
+    "brk",
+    keyToken(activeBreak.jobId, "job0"),
+    keyToken(activeBreak.breakTypeId ?? activeBreak.id, "type0"),
+    Number.isFinite(startMs) ? String(startMs) : keyToken(activeBreak.startTime, "start0"),
+    projectId === null ? "job" : `p${keyToken(projectId, "0")}`,
+  ].join("-");
+
+  // The server rejects malformed keys with 400, which would re-introduce a
+  // client-visible failure for a break that should be logged; pad/trim so the
+  // key is always usable and still derived only from break identity.
+  const trimmed = key.slice(0, 128);
+  if (IDEMPOTENCY_KEY_PATTERN.test(trimmed)) return trimmed;
+  return `${trimmed.replace(/[^A-Za-z0-9_-]/g, "-")}x`.padEnd(16, "0").slice(0, 128);
+}
+
 /** Internal outcome of one POST to `/api/breaks/log`. */
 type BreakLogResponse =
   | { kind: "ok" }
@@ -86,7 +156,16 @@ export async function logFinishedBreak(
     try {
       response = await fetch("/api/breaks/log", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // FL-01: deterministic per logical break (see `breakIdempotencyKey`),
+          // so a second tab / double click / retry is replayed by the server
+          // instead of logging the break twice.
+          [IDEMPOTENCY_HEADER]: breakIdempotencyKey(
+            activeBreak,
+            typeof body.projectId === "number" ? body.projectId : null,
+          ),
+        },
         cache: "no-store",
         body: JSON.stringify(body),
       });

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuthContext, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { withReadRetry } from "@/lib/db-resilience";
 import { invalidateStatsCache } from "@/lib/stats-cache";
 import { withIdempotency } from "@/lib/idempotency";
 import { withRequestLogging, type RequestLogContext } from "@/lib/request-log";
@@ -85,12 +86,16 @@ async function listJobs(request: Request | undefined, log: RequestLogContext) {
     if (cursor) clauses.push(keysetAfter(cursor, "createdAt", false));
     const where = { AND: clauses } as unknown as Prisma.JobWhereInput;
 
-    const rows = await prisma.job.findMany({
-      where,
-      select: { ...JOB_SELECT, createdAt: true },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: paginated ? limit + 1 : undefined,
-    });
+    const rows = await withReadRetry(
+      () =>
+        prisma.job.findMany({
+          where,
+          select: { ...JOB_SELECT, createdAt: true },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          take: paginated ? limit + 1 : undefined,
+        }),
+      { label: "jobs list" },
+    );
 
     const page = paginated ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];

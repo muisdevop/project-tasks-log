@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireWriteAccess } from "@/lib/auth";
-import { HttpError, toErrorResponse } from "@/lib/api-error";
+import { HttpError, fieldErrors, toErrorResponse } from "@/lib/api-error";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { formatElapsed } from "@/lib/business-time";
 import { breakLogSchema } from "@/lib/validators";
@@ -40,7 +40,12 @@ const scheduleSelect = { workStart: true, workEnd: true, workDays: true } as con
  * AI-03: `Idempotency-Key` opt-in. The transaction below is a real write
  * (it banks the active task and inserts a row), so an agent retrying after a
  * timeout would otherwise log the same break twice; with a key the original
- * `{ task }` response is replayed instead.
+ * `{ task }` response is replayed instead. The browser widget/overlay now send
+ * a key derived from the break identity (FL-01), so the two-tab double-log path
+ * is a replay rather than a second row.
+ * FL-01 backstop: even with no key (or a body that differs only by project
+ * scope), an equivalent completed break task for the same project + break name
+ * + start minute makes this a no-op that returns the existing row with 200.
  * MF-04: `withRequestLogging` emits the structured request line.
  */
 export async function POST(request: Request) {
@@ -57,7 +62,7 @@ async function logBreak(request: Request, log: RequestLogContext) {
     );
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid break payload.", issues: parsed.error.issues },
+        { error: "Invalid break payload.", fieldErrors: fieldErrors(parsed.error.issues) },
         { status: 400 },
       );
     }
@@ -99,6 +104,16 @@ function validateBreakWindow(input: BreakLogInput): NextResponse | null {
   return null;
 }
 
+/** Start of the minute a break began in — the granularity of the FL-01 dedupe. */
+function startOfMinute(value: Date): Date {
+  return new Date(Math.floor(value.getTime() / 60_000) * 60_000);
+}
+
+/** The minute boundary after `startOfMinute`, as a half-open range end. */
+function startOfMinutePlusOne(value: Date): Date {
+  return new Date(startOfMinute(value).getTime() + 60_000);
+}
+
 /** The whole break write, kept as one function so `withIdempotency` can re-run or skip it atomically. */
 async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
   const { jobId, projectId, name, startedAt: startedAtRaw } = input;
@@ -106,7 +121,7 @@ async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
   const startedAt = new Date(startedAtRaw);
   const wallClockSeconds = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
 
-  const task = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const job = await tx.job.findUnique({
       where: { id: jobId },
       select: { id: true, ...scheduleSelect },
@@ -144,6 +159,29 @@ async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
       );
     }
 
+    // FL-01 backstop: the `Idempotency-Key` replay above only protects callers
+    // that send the header and the same body. An agent without a key, or a
+    // second tab whose URL resolves a different project scope (hence a
+    // different key), reaches this identical write a second time. Inside the
+    // SAME transaction, refuse to duplicate it: an equivalent break task —
+    // same project, same "<name> Break" title, same start minute — means this
+    // break is already on the board, so the existing row is returned as an
+    // idempotent success (200) instead of throwing. Chosen over 409 because the
+    // caller's intent ("log this break") is already satisfied, and a throw
+    // would make the widget show an error for work that is on the board.
+    const alreadyLogged = await tx.task.findFirst({
+      where: {
+        projectId: targetProject.id,
+        isBreak: true,
+        title: `${name} Break`,
+        startedAt: { gte: startOfMinute(startedAt), lt: startOfMinutePlusOne(startedAt) },
+      },
+      orderBy: { id: "asc" },
+    });
+    if (alreadyLogged) {
+      return { task: alreadyLogged, deduplicated: true };
+    }
+
     // The break pauses whatever is active in that project: bank its worked
     // time first (same rule as creating a break task through /api/tasks).
     const activeTask = await tx.task.findFirst({
@@ -172,7 +210,7 @@ async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
     const change = applyTaskTransition(snapshot, "complete", now, job);
     const durationLabel = formatElapsed(wallClockSeconds);
 
-    return tx.task.create({
+    const task = await tx.task.create({
       data: {
         projectId: targetProject.id,
         title: `${name} Break`,
@@ -197,7 +235,15 @@ async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
         },
       },
     });
+
+    return { task, deduplicated: false };
   });
 
-  return NextResponse.json({ task }, { status: 201 });
+  return NextResponse.json(
+    { task: result.task, ...(result.deduplicated ? { deduplicated: true } : {}) },
+    {
+      status: result.deduplicated ? 200 : 201,
+      ...(result.deduplicated ? { headers: { "Break-Deduplicated": "true" } } : {}),
+    },
+  );
 }
