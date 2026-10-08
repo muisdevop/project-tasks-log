@@ -22,6 +22,9 @@ const eslintConfig = defineConfig([
     "test-results/**",
     ".playwright-e2e/**",
     "audit-report/**",
+    // Nested agent/worktree copies of the repo (see .gitignore): stale mirrors
+    // of src/ that would otherwise report hundreds of findings twice.
+    ".qoder/**",
   ]),
 ]);
 

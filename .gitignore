@@ -66,3 +66,7 @@ dev.db
 
 # Database snapshots written by `npm run db:backup` (MF-06)
 /backups/
+
+# Qoder/agent scratch: nested git worktrees hold full copies of this repo at an
+# older commit. They must never be committed, linted, typechecked or built.
+/.qoder/
