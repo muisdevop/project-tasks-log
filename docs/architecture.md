@@ -101,17 +101,25 @@ sequence is a convention, and `docs/CONTRIBUTING.md` repeats it.
    `READ COMMITTED` interleave, and this repo has no Postgres test harness.
    **Why there is no `UNIQUE (projectId) WHERE status = 'in_progress'` index:**
    the app intentionally *displaces* the running task instead of rejecting the
-   new one, so a unique index would have to be deferred to commit time —
-   Prisma cannot express partial or deferrable unique constraints in either
-   schema, and SQLite provisioning here is `prisma db push` from
-   `prisma/schema.sqlite.prisma`, which would silently drop an index written by
-   hand in migration SQL (a backstop that vanishes on the next push is worse
-   than none). On Postgres the immediate variant is actively harmful: under
-   `READ COMMITTED` two concurrent resumes can both pass the read phase, and
-   the second one's `UPDATE … status='in_progress'` would abort the whole
-   transaction with `23505` — turning today's clean auto-hold (200 + the other
-   task `on_hold`) into a 500. The guarded update plus the concurrency test
-   stay the enforcement mechanism.
+   new one, so a backstop would need to be deferred to commit time — and a
+   partial unique index cannot be deferred (Postgres allows `DEFERRABLE` only on
+   `UNIQUE` constraints, which do not support `WHERE`; Prisma expresses neither
+   partial nor deferrable constraints in either schema). The immediate variant
+   is actively harmful: under `READ COMMITTED` two concurrent resumes of two
+   different tasks can both pass the read phase, and the loser's
+   `UPDATE … status='in_progress'` blocks on the winner's uncommitted index
+   tuple, then aborts its whole transaction with `23505` — replacing today's
+   clean auto-hold (200, the other task back to `on_hold`) with a 500. It is
+   also operationally unsafe here: an index that lives only in hand-written
+   migration SQL is invisible to `prisma/schema.sqlite.prisma`, so `prisma db
+   push` (what the entire integration harness provisions with, see
+   `tests/integration/helpers/harness.ts`) and `npm run db:parity` silently
+   disagree with the deployed database; and `CREATE UNIQUE INDEX` fails outright
+   during the `prisma migrate deploy` in `docker-entrypoint.sh` if any project
+   already holds two `in_progress` rows — a pre-invariant database would refuse
+   to boot instead of converging, which also breaks the Coolify deploy path.
+   The transaction + guarded update + the concurrency test stay the enforcement
+   mechanism.
 3. **A break ends as exactly one completed break task**, written transactionally
    after banking the task that was running. FL-01 closes the double-log path
    from both ends: the widget/overlay send a **deterministic** `Idempotency-Key`

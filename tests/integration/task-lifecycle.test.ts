@@ -452,8 +452,12 @@ describe("concurrent PATCH (no lost updates / no double billing)", () => {
       expect(task.elapsedSeconds).toBeLessThanOrEqual(3 * 3600);
     }
 
-    // Exactly one "resumed" event per task: the loser's own transition still
-    // happened once, and the displacement wrote a "held" event for the winner.
+    // Exactly one "resumed" event per task, and exactly one "held" event — the
+    // explicit hold above. The auto-displacement inside the loser's transaction
+    // writes NO TaskEvent for the task it pushes back to on_hold (it is a plain
+    // `tx.task.update`), so a displaced task's banked time is not auditable from
+    // events. Asserted as documentation of the real behaviour, not as an
+    // improvement request.
     const events = await prisma.taskEvent.findMany({
       where: { taskId: { in: [idA, idB] } },
       orderBy: { id: "asc" },
