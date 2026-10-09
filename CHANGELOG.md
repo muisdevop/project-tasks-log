@@ -194,3 +194,14 @@ tagged with the finding ids they close.
   (`/api/auth/logout`) explained rather than apologised for, and each closed item
   is stated as closed and gated. (PM-02, found by re-reading the docs against the
   tree during the 2026-10-09 re-audit.)
+- `README.md` contradicted `package.json` in two directions at once: the Scripts
+  section said `db:backup` / `db:restore` were "not present" (they exist, added by
+  the MF-06 tooling) while its table omitted them, and the Configuration table —
+  which claims to list every variable the tree reads, verified by a
+  `process.env.` grep — was missing `DB_QUERY_TIMEOUT_MS`, `GID_BACKUP_DIR`,
+  `PG_DUMP_PATH` and `PSQL_PATH`. The backup variables are invisible to that grep
+  because the scripts read an injected `env` object; the table now says so
+  explicitly. `PG_RESTORE_PATH` was *not* added: nothing calls `pg_restore`, so
+  the name was dropped from `.env.example` rather than documented as a knob that
+  does nothing (PM-03, README claims must be re-verifiable by `grep` at review
+  time).

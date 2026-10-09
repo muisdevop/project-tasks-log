@@ -110,12 +110,16 @@ Every row is a real entry in `package.json` `scripts`.
 | `npm run db:migrate:sqlite-to-postgres` | `tsx scripts/migrate-sqlite-to-postgres.ts` data move |
 | `npm run db:seed` | `tsx prisma/seed.ts` demo data |
 | `npm run db:parity` | `node scripts/check-schema-parity.mjs` — fails if the two Prisma schemas drift |
+| `npm run db:backup` | `tsx scripts/backup.ts` — labelled snapshot of the active provider (`docs/backup-restore.md`) |
+| `npm run db:restore` | `tsx scripts/restore.ts` — verifies and restores one of those snapshots |
 | `npm run password:hash -- "pw"` | `tsx scripts/hash-password.ts`, bcrypt cost 12, for `APP_PASSWORD_HASH` |
 | `npm run docs:openapi` | regenerate `docs/openapi.yaml` from the zod schemas |
 | `npm run docs:openapi:check` | fail if the committed OpenAPI file is stale (CI) |
 
-Not present in `package.json`: `postinstall`, `db:backup`, `db:restore`,
-`test:watch`, `format`. Do not script against them.
+Not present in `package.json`: `postinstall`, `test:watch`, `format`. Do not
+script against them. (`db:backup` and `db:restore` *do* exist — they were added
+by the MF-06 backup tooling; this note used to claim they did not, which the
+2026-10-09 re-audit caught by diffing the note against `package.json`.)
 
 ## Configuration
 
@@ -131,7 +135,7 @@ There are no NextAuth variables — NextAuth is not a dependency; sessions are
 | `DATABASE_URL_SQLITE` | `file:./dev.db` | entrypoint / prisma | used when `DATABASE_URL` is unset |
 | `DATABASE_URL_POSTGRES` | local postgres | entrypoint / prisma | used when `DATABASE_URL` is unset |
 | `PRISMA_SCHEMA_PATH` | unset | entrypoint, prisma | tells the runtime which schema the generated client came from |
-| `DB_QUERY_TIMEOUT_MS` | built-in default | query-timeout helper (see `docs/CONTRIBUTING.md`, in flight as of `9a46388`) | overrides the default query timeout, clamped to a sane range |
+| `DB_QUERY_TIMEOUT_MS` | `8000` | `src/lib/db-resilience.ts` (`withQueryTimeout`) | per-query timeout; clamped to 500..30000 |
 | `SESSION_SECRET` | — | `src/lib/session.ts`, `src/proxy.ts`, `src/lib/startup-checks.ts` | required, >= 16 chars, not a known default; production refuses to boot otherwise |
 | `APP_USERNAME` | `admin` | `src/lib/auth.ts` | login name |
 | `APP_PASSWORD_HASH` | — | `src/lib/auth.ts` | preferred credential (bcrypt cost 12) |
@@ -140,6 +144,17 @@ There are no NextAuth variables — NextAuth is not a dependency; sessions are
 | `PUPPETEER_EXECUTABLE_PATH` | auto-detected | `src/lib/pdf-render.ts` | Chromium used for PDF export; unset means HTML fallback |
 | `DEV_ALLOWED_ORIGINS` | localhost | `next.config.ts` | comma-separated extra origins for `allowedDevOrigins` (dev/LAN only) |
 | `NEXT_DIST_DIR` | `.next` | `next.config.ts` | build/cache dir; the Playwright matrix sets `.next-e2e` |
+| `GID_BACKUP_DIR` | `<db dir or cwd>/backups` (so `/data/backups` in the image) | `scripts/backup.ts`, `scripts/restore.ts` | snapshot location; the default keeps backups on the persistent volume, not the container's writable layer |
+| `PG_DUMP_PATH` | `pg_dump` on `PATH` | `scripts/backup.ts` | absolute-path override for the Postgres dump binary |
+| `PSQL_PATH` | `psql` on `PATH` | `scripts/restore.ts` | absolute-path override for `psql` — Postgres restores run through `psql -f`, not `pg_restore` |
+
+The last three are read inside the backup scripts, which take an injected `env`
+object (`env.GID_BACKUP_DIR`, `requireTool(env, "pg_dump", "PG_DUMP_PATH")`,
+`env.PSQL_PATH`) instead of spelling `process.env.<NAME>`, so the grep above does
+not find them on its own — they were missing from this table until the 2026-10-09
+re-audit. `PATH_ENV_KEYS` in `scripts/backup.ts` also whitelists
+`PG_RESTORE_PATH` for redaction, but nothing calls `pg_restore`, so that name is
+deliberately not documented as a knob.
 | `PORT` | `3000` | `next start`, container | `HOSTNAME` is pinned to `0.0.0.0` in the Dockerfile because Docker otherwise injects the container name |
 
 ## Authentication and access model
