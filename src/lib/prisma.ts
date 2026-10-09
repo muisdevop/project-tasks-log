@@ -2,65 +2,128 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-function createClient() {
-  const provider = (process.env.DB_PROVIDER || "").toLowerCase();
-  const schemaPath = (process.env.PRISMA_SCHEMA_PATH || "").toLowerCase();
-  const resolvedUrl = process.env.DATABASE_URL?.trim();
+type DbProvider = "postgres" | "sqlite";
 
-  const hintedProvider =
-    (schemaPath.includes("postgres")
-      ? "postgres"
-      : schemaPath.includes("sqlite")
-        ? "sqlite"
-        : "") ||
-    (resolvedUrl?.startsWith("postgres") ? "postgres" : "") ||
-    provider;
+/**
+ * Only a convenience for `next dev`/scripts where the operator declared *which*
+ * database to use but left the connection string to the image defaults. They are
+ * never used to switch to the *other* database behind the operator's back: that
+ * silent fallback is what let a misconfigured production deploy serve an empty
+ * database with no visible error (ST-03).
+ */
+const DEVELOPMENT_SQLITE_URL = "file:./dev.db";
+const DEVELOPMENT_POSTGRES_URL = "postgresql://postgres:postgres@localhost:5432/postgres?schema=public";
 
-  const defaultSqliteUrl = process.env.DATABASE_URL_SQLITE?.trim() || "file:./dev.db";
-  const defaultPostgresUrl =
-    process.env.DATABASE_URL_POSTGRES?.trim() ||
-    "postgresql://postgres:postgres@localhost:5432/postgres?schema=public";
+const CONFIG_ERROR_PREFIX = "Invalid database configuration";
+
+function providerFromName(value: string): DbProvider | "" {
+  if (value === "sqlite") return "sqlite";
+  if (value === "postgres" || value === "postgresql") return "postgres";
+  return "";
+}
+
+/**
+ * Keeps thrown messages safe to log: a full connection string carries the
+ * database password. `file:` URLs are plain paths (no credentials) and are quoted
+ * in full because the path is exactly what the operator has to fix; anything else
+ * is reduced to its scheme.
+ */
+function describeConnection(url: string): string {
+  if (url.startsWith("file:")) return `"${url}"`;
+  const scheme = /^[a-z][a-z\d+.-]*:/i.exec(url)?.[0];
+  return scheme ? `a "${scheme}//…" URL` : "a value with no recognisable scheme";
+}
+
+function providerOfUrl(url: string): DbProvider | "" {
+  if (url.startsWith("postgres")) return "postgres";
+  if (url.startsWith("file:")) return "sqlite";
+  return "";
+}
+
+/**
+ * Resolves which database this process is allowed to talk to, or throws.
+ *
+ * Three signals can declare the provider, and they must agree:
+ * `PRISMA_SCHEMA_PATH` (which schema the client was generated from),
+ * `DB_PROVIDER` (what the operator says the deployment is) and the
+ * `DATABASE_URL` scheme. Precedence is schema path, then `DB_PROVIDER`, then the
+ * URL scheme — the first one that is actually declared wins, and a contradiction
+ * between two declared signals is a hard configuration error rather than a
+ * guess.
+ */
+function resolveDatabaseConfig(): { provider: DbProvider; url: string } {
+  const providerEnv = (process.env.DB_PROVIDER ?? "").trim().toLowerCase();
+  const schemaPath = (process.env.PRISMA_SCHEMA_PATH ?? "").trim().toLowerCase();
+  const declaredUrl = (process.env.DATABASE_URL ?? "").trim();
+  const sqliteUrl = (process.env.DATABASE_URL_SQLITE ?? "").trim();
+  const postgresUrl = (process.env.DATABASE_URL_POSTGRES ?? "").trim();
+
+  const schemaHint: DbProvider | "" = schemaPath.includes("postgres")
+    ? "postgres"
+    : schemaPath.includes("sqlite")
+      ? "sqlite"
+      : "";
+  const providerHint = providerFromName(providerEnv);
+
+  if (providerEnv && !providerHint) {
+    throw new Error(
+      `${CONFIG_ERROR_PREFIX}: DB_PROVIDER is "${providerEnv}", which is not a supported provider. Expected sqlite, postgres or postgresql.`,
+    );
+  }
+
+  const urlHint = providerOfUrl(declaredUrl);
+
+  if (schemaHint && providerHint && schemaHint !== providerHint) {
+    throw new Error(
+      `${CONFIG_ERROR_PREFIX}: DB_PROVIDER is "${providerEnv}" but PRISMA_SCHEMA_PATH points at the ${schemaHint} schema. Keep DB_PROVIDER, PRISMA_SCHEMA_PATH and DATABASE_URL describing the same database.`,
+    );
+  }
+
+  const provider = schemaHint || providerHint || urlHint;
+
+  if (!provider) {
+    // Nothing declares which database this is. Falling back to the built-in
+    // development file would boot a deployment against an empty `dev.db`.
+    throw new Error(
+      `${CONFIG_ERROR_PREFIX}: no database is declared. Set DATABASE_URL, or DB_PROVIDER together with DATABASE_URL_SQLITE / DATABASE_URL_POSTGRES. Refusing to open the built-in development database.`,
+    );
+  }
 
   const url =
-    resolvedUrl ||
-    (hintedProvider === "postgres" || hintedProvider === "postgresql"
-      ? defaultPostgresUrl
-      : defaultSqliteUrl);
+    declaredUrl ||
+    (provider === "postgres"
+      ? postgresUrl || DEVELOPMENT_POSTGRES_URL
+      : sqliteUrl || DEVELOPMENT_SQLITE_URL);
 
-  const useSqlite =
-    hintedProvider === "sqlite" ||
-    ((hintedProvider !== "postgres" && hintedProvider !== "postgresql") && url.startsWith("file:"));
+  if (provider === "sqlite" && !url.startsWith("file:")) {
+    throw new Error(
+      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is sqlite but DATABASE_URL is ${describeConnection(url)}. Set DB_PROVIDER=postgres or a file: URL.`,
+    );
+  }
+  if (provider === "postgres" && url.startsWith("file:")) {
+    throw new Error(
+      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is postgres but DATABASE_URL is ${describeConnection(url)}. Set DB_PROVIDER=sqlite or a postgresql:// URL.`,
+    );
+  }
+  if (provider === "postgres" && providerOfUrl(url) !== "postgres") {
+    throw new Error(
+      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is postgres but DATABASE_URL is ${describeConnection(url)}, which is not a postgresql:// connection string.`,
+    );
+  }
+
+  return { provider, url };
+}
+
+function createClient(): PrismaClient {
+  const { provider, url } = resolveDatabaseConfig();
 
   const log: Array<"error" | "warn"> =
     process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"];
 
-  const createSqliteClient = (connectionUrl: string) =>
-    new PrismaClient({
-      adapter: new PrismaBetterSqlite3({ url: connectionUrl }),
-      log,
-    });
-
-  const createPostgresClient = (connectionUrl: string) =>
-    new PrismaClient({
-      adapter: new PrismaPg({ connectionString: connectionUrl }),
-      log,
-    });
-
-  // Fail fast on any provider/env mismatch. A silent fallback to the other
-  // database with default connection strings can serve an empty database in
-  // production with no visible error (ST-03).
-  if (useSqlite && !url.startsWith("file:")) {
-    throw new Error(
-      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is sqlite but DATABASE_URL is "${url}". Set DB_PROVIDER=postgres or a file: URL.`,
-    );
+  if (provider === "sqlite") {
+    return new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }), log });
   }
-  if (!useSqlite && url.startsWith("file:")) {
-    throw new Error(
-      `DB_PROVIDER/DATABASE_URL mismatch: resolved provider is postgres but DATABASE_URL is "${url}". Set DB_PROVIDER=sqlite or a postgresql:// URL.`,
-    );
-  }
-
-  return useSqlite ? createSqliteClient(url) : createPostgresClient(url);
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url }), log });
 }
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -78,11 +141,11 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
  * means whoever sets the environment last wins, which is the behaviour every caller
  * already assumes.
  *
- * Fail-fast configuration is unaffected: the startup checks in
- * `scripts/bootstrap`/`src/lib/startup-checks.ts` still validate `DB_PROVIDER`
- * against `DATABASE_URL` before the app serves a request, and `createClient` still
- * throws on a provider mismatch — it just throws on the first query instead of at
- * import time.
+ * Fail-fast configuration depends on the same property: `resolveDatabaseConfig`
+ * above throws a clear configuration error on a provider/URL contradiction (ST-03)
+ * instead of falling back to the other database, and because it runs here the
+ * error surfaces on the first query rather than at import time — which is what
+ * keeps `next build` compiling in an environment that has no database at all.
  */
 function resolveClient(): PrismaClient {
   const existing = globalForPrisma.prisma;
