@@ -149,3 +149,9 @@ tagged with the finding ids they close.
   had failed for the whole campaign because nothing parsed it. The values are now
   quoted and CI runs `docker compose config -q` against both files plus asserts
   the required-secret guard still refuses an empty environment (AR-08).
+- The CI pipeline could not have passed, and only failed once it actually ran.
+  The quality job sets `NODE_ENV: production`, so `npm ci` skipped every
+  devDependency - `tsx`, `vitest`, `eslint`, `typescript`, `@playwright/test`,
+  `tailwindcss` - and `npm run docs:openapi:check` died with `sh: 1: tsx: not found`
+  (MF-01). Install is now `npm ci --include=dev`, so a production `NODE_ENV` cannot
+  hollow out the toolchain again.

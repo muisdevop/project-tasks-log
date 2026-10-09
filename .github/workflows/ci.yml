@@ -33,7 +33,14 @@ jobs:
           node-version: "20"
           cache: npm
       - name: Install
-        run: npm ci
+        # This job pins NODE_ENV=production for the build/test steps, and npm then
+        # silently skips devDependencies - which is every tool this pipeline calls
+        # (tsx, vitest, eslint, typescript, @playwright/test, tailwindcss). The
+        # failure only appeared the first time CI actually ran, on 2026-10-09:
+        # `npm run docs:openapi:check` died with `sh: 1: tsx: not found`. Install
+        # dev dependencies explicitly so a production NODE_ENV cannot hollow out
+        # the toolchain.
+        run: npm ci --include=dev
       - name: Compose files parse (Docker / Coolify deploy path)
         # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
         # `docker compose config`, so when the demo secrets were removed the dev
