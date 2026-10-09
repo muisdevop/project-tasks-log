@@ -127,6 +127,13 @@ tagged with the finding ids they close.
   cost 12 and a rate-limit test performs up to six of those comparisons while every
   test file runs in a parallel worker.
 
+- `.env.example` is now tracked (`!.env.example` in `.gitignore`) and completed: it
+  documents `DB_PROVIDER`, `DATABASE_URL_SQLITE` / `DATABASE_URL_POSTGRES`,
+  `PRISMA_SCHEMA_PATH`, `DB_QUERY_TIMEOUT_MS` and the backup CLI paths, and its
+  `APP_PASSWORD` is empty instead of a demo password - a template that ships a usable
+  credential is the same forgeable default the audit removed from `docker-compose.yml`
+  (PM-01, AI-01: a fresh clone can now `cp .env.example .env`).
+
 ### Fixed
 - Board/queue rendering, dialog focus handling, form validation, empty/error states
   and duplicate element ids across the task board, job pages and settings (BG-01,
@@ -155,3 +162,16 @@ tagged with the finding ids they close.
   `tailwindcss` - and `npm run docs:openapi:check` died with `sh: 1: tsx: not found`
   (MF-01). Install is now `npm ci --include=dev`, so a production `NODE_ENV` cannot
   hollow out the toolchain again.
+- `src/lib/prisma.ts` rebuilt the database client on every property access in
+  production. The lazy `Proxy` memoised only on `globalThis`, and `globalThis` is
+  deliberately populated outside production, so with `NODE_ENV=production`
+  `resolveClient()` found no cache each time: every `prisma.*` call constructed a new
+  `PrismaClient` plus a new driver adapter and connection pool, none of them ever
+  disconnected. The client is now also memoised in module scope, and
+  `tests/unit/prisma-provider-mismatch.test.ts` counts adapter constructions under
+  production to keep it that way (ST-03 / PF-01; found by running the suite under
+  CI's environment rather than a developer's).
+- Two tests encoded host-environment assumptions instead of behaviour: one pinned the
+  literal `"0.1.0"` from `package.json` (it broke on the 0.2.0 bump) and one read
+  `globalThis.prisma`, which production does not set. Both now assert against the
+  source of truth, and nothing in the suite may hardcode a version string.

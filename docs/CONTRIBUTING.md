@@ -67,8 +67,16 @@ need every change to have a name and a place to be discussed.
 ## 3. Release and tagging convention
 
 SemVer (`MAJOR.MINOR.PATCH`) with annotated tags, one `CHANGELOG.md` section per
-release. Currently `package.json` says `0.1.0` and `git tag -l` is empty, so
-there is no release history to audit — that is the gap this section closes.
+release. Release history: **`v0.2.0` (2026-10-09)** — the audit remediation
+campaign, cut on the branch `chore/audit-remediation-2026-10` (Draft PR #2), which
+must be merged with a merge commit so the annotated tag stays reachable from
+`master`. There was no tag before it; `0.1.0` was never released, it was just what
+`package.json` happened to say.
+
+Nothing in the suite may assert a literal version string. `docs/openapi.yaml`,
+`readAppVersion()` in the backup CLIs, and the contract check all read
+`package.json`, which is what makes a bump safe; a test that hardcodes `0.1.0`
+fails the first release after it (and did exactly that on CI, 2026-10-09).
 
 For every release:
 
@@ -129,12 +137,12 @@ Findings from the PM-01/PM-02 pass, each verified with the command shown.
 
 | Item | State | Action |
 | --- | --- | --- |
-| `.gitignore` line `.env*` | Also ignores **`.env.example`**, which is therefore **untracked** (`git ls-files .env.example` is empty; `git check-ignore -v .env.example` matches) | Add a negation `!.env.example` so the template ships with the repo. Tracked `.env` has never existed (`git log --all -- .env` is empty) — keep it that way |
-| `project-tasks-log.zip` at the repo root | 246,196 bytes, untracked, matched by `.gitignore:50:*.zip`; contains a `dev.db` snapshot (73,728 bytes) with real client/project/task names and a placeholder `.env.example` | Delete it from disk: `rm project-tasks-log.zip`. Nothing to purge from history (`git log --all --diff-filter=A -- project-tasks-log.zip` is empty) |
+| `.gitignore` line `.env*` | Resolved 2026-10-09: `.env.example` is now negated (`!.env.example`) and **tracked**; real `.env` files stay ignored (`git check-ignore -v .env` still matches) | Keep the template free of credential material — `APP_PASSWORD` / `APP_PASSWORD_HASH` are empty in it, on purpose. Tracked `.env` has never existed (`git log --all -- .env` is empty) |
+| `project-tasks-log.zip` at the repo root | Resolved 2026-10-09: deleted with the operator's approval. It was 246,196 bytes, untracked, ignored, and held a `dev.db` snapshot with real client/project/task names | Nothing left to do; there was never anything to purge from history (`git log --all --diff-filter=A -- project-tasks-log.zip` is empty) |
 | Archives/scratch | `*.zip`, `*.tar.gz`, `.tmp-*` ignored; `audit-report/`, `coverage/`, `test-results/`, `.next-e2e/`, `.playwright-e2e/`, `e2e-playwright.db*`, `dev.db`, `*.tsbuildinfo`, `next-env.d.ts`, `/src/generated/prisma` ignored | Correct as-is; no tracked file is ignored (`git ls-files -i -c --exclude-standard` is empty) |
 | Secrets in git | None: `git ls-files` shows no `.env`, `*.db`, `*.pem`, `*.key`; `*.pem` is ignored | Keep credential material out of the tree; `SESSION_SECRET` and hashes live in `.env` / Coolify env only |
-| `LICENSE` | MIT, copyright "MUIS / GID Studio"; `package.json` has **no** `license` field and is `"private": true` | Add `"license": "MIT"` to `package.json` so tooling agrees with `LICENSE` |
-| Default branch | `master`, remote `https://github.com/muisdevop/project-tasks-log` | Re-check push state before claiming CI ran: `git rev-list --count origin/master..master` |
+| `LICENSE` | Resolved: `package.json` now declares `"license": "MIT"`, matching `LICENSE` (copyright "MUIS / GID Studio"), while staying `"private": true` | Nothing to do; if the package is ever published, drop `private` in the same commit |
+| Default branch | `master`, remote `https://github.com/muisdevop/project-tasks-log`. Since 2026-10-09 work lands on a branch and a Draft PR (`chore/audit-remediation-2026-10` → PR #2), and CI has actually executed | Re-check before claiming anything: `git rev-list --count origin/master..master`, `gh run list --limit 5`, and read the failed step (`gh run view <id> --log-failed`) rather than the badge |
 
 ## 6. Reviewer checklist
 

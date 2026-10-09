@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 .env
+# ...but the template is tracked: it is the onboarding contract and the AI-agent
+# surface (AI-01) needs `cp .env.example .env` to work from a fresh clone. It
+# carries no credential material — APP_PASSWORD and APP_PASSWORD_HASH are empty.
+!.env.example
 
 # vercel
 .vercel
