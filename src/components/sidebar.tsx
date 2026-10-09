@@ -612,7 +612,16 @@ export function SidebarLayout({
 
       <Sidebar username={username} open={navOpen} isDesktop={isDesktop} />
       <GlobalBreakWidget />
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex-1 pt-14 outline-none md:pl-64 md:pt-0">
+      {/* RS-01/RS-02: `flex-1` alone keeps the CSS default `min-width: auto`, so the
+          shell refused to shrink below the min-content width of whatever the route
+          drew and the whole document scrolled horizontally at the md breakpoint
+          (1002px of page in a 768px viewport on the seeded dashboard). The matrix now
+          measures the drawn page, not the loading skeleton, so this is asserted. */}
+      <main
+        id={MAIN_CONTENT_ID}
+        tabIndex={-1}
+        className="min-w-0 flex-1 pt-14 outline-none md:pl-64 md:pt-0"
+      >
         {/* RS-04: the break widget is a bottom-right fixed overlay below md, so the
             last row of a short page sat underneath it and swallowed taps (the export
             button could not be clicked at 375px). Extra bottom padding on mobile keeps

@@ -72,33 +72,109 @@ function trackApiRequests(page: Page) {
   };
 }
 
-type Overflow = { scrollWidth: number; innerWidth: number; offenders: string[] };
+type Overflow = {
+  scrollWidth: number;
+  innerWidth: number;
+  offenders: string[];
+  roots: string[];
+  /** The app shell that holds the page (`<main id="main-content">`), if this route has one. */
+  shell: { id: string; right: number; display: string; minWidth: string } | null;
+};
 
 /**
- * Measures page-level horizontal scroll and, when it overflows, names the deepest
- * elements past the right edge — without that list a failure only says "1002 > 768"
- * and the hunt for the culprit starts from a screenshot.
+ * Waits until the route's stylesheet is genuinely in effect before anything is measured.
+ *
+ * Under `next dev` a route's CSS is compiled on demand and can land after the first
+ * heading has already painted, and a layout measured in that window is the *unstyled*
+ * layout - nothing wraps, nothing is constrained. The gate stays for that reason, but
+ * it is worth recording what the probe run measured: disabling every stylesheet at
+ * firefox@768 gave `scrollWidth 768`, not the 1002 the failing run reported, so the
+ * overflow this pass found was NOT an unstyled paint. It is a real layout defect, and
+ * the shell assertion below is what names it.
+ */
+async function waitForStyledLayout(page: Page) {
+  await page.waitForFunction(
+    () => {
+      const probe = document.querySelector<HTMLElement>(".flex");
+      // Tailwind's `.flex` is the cheapest proof that the utility layer is applied:
+      // without it the element computes to the block default.
+      const utilitiesApplied = probe === null || getComputedStyle(probe).display === "flex";
+      const sheetHasRules = Array.from(document.styleSheets).some((sheet) => {
+        try {
+          return sheet.cssRules.length > 0;
+        } catch {
+          return true; // cross-origin sheet: unreadable rules, but it did load
+        }
+      });
+      return utilitiesApplied && sheetHasRules;
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+  // Webfonts change widths after the CSS does, so settle both before measuring.
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+}
+
+/**
+ * Measures page-level horizontal scroll and, when it overflows, names the culprits two
+ * ways: `roots` are the shallowest elements that pass the right edge while their own
+ * parent fits (the actual blow-out, which is what to fix), `offenders` are the deepest
+ * leaf elements past the edge. Reporting only the leaves - what this did first - made
+ * the failure blame a PageHeader paragraph whose width was a symptom of a container
+ * somewhere above it, so the hunt still started from a screenshot.
  */
 async function measureOverflow(page: Page): Promise<Overflow> {
   return page.evaluate(() => {
     const limit = window.innerWidth;
     const right = (el: Element) => el.getBoundingClientRect().right;
+    const describe = (el: Element) => {
+      const cls =
+        typeof el.className === "string" && el.className.trim()
+          ? `.${el.className.trim().split(/\s+/).join(".")}`
+          : "";
+      return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${cls} → ${Math.round(right(el))}px`;
+    };
     const offenders: string[] = [];
+    const roots: string[] = [];
     for (const el of Array.from(document.querySelectorAll("body *"))) {
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 || rect.right <= limit + 1) continue;
+      const parent = el.parentElement;
+      const parentOverflows = parent !== null && parent !== document.body && right(parent) > limit + 1;
+      if (!parentOverflows && roots.length < 4) {
+        const style = getComputedStyle(el);
+        roots.push(
+          `${describe(el)} [display:${style.display} whiteSpace:${style.whiteSpace} ` +
+            `minWidth:${style.minWidth} overflowX:${style.overflowX}]`,
+        );
+      }
       const childOverflows = Array.from(el.children).some((child) => right(child) > limit + 1);
       if (childOverflows) continue; // report the deepest offender only
-      const cls = typeof el.className === "string" ? `.${el.className.trim().split(/\s+/).join(".")}` : "";
-      offenders.push(
-        `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${cls} → ${Math.round(rect.right)}px`,
-      );
-      if (offenders.length >= 6) break;
+      if (offenders.length >= 6) continue;
+      offenders.push(describe(el));
     }
     return {
       scrollWidth: document.documentElement.scrollWidth,
       innerWidth: limit,
       offenders,
+      roots,
+      shell: (() => {
+        const main = document.getElementById("main-content");
+        if (!main) return null;
+        const style = getComputedStyle(main);
+        return {
+          id: "main-content",
+          right: Math.round(main.getBoundingClientRect().right),
+          display: style.display,
+          minWidth: style.minWidth,
+        };
+      })(),
     };
   });
 }
@@ -109,7 +185,8 @@ async function expectNoHorizontalScroll(
   browserName: string,
   expectedWidth?: number,
 ) {
-  const { scrollWidth, innerWidth, offenders } = await measureOverflow(page);
+  await waitForStyledLayout(page);
+  const { scrollWidth, innerWidth, offenders, roots, shell } = await measureOverflow(page);
   // The project's viewport is only meaningful if the engine honoured it; asserting
   // the live width turns "the matrix ran at 375px" from a config claim into a check.
   if (expectedWidth !== undefined) {
@@ -121,8 +198,25 @@ async function expectNoHorizontalScroll(
   expect(
     scrollWidth,
     `${route} scrolls horizontally on ${browserName} at ${innerWidth}px (scrollWidth ${scrollWidth}). ` +
+      `Overflowing while their parent fits (fix these): ${roots.join(", ") || "none identified"}. ` +
       `Deepest elements past the right edge: ${offenders.join(", ") || "none identified"}`,
   ).toBeLessThanOrEqual(innerWidth + 1);
+
+  // The shell is asserted on its own because `<main class="flex-1">` inside a row-flex
+  // container carries the CSS default `min-width: auto`: it refuses to shrink below the
+  // min-content width of whatever the route draws, so the document gets a horizontal
+  // scrollbar without any single component looking too wide. Because that width depends
+  // on how much data the page has drawn by the time of the measurement, the defect
+  // surfaced as an intermittent page-level failure for a whole pass; naming the shell
+  // turns it into a standing, deterministic one.
+  if (shell) {
+    expect(
+      shell.right,
+      `${route}: the app shell (#${shell.id}, display ${shell.display}, min-width ${shell.minWidth}) ` +
+        `reaches ${shell.right}px on ${browserName} at ${innerWidth}px. ` +
+        `Overflowing while their parent fits: ${roots.join(", ") || "none identified"}`,
+    ).toBeLessThanOrEqual(innerWidth + 1);
+  }
 }
 
 const ROUTES: Array<{
@@ -143,6 +237,13 @@ const ROUTES: Array<{
     marker: (page) => page.getByRole("heading", { name: /account settings/i }),
   },
   {
+    label: "/admin",
+    // The event feed renders server payloads, which is the widest content in the
+    // app; it was missing from the matrix while the shell overflow was possible.
+    path: () => "/admin",
+    marker: (page) => page.getByRole("heading", { name: /^admin$/i }),
+  },
+  {
     label: "task board",
     path: (seed) => `/projects/${seed.projectId}/tasks`,
     marker: (page) => page.getByText(SEED.taskTitle),
@@ -158,8 +259,13 @@ test.describe("responsive shell", () => {
     viewport,
   }) => {
     const errors = collectErrors(page);
+    const waitForApiToSettle = trackApiRequests(page);
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: /^Dashboard$/ })).toBeVisible();
+    // Measure the drawn dashboard, not the loading one: the stats and reminders
+    // sections arrive from `/api/*` after first paint, and the width they need is
+    // exactly what the overflow assertion is about.
+    await waitForApiToSettle();
 
     await expectNoHorizontalScroll(page, "/dashboard", browserName, viewport?.width ?? undefined);
 

@@ -5,6 +5,23 @@ format. Versioning follows SemVer.
 
 ## [Unreleased]
 
+### Fixed
+- The app shell no longer forces a horizontal scrollbar at the `md` breakpoint:
+  `SidebarLayout`'s `<main>` carried `flex-1` with the CSS default
+  `min-width: auto`, so it refused to shrink below the min-content width of the
+  drawn page and the seeded dashboard measured 1002px inside a 768px viewport on
+  Chromium, WebKit and Firefox alike. It now carries `min-w-0` (RS-01, RS-02).
+- The responsive matrix stopped measuring loading skeletons. The dashboard test
+  asserted no-overflow right after the heading appeared, while the stats and
+  reminders sections were still arriving from `/api/*`, so the same layout passed
+  or failed depending on request timing; it now drains in-flight API calls like
+  the other route tests do, waits for the stylesheet to be in effect, and asserts
+  the shell's right edge separately from `document.scrollWidth`, which is the
+  assertion that names `min-width: auto` blow-outs instead of blaming whatever
+  text happened to be deepest. This is how the defect above was found: a
+  firefox-tablet failure the first pass dismissed as flaky was real, and after
+  the wait was fixed it reproduced on all three engines.
+
 ### Changed
 - `/api/export` pipes Chromium's printed document straight to the response instead
   of buffering it: `renderPdfBytes` (`page.pdf()`, one finished buffer) became
