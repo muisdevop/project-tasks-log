@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(),
   close: vi.fn(),
   setContent: vi.fn(),
-  pdf: vi.fn(),
+  createPDFStream: vi.fn(),
 }));
 
 function puppeteerModule(): unknown {
@@ -20,7 +20,7 @@ function puppeteerModule(): unknown {
       launch: mocks.launch.mockImplementation(async () => ({
         newPage: async () => ({
           setContent: mocks.setContent,
-          pdf: mocks.pdf,
+          createPDFStream: mocks.createPDFStream,
         }),
         close: mocks.close,
       })),
@@ -41,7 +41,7 @@ import {
   DEV_CHROME_CANDIDATES,
   PROD_CHROMIUM_FALLBACK_PATH,
   buildPuppeteerLaunchOptions,
-  renderPdfBytes,
+  renderPdfStream,
   resolveChromiumExecutablePath,
 } from "@/lib/pdf-render";
 
@@ -49,9 +49,34 @@ import {
 function restoreLaunchMock(): void {
   mocks.launch.mockReset();
   mocks.launch.mockImplementation(async () => ({
-    newPage: async () => ({ setContent: mocks.setContent, pdf: mocks.pdf }),
+    newPage: async () => ({
+      setContent: mocks.setContent,
+      createPDFStream: mocks.createPDFStream,
+    }),
     close: mocks.close,
   }));
+}
+
+/** A Chromium-like print stream: one chunk per array, then close or error. */
+function printStream(chunks: Uint8Array[], failWith?: Error): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      if (failWith) controller.error(failWith);
+      else controller.close();
+    },
+  });
+}
+
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const parts: Uint8Array[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    parts.push(value);
+  }
+  return new Uint8Array(Buffer.concat(parts.map((p) => Buffer.from(p))));
 }
 
 afterEach(() => {
@@ -148,16 +173,24 @@ describe("buildPuppeteerLaunchOptions", () => {
   });
 });
 
-describe("renderPdfBytes", () => {
-  it("renders the document and always closes the browser", async () => {
-    mocks.pdf.mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+describe("renderPdfStream", () => {
+  const PDF_OPTIONS = {
+    format: "A4",
+    printBackground: true,
+    timeout: 60_000,
+    margin: { top: "12mm", right: "12mm", bottom: "14mm", left: "12mm" },
+  };
 
-    const bytes = await renderPdfBytes("<html>report</html>", {
+  it("hands back Chromium's print stream and closes the browser only once the body is consumed", async () => {
+    mocks.createPDFStream.mockResolvedValue(
+      printStream([new Uint8Array([1, 2]), new Uint8Array([3, 4])]),
+    );
+
+    const stream = await renderPdfStream("<html>report</html>", {
       NODE_ENV: "production",
       PUPPETEER_EXECUTABLE_PATH: "/usr/bin/chromium-browser",
     });
 
-    expect(Array.from(bytes)).toEqual([1, 2, 3]);
     expect(mocks.launch).toHaveBeenCalledWith(
       buildPuppeteerLaunchOptions({ NODE_ENV: "production" }),
     );
@@ -165,19 +198,54 @@ describe("renderPdfBytes", () => {
       waitUntil: "networkidle0",
       timeout: 30_000,
     });
-    expect(mocks.pdf).toHaveBeenCalledWith({
-      format: "A4",
-      printBackground: true,
-      timeout: 60_000,
-      margin: { top: "12mm", right: "12mm", bottom: "14mm", left: "12mm" },
-    });
-    expect(mocks.close).toHaveBeenCalledTimes(1);
+    expect(mocks.createPDFStream).toHaveBeenCalledWith(PDF_OPTIONS);
+
+    // PF-02: the whole point of the stream is that the browser is still printing
+    // (or has printed but not been drained) while the caller reads, so closing it
+    // at the end of this function would truncate the document.
+    expect(mocks.close).not.toHaveBeenCalled();
+
+    expect(Array.from(await readAll(stream))).toEqual([1, 2, 3, 4]);
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledTimes(1));
+  });
+
+  it("closes the browser when the client hangs up mid-download", async () => {
+    let cancelled = false;
+    mocks.createPDFStream.mockResolvedValue(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    );
+
+    const stream = await renderPdfStream("<html>report</html>", { NODE_ENV: "production" });
+    const reader = stream.getReader();
+    await reader.read();
+    await reader.cancel("client disconnected");
+
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledTimes(1));
+    expect(cancelled).toBe(true);
+  });
+
+  it("propagates a print failure to the reader and still closes the browser", async () => {
+    mocks.createPDFStream.mockResolvedValue(
+      printStream([new Uint8Array([1])], new Error("PrintConfigurationError")),
+    );
+
+    const stream = await renderPdfStream("<html>x</html>", { NODE_ENV: "production" });
+
+    await expect(readAll(stream)).rejects.toThrow("PrintConfigurationError");
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledTimes(1));
   });
 
   it("closes the browser when page rendering fails", async () => {
-    mocks.pdf.mockRejectedValueOnce(new Error("page died"));
+    mocks.createPDFStream.mockRejectedValueOnce(new Error("page died"));
 
-    await expect(renderPdfBytes("<html>x</html>", { NODE_ENV: "production" })).rejects.toThrow(
+    await expect(renderPdfStream("<html>x</html>", { NODE_ENV: "production" })).rejects.toThrow(
       "page died",
     );
     expect(mocks.close).toHaveBeenCalledTimes(1);
@@ -186,7 +254,7 @@ describe("renderPdfBytes", () => {
   it("propagates a launch failure without trying to close", async () => {
     mocks.launch.mockRejectedValueOnce(new Error("no chromium"));
 
-    await expect(renderPdfBytes("<html>x</html>", { NODE_ENV: "production" })).rejects.toThrow(
+    await expect(renderPdfStream("<html>x</html>", { NODE_ENV: "production" })).rejects.toThrow(
       "no chromium",
     );
     expect(mocks.close).not.toHaveBeenCalled();

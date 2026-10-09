@@ -113,7 +113,21 @@ function buildPuppeteerMock() {
             setContent: async (html: string) => {
               mockPuppeteerState.lastHtml = html;
             },
-            pdf: async () => new Uint8Array(Buffer.from("%PDF-1.4 mocked")),
+            // PF-02: the route now pipes Chromium's print stream straight to the
+            // response, so the stand-in hands back a chunked stream (three parts of
+            // a fake %PDF) instead of one finished buffer. A test can therefore see
+            // whether the route buffered the body or passed the chunks through.
+            createPDFStream: async () => {
+              const parts = ["%PDF-1.4 ", "mocked ", "document"];
+              return new ReadableStream<Uint8Array>({
+                start(controller) {
+                  for (const part of parts) {
+                    controller.enqueue(new Uint8Array(Buffer.from(part)));
+                  }
+                  controller.close();
+                },
+              });
+            },
           }),
           close: async () => undefined,
         };

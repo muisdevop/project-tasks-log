@@ -14,7 +14,7 @@ import {
 } from "@/lib/export-data";
 import { buildReportHtml, htmlStreamFromChunks, reportHtmlChunks } from "@/lib/export-html";
 import type { ReportHtmlInput } from "@/lib/export-html";
-import { renderPdfBytes } from "@/lib/pdf-render";
+import { renderPdfStream } from "@/lib/pdf-render";
 
 /**
  * HTTP boundary for `/api/export` (AR-01).
@@ -121,18 +121,13 @@ export async function GET(request: Request) {
     };
 
     try {
-      // PF-02, deliberately still buffered: `page.setContent()` needs the whole
-      // document and `page.pdf()` gives back the complete file as one buffer, so
-      // there is nothing to stream on this path. What is *not* kept alive any
-      // more is the HTML next to the PDF — `buildReportHtml(...)` is passed as a
-      // temporary argument and becomes collectable as soon as the bytes return,
-      // instead of being held in a route-level `const` for the fallback branch.
-      const pdfBuffer = await renderPdfBytes(buildReportHtml(report));
-      return downloadResponse(
-        Buffer.from(pdfBuffer),
-        "application/pdf",
-        `${naming.filenameBase}.pdf`,
-      );
+      // PF-02: Chromium prints into a `ReadableStream` that is handed to the
+      // response, so the finished document is never collected into a buffer next
+      // to the HTML it came from. `buildReportHtml(...)` is still one string —
+      // `page.setContent()` needs the whole document — and it becomes collectable
+      // as soon as the print call starts.
+      const pdf = await renderPdfStream(buildReportHtml(report));
+      return downloadResponse(pdf, "application/pdf", `${naming.filenameBase}.pdf`);
     } catch (puppeteerError) {
       console.error("Puppeteer PDF generation failed:", puppeteerError);
 

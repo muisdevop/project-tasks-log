@@ -5,7 +5,18 @@ format. Versioning follows SemVer.
 
 ## [Unreleased]
 
-Nothing staged.
+### Changed
+- `/api/export` pipes Chromium's printed document straight to the response instead
+  of buffering it: `renderPdfBytes` (`page.pdf()`, one finished buffer) became
+  `renderPdfStream` (`page.createPDFStream()`, available since Puppeteer 22 and this
+  repository pins 24). The browser is now closed by the stream itself — when the
+  body drains, when printing errors, or when the client hangs up mid-download — and
+  all three paths are pinned by unit tests, with the integration suite asserting the
+  chunks reach the caller unbuffered. This closes the PF-02 residual 0.2.0 left
+  open, and corrects the reasoning in the old comment, which claimed no streamable
+  PDF API existed. What genuinely stays in memory is the report HTML, because
+  `page.setContent()` requires the whole document; that is now stated plainly
+  instead of being used to justify the buffer.
 
 ## [0.2.0] - 2026-10-09
 

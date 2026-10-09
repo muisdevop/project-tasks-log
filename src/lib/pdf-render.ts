@@ -4,12 +4,15 @@ import puppeteer from "puppeteer";
 /**
  * Chromium driving for `/api/export` (AR-01).
  *
- * The browser pipeline itself is deliberately unchanged — `PUPPETEER_EXECUTABLE_PATH`
- * resolution, the same launch flags and the same A4 page options — because the
- * audit scopes rendering out of automated testing (a real browser launch in CI
- * would be slow and non-deterministic). Only the concerns were separated: this
- * module turns finished HTML into PDF bytes and throws on any browser failure so
- * the route can fall back to serving the HTML document.
+ * The browser pipeline itself is deliberately thin — `PUPPETEER_EXECUTABLE_PATH`
+ * resolution, the launch flags and the A4 page options are the whole contract —
+ * because the unit and integration suites mock Puppeteer to stay deterministic and
+ * parallel-safe. Real Chromium rendering is verified one layer up, by the AGENTS.md
+ * container gate: `scripts/container-smoke.mjs` with `REQUIRE_PDF=1` prints a PDF
+ * using the image's own Chromium on both providers, and CI runs it on every push.
+ * Only the concerns were separated: this module turns finished HTML into a PDF
+ * stream and throws on any browser failure so the route can fall back to serving
+ * the HTML document.
  */
 
 /** Candidate Chrome/Chromium binaries probed outside production, in priority order. */
@@ -79,26 +82,37 @@ export function buildPuppeteerLaunchOptions(
 }
 
 /**
- * Render the report document to PDF bytes. Throws when the browser step fails.
+ * Render the report document as a PDF *stream*. Throws when the browser step
+ * fails, before any stream exists, so the route can fall back to the HTML report.
  *
- * PF-02: this path is buffered on purpose. `page.setContent()` needs the whole
- * document and Chromium's `page.pdf()` resolves with the complete file, so there
- * is no incremental form of a PDF to stream. What the route does instead is keep
- * the source HTML alive only as a temporary argument, and the copy below is the
- * one `Response` body type the platform accepts (`BodyInit`), not a re-layout of
- * the report.
+ * PF-02: this used to be `page.pdf()` returning one finished buffer, justified in
+ * the comment as "there is no incremental form of a PDF to stream". That claim was
+ * false for the pinned Puppeteer — `page.createPDFStream()` has returned a
+ * `ReadableStream<Uint8Array>` since v22, and this repository pins 24 — so the
+ * printed document now goes to the response as the bytes arrive instead of being
+ * held in memory next to the HTML it was rendered from.
+ *
+ * What genuinely cannot be streamed is the input: `page.setContent()` needs the
+ * whole document, so the report HTML is still one string here. That is the honest
+ * residual, and it is why the HTML fallback path (which needs no browser) chunks
+ * its own output instead of building the same string.
+ *
+ * The browser must outlive this function: closing it as soon as the print call
+ * returned would truncate the document mid-stream. Cleanup therefore happens on
+ * the stream itself — when the body is exhausted, when it errors, or when the
+ * client hangs up — and every one of those three paths is pinned by a test.
  */
-export async function renderPdfBytes(
+export async function renderPdfStream(
   html: string,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<Uint8Array> {
+): Promise<ReadableStream<Uint8Array>> {
   const browser = await puppeteer.launch(buildPuppeteerLaunchOptions(env));
 
+  let printable: ReadableStream<Uint8Array>;
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 30_000 });
-
-    return await page.pdf({
+    printable = await page.createPDFStream({
       format: "A4",
       printBackground: true,
       timeout: 60_000,
@@ -109,7 +123,53 @@ export async function renderPdfBytes(
         left: "12mm",
       },
     });
-  } finally {
+  } catch (error) {
+    // Nothing was handed to the caller, so nothing is left to clean up later.
     await browser.close();
+    throw error;
   }
+
+  return closedWhenDrained(printable, () => browser.close());
+}
+
+/**
+ * Re-expose `source` so that `close` runs exactly once, whether the body was read
+ * to the end, failed inside Chromium, or was abandoned by the client.
+ */
+function closedWhenDrained(
+  source: ReadableStream<Uint8Array>,
+  close: () => Promise<unknown>,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  let closed = false;
+  const closeOnce = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    try {
+      await close();
+    } catch {
+      // A browser that refuses to shut down is not worth failing a download over.
+    }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          await closeOnce();
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        await closeOnce();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
+      await closeOnce();
+    },
+  });
 }

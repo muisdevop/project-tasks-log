@@ -4,10 +4,11 @@
  * concurrent-export mutex.
  *
  * NOTE ON PDF: real Chromium/Puppeteer is intentionally NEVER launched here.
- * The harness mocks the `puppeteer` module (success = fake %PDF bytes,
+ * The harness mocks the `puppeteer` module (success = a chunked fake %PDF stream,
  * failure = forced HTML fallback), which keeps the suite deterministic and
- * parallel-safe. The Chromium rendering pipeline itself therefore stays
- * uncovered by design; only the route logic around it is tested.
+ * parallel-safe. What the Chromium pipeline actually produces is verified one
+ * layer up, by the container gate (`scripts/container-smoke.mjs`, REQUIRE_PDF=1),
+ * which prints a real PDF from the image's own Chromium on both providers.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -173,7 +174,20 @@ describe("/api/export happy paths (Puppeteer mocked, no browser launch)", () => 
     expect(res.headers.get("content-type")).toContain("application/pdf");
     const disposition = res.headers.get("content-disposition") ?? "";
     expect(disposition).toContain("activity-report-2026-03-31-to-2026-03-31-by-date.pdf");
-    const bytes = Buffer.from(await res.arrayBuffer());
+
+    // PF-02: the route must hand Chromium's print stream to the response instead
+    // of collecting it, so the body arrives as the chunks the browser produced.
+    const body = res.body;
+    expect(body, "PDF response must be a stream, not a buffered body").not.toBeNull();
+    const reader = body!.getReader();
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    expect(chunks.length, "print chunks must reach the caller unbuffered").toBeGreaterThan(1);
+    const bytes = Buffer.concat(chunks.map((c) => Buffer.from(c)));
     expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
     // The HTML that would have been rendered contained the seeded task.
     expect(mockPuppeteerState.lastHtml).toContain("Alpha done task");
