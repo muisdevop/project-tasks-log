@@ -52,9 +52,9 @@ jobs:
         run: |
           set +e
           echo "runtime tree:"
-          npm audit --omit=dev 2>&1 | tail -2
+          npm audit --omit=dev 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
           echo "full tree (dev tooling included):"
-          npm audit 2>&1 | tail -2
+          npm audit 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
           exit 0
       - name: Compose files parse (Docker / Coolify deploy path)
         # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
