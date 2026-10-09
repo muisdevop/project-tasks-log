@@ -59,9 +59,13 @@ Interface
 
 ## Requirements
 
-- Node.js 20 — the Dockerfile pins `node:20-alpine3.20` (with digest) and CI runs
-  `node-version: "20"`. No `engines` field exists in `package.json`, so other
-  versions are untested rather than blocked.
+- Node.js `^20.19.0 || ^22.12.0 || >=24.0.0` — declared in `package.json`'s `engines`
+  and enforced at install time by `.npmrc` (`engine-strict=true`). The floor is not
+  a preference: `prisma@7` requires `^20.19` on the 20 line, the Dockerfile pins
+  `node:20-alpine3.20` (with digest; measured `v20.20.2` in the built image) and CI
+  runs `node-version: "20"`. Before this field existed, a devDependency whose own
+  `engines` excluded Node 20 installed with a warning and then died inside CI's test
+  worker — see RA-09 in the CHANGELOG.
 - SQLite 3 (default, zero setup) **or** PostgreSQL — `docker-compose.yml` and
   `docker-compose.prod.yml` both pin `postgres:16-alpine`.
 - A Chromium/Chrome binary only if you want PDF instead of HTML export.

@@ -32,6 +32,21 @@ with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
   `eslint-plugin-jsx-a11y`.
 
 ### Fixed
+- The toolchain now refuses a dependency that cannot run on the shipped Node (RA-09).
+  CI caught what this host could not: `jsdom@30` declares `engines.node` as
+  `^22.22.2 || ^24.15.0 || >=26.0.0`, so the new component suite died in CI's forked
+  worker with `webidl.util.markAsUncloneable is not a function` - npm only *warns*
+  about engines by default, and the developer machine ran Node 24. Two changes,
+  because pinning jsdom back to `26.1.0` (engines `>=18`) would have fixed today's run
+  and left the same trap armed for the next install: `package.json` now declares
+  `engines.node` as `^20.19.0 || ^22.12.0 || >=24.0.0` (the floor comes from `prisma@7`,
+  the image is `node:20-alpine3.20` measured at `v20.20.2`, and the README had been
+  stating "no `engines` field exists" as if that were acceptable), and `.npmrc` sets
+  `engine-strict=true` so an incompatible package stops `npm ci` with its name and
+  range instead of surfacing three jobs later. A sweep of all 527 installed
+  `package.json` files finds no remaining range that excludes Node 20 or Node 24.
+  `.npmrc` is deliberately not copied into the image, so the release build path is
+  unchanged.
 - `ModalShell` was not a dialog to assistive technology (RA-01). It rendered a
   plain `div`: no `role`, no `aria-modal`, no name, no Escape, no focus handling,
   so a screen reader announced a task form as unnamed page text and Tab walked
