@@ -143,3 +143,9 @@ tagged with the finding ids they close.
 - Duplicate break records: `POST /api/breaks/log` derives a deterministic
   idempotency key and answers a replay with `Break-Deduplicated: true` instead of
   inserting a second row (FL-01).
+- `docker-compose.yml` was unparseable YAML. Removing the forgeable demo secrets
+  put `${VAR:?message with ": " inside}` into an unquoted scalar, which is a
+  mapping-error, so `docker compose config`/`up` failed on the dev file - and it
+  had failed for the whole campaign because nothing parsed it. The values are now
+  quoted and CI runs `docker compose config -q` against both files plus asserts
+  the required-secret guard still refuses an empty environment (AR-08).

@@ -43,8 +43,13 @@ services:
       # A committed hash of "admin123" would have been the same as no password
       # for anyone who can read this file, so there is no demo fallback.
       APP_PASSWORD: ${APP_PASSWORD:-}
-      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:?APP_PASSWORD_HASH is required - run: npm run password:hash -- "<password>"}
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required - run: openssl rand -hex 32}
+      # Quoted, and deliberately so: the message text contains ": ", which an
+      # unquoted YAML scalar cannot carry (a plain `key: a: b` is a parse error,
+      # and `docker compose config` fails the whole file). docker-compose.yml was
+      # not parsed by anything until the 2026-10-09 re-audit added a CI step, which
+      # is how that regression slipped in with the removal of the demo defaults.
+      APP_PASSWORD_HASH: '${APP_PASSWORD_HASH:?APP_PASSWORD_HASH is required - run: npm run password:hash -- "<password>"}'
+      SESSION_SECRET: '${SESSION_SECRET:?SESSION_SECRET is required - run: openssl rand -hex 32}'
     volumes:
       - tasklogger-data:/data
     depends_on:

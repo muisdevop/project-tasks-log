@@ -22,6 +22,7 @@ no tags, no licence).
 | Build | `npm run build` | exit 0 |
 | Browser matrix | `npm run test:e2e` | exit 0 (needs `npm run test:e2e:install` once) |
 | Container | `docker build -t gid-task-flow .` then boot on SQLite **and** Postgres | `/api/health` returns ok, login works |
+| Compose files | `docker compose -f docker-compose.yml config -q` (with `SESSION_SECRET` + `APP_PASSWORD_HASH` set) and the same for `docker-compose.prod.yml` | exit 0 — both files must parse, and `docker-compose.yml` must still **refuse** an empty `APP_PASSWORD_HASH`. CI runs this as its own step, because nothing else ever did and a broken dev file went unnoticed for a whole wave. |
 
 `AGENTS.md` is the canonical definition of done; `.github/workflows/ci.yml`
 automates it (quality → docker-build → smoke on both databases). CI only means

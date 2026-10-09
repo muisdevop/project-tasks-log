@@ -34,6 +34,24 @@ jobs:
           cache: npm
       - name: Install
         run: npm ci
+      - name: Compose files parse (Docker / Coolify deploy path)
+        # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
+        # `docker compose config`, so when the demo secrets were removed the dev
+        # file became unparseable YAML (`key: ${V:?msg with ": " in it}` needs
+        # quoting) and stayed that way. This step asserts both files parse AND
+        # that the required-secret guards still refuse an empty environment.
+        run: |
+          set -euo pipefail
+          SESSION_SECRET=0123456789abcdef0123456789abcdef \
+          APP_PASSWORD_HASH='$2b$12$ciOnlyPlaceholderHashValueAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
+            docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.prod.yml config -q
+          if APP_PASSWORD_HASH= SESSION_SECRET= \
+               docker compose -f docker-compose.yml config -q 2>/dev/null; then
+            echo "docker-compose.yml accepted an empty APP_PASSWORD_HASH - guard lost"
+            exit 1
+          fi
+          echo "both compose files parse; required-secret guards fire"
       - name: Generate Prisma client
         run: npx prisma generate --schema prisma/schema.sqlite.prisma
       - name: SQLite/Postgres schema parity
