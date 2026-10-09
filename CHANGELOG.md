@@ -9,18 +9,25 @@ format. Versioning follows SemVer.
 - The app shell no longer forces a horizontal scrollbar at the `md` breakpoint:
   `SidebarLayout`'s `<main>` carried `flex-1` with the CSS default
   `min-width: auto`, so it refused to shrink below the min-content width of the
-  drawn page and the seeded dashboard measured 1002px inside a 768px viewport on
-  Chromium, WebKit and Firefox alike. It now carries `min-w-0` (RS-01, RS-02).
-- The responsive matrix stopped measuring loading skeletons. The dashboard test
-  asserted no-overflow right after the heading appeared, while the stats and
-  reminders sections were still arriving from `/api/*`, so the same layout passed
-  or failed depending on request timing; it now drains in-flight API calls like
-  the other route tests do, waits for the stylesheet to be in effect, and asserts
-  the shell's right edge separately from `document.scrollWidth`, which is the
-  assertion that names `min-width: auto` blow-outs instead of blaming whatever
-  text happened to be deepest. This is how the defect above was found: a
-  firefox-tablet failure the first pass dismissed as flaky was real, and after
-  the wait was fixed it reproduced on all three engines.
+  drawn page and the seeded dashboard measured 1002px inside a 768px viewport.
+  Re-measured with the class removed, the overflow trips WebKit and Firefox at
+  768px and not Chromium, whose min-content for this tree fits — the defect is real
+  but engine-dependent, which is the argument for a three-engine matrix rather than
+  one browser. `min-w-0` fixes it everywhere (RS-01, RS-02).
+- The responsive matrix stopped measuring loading skeletons, and its overflow check
+  is no longer engine-dependent. The dashboard test asserted no-overflow right after
+  the heading appeared, while the stats and reminders were still arriving from
+  `/api/*`, so the same layout passed or failed on request timing; it now drains
+  in-flight API calls like the other route tests, waits for the stylesheet to be
+  provably in effect, names the elements that overflow while their parent fits
+  (blaming the deepest leaf had pointed at a PageHeader paragraph that was only a
+  symptom), and asserts the shell twice over: its right edge against the viewport,
+  and its computed `min-width` against `0px`. The second is the one that catches
+  this class of defect on every engine — with `min-w-0` removed, 6 of
+  chromium-tablet's 9 responsive tests fail it even though every scroll assertion
+  on that engine passes. How the defect above was found: a firefox-tablet failure
+  the first pass dismissed as flaky was real, and once the wait was fixed it
+  reproduced deterministically.
 
 ### Changed
 - `/api/export` pipes Chromium's printed document straight to the response instead

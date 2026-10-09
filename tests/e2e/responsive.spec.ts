@@ -210,6 +210,20 @@ async function expectNoHorizontalScroll(
   // surfaced as an intermittent page-level failure for a whole pass; naming the shell
   // turns it into a standing, deterministic one.
   if (shell) {
+    // The engine-independent half of the same invariant. Whether the scroll check above
+    // trips depends on the engine's own min-content for the drawn tree: re-measured at
+    // 28f90cb with `min-w-0` removed, webkit-tablet and firefox-tablet fail at 768px and
+    // chromium-tablet passes both times. So on its own that assertion would let the
+    // regression back in through the most-used engine. The computed min-width has no such
+    // dependency - `auto` is the CSS default that caused the blow-out, so demanding 0px
+    // catches it on every engine, at every viewport, whatever the page happens to contain.
+    expect(
+      shell.minWidth,
+      `${route}: the app shell (#${shell.id}) computes to min-width: ${shell.minWidth} on ` +
+        `${browserName} at ${innerWidth}px. A flex item left at the default ` +
+        "`min-width: auto` cannot shrink below its content's min-content width, which is " +
+        "how a 1002px page ended up inside a 768px viewport (RS-01).",
+    ).toBe("0px");
     expect(
       shell.right,
       `${route}: the app shell (#${shell.id}, display ${shell.display}, min-width ${shell.minWidth}) ` +
