@@ -93,6 +93,13 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
           isFocused ? "ring-2 ring-blue-500 border-transparent" : ""
         } hover:border-zinc-400 dark:hover:border-zinc-600`,
         placeholder: placeholder,
+        // A contenteditable box has no accessible name of its own and no role,
+        // so the placeholder the sighted user sees is invisible to a screen
+        // reader. Declaring it as a multiline textbox and naming it by that same
+        // placeholder keeps the two readings of the field identical.
+        role: "textbox",
+        "aria-label": placeholder,
+        "aria-multiline": "true",
       },
     },
     parseOptions: {
@@ -188,6 +195,7 @@ export function RichTextEditor({ value, onChange, placeholder = "Enter descripti
 
         {/* Headings - Limited to H1-H3 for security */}
         <select
+          aria-label="Text style"
           onChange={(e) => {
             const level = e.target.value;
             if (level === "paragraph") {

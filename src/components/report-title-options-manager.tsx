@@ -148,6 +148,7 @@ export function ReportTitleOptionsManager() {
                     type="radio"
                     checked={defaultTitle === title}
                     onChange={() => setAsDefault(title)}
+                    aria-label={`Use “${title}” as the default report title`}
                     className="h-4 w-4 text-cyan-700"
                   />
 

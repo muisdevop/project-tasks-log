@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ModalCancelButton, ModalShell, ModalSpinner } from "./modal-shell";
 
 const DANGER_ICON = "bg-linear-to-br from-red-500 to-rose-600 shadow-red-500/30";
@@ -103,6 +103,10 @@ function InputDialogForm({
   onClose,
 }: Omit<InputDialogProps, "isOpen">) {
   const [value, setValue] = useState(initialValue);
+  // The visible label has to name the field for assistive technology, which a
+  // sibling <label> without `for` does not do; axe reports it as a critical
+  // `label` violation (RA-02), and Testing Library's role/name queries agree.
+  const fieldId = useId();
 
   const trimmed = value.trim();
 
@@ -122,10 +126,11 @@ function InputDialogForm({
         }}
       >
         <div className="space-y-2">
-          <label className="field-label">
+          <label htmlFor={fieldId} className="field-label">
             {label}
           </label>
           <input
+            id={fieldId}
             autoFocus
             type={type}
             value={value}

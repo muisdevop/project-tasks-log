@@ -159,10 +159,11 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
-                <label className="field-label">
+                <label htmlFor="break-name" className="field-label">
                   Break Name
                 </label>
                 <input
+                  id="break-name"
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -173,10 +174,11 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
               </div>
 
               <div>
-                <label className="field-label">
+                <label htmlFor="break-type" className="field-label">
                   Break Type
                 </label>
                 <select
+                  id="break-type"
                   value={formData.type}
                   onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                   className="field-input"
@@ -190,10 +192,11 @@ export function BreaksConfig({ jobId }: { jobId: number }) {
               </div>
 
               <div>
-                <label className="field-label">
+                <label htmlFor="break-duration" className="field-label">
                   Duration (minutes)
                 </label>
                 <input
+                  id="break-duration"
                   type="number"
                   min="1"
                   max="480"

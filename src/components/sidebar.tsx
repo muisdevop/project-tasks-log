@@ -242,7 +242,7 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
       <div className="flex h-16 items-center border-b border-white/10 px-6">
         <Link href="/dashboard" className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 shadow-lg ring-1 ring-white/20">
-            <Image src="/logo-new.svg" alt="GID Task Flow" width={22} height={22} className="h-5 w-5" />
+            <Image src="/logo-new.svg" alt="" width={22} height={22} className="h-5 w-5" />
           </div>
           <span className="text-lg font-bold text-white">GID Task Flow</span>
         </Link>

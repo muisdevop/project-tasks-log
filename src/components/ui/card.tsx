@@ -117,6 +117,7 @@ export function PageHeader({
   icon,
   iconClassName,
   titleClassName,
+  headingId,
   className = "mb-6",
   level = 1,
 }: {
@@ -127,6 +128,12 @@ export function PageHeader({
   icon?: ReactNode;
   iconClassName?: string;
   titleClassName?: string;
+  /**
+   * Gives the heading an id so a caller can point `aria-labelledby` at it. The
+   * modal chrome needs this: a dialog must be named by the title it shows rather
+   * than by a copy of it.
+   */
+  headingId?: string;
   className?: string;
   level?: 1 | 2;
 }) {
@@ -159,7 +166,9 @@ export function PageHeader({
               {eyebrow}
             </p>
           ) : null}
-          <Heading className={headingClass}>{title}</Heading>
+          <Heading id={headingId} className={headingClass}>
+            {title}
+          </Heading>
           {description ? (
             <p className="mt-1 text-sm text-muted dark:text-zinc-400">{description}</p>
           ) : null}

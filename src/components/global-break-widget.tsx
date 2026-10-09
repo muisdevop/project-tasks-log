@@ -263,6 +263,7 @@ export function GlobalBreakWidget() {
                 </div>
               ) : null}
               <select
+                aria-label="Break type"
                 value={selectedBreak || ""}
                 onChange={(e) => setSelectedBreak(e.target.value ? Number(e.target.value) : null)}
                 disabled={!activeJobId}

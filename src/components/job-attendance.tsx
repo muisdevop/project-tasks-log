@@ -176,7 +176,7 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
               setPendingAction("checkout");
             }}
             disabled={isLoading}
-            className="w-full py-2 px-4 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-sm transition-all flex items-center justify-center gap-2"
+            className="btn-danger w-full"
           >
             {isLoading ? (
               <>
@@ -248,7 +248,7 @@ export function JobAttendance({ jobId }: JobAttendanceProps) {
               setPendingAction("checkin");
             }}
             disabled={isLoading}
-            className="w-full py-2 px-4 rounded-xl bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-sm transition-all flex items-center justify-center gap-2"
+            className="btn-success w-full"
           >
             {isLoading ? (
               <>

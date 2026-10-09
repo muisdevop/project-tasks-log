@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useId, useEffect, useState } from "react";
 import { readApiError, useKeyedApiMutation } from "@/hooks/use-api-mutation";
+import { StatusBanner } from "@/components/ui/status-banner";
 import { ConfirmDialog } from "./confirm-dialog";
 
 export type SubTask = {
@@ -51,6 +52,7 @@ export function SubTasks({ taskId, taskStatus, initialSubtasks }: SubTasksProps)
     error,
     setError,
   } = useKeyedApiMutation<string | number>();
+  const addFieldId = useId();
 
   const isInProgress = taskStatus === "in_progress";
   const hasSeededSubtasks = initialSubtasks !== undefined;
@@ -174,6 +176,10 @@ export function SubTasks({ taskId, taskStatus, initialSubtasks }: SubTasksProps)
               <input
                 type="checkbox"
                 checked={subtask.isCompleted}
+                // Named by the row it controls: a list of checkboxes whose only
+                // text is a sibling <span> announces as "unchecked, unchecked,
+                // unchecked" to a screen reader.
+                aria-label={`Toggle “${subtask.title}”`}
                 onChange={(e) => toggleSubtask(subtask.id, e.target.checked)}
                 className="h-4 w-4 rounded border-violet-300 text-violet-500 focus:ring-violet-500 dark:border-violet-600"
               />
@@ -188,8 +194,9 @@ export function SubTasks({ taskId, taskStatus, initialSubtasks }: SubTasksProps)
               </span>
               <button
                 onClick={() => setPendingDeleteId(subtask.id)}
-                className="rounded p-1 text-red-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                aria-label={`Delete subtask “${subtask.title}”`}
                 title="Delete subtask"
+                className="rounded p-1 text-red-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -201,7 +208,11 @@ export function SubTasks({ taskId, taskStatus, initialSubtasks }: SubTasksProps)
       )}
 
       <form onSubmit={addSubtask} className="flex gap-2">
+        <label htmlFor={addFieldId} className="sr-only">
+          Add a subtask
+        </label>
         <input
+          id={addFieldId}
           type="text"
           value={newSubtaskTitle}
           onChange={(e) => setNewSubtaskTitle(e.target.value)}
@@ -228,14 +239,9 @@ export function SubTasks({ taskId, taskStatus, initialSubtasks }: SubTasksProps)
         </button>
       </form>
 
-      {error && (
-        <div className="flex items-center gap-2 rounded-lg border border-red-200/50 bg-red-50/70 p-2 text-sm text-red-700 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          {error}
-        </div>
-      )}
+      {/* One banner primitive, announced as a live region: a hand-rolled div here
+          showed the failure but never told anyone it had happened (UX-04). */}
+      {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
     </div>
 
     <ConfirmDialog

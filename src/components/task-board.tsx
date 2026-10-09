@@ -10,6 +10,7 @@ import { TaskActionModal } from "./task-action-modal";
 import { LogNotesModal } from "./log-notes-modal";
 import { SubTasks, type SubTask } from "./subtasks";
 import { SectionCard } from "@/components/ui/card";
+import { StatusBanner } from "@/components/ui/status-banner";
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -522,7 +523,11 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           </div>
           
           <div className="space-y-3">
+            <label htmlFor={`task-title-${projectId}`} className="sr-only">
+              Task title
+            </label>
             <input
+              id={`task-title-${projectId}`}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder="Task title"
@@ -617,14 +622,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         ) : null}
       </div>
 
-      {error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-red-200/50 bg-red-50/70 px-4 py-3 text-sm text-red-700 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          {error}
-        </div>
-      ) : null}
+      {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
 
       {renderTaskSection("In Progress", inProgress, false)}
       {renderTaskSection("On Hold / In Review", onHold, false)}

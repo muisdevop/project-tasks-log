@@ -603,6 +603,7 @@ export function ExportPageContent() {
               Report PDF Title
             </h2>
             <select
+              aria-label="Report PDF title"
               value={selectedReportTitle}
               onChange={(e) => setSelectedReportTitle(e.target.value)}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"

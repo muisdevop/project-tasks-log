@@ -426,6 +426,10 @@ describe("interval/listener cleanup guard (ST-04)", () => {
       0,
     );
     expect(timers, "setInterval/setTimeout/requestAnimationFrame sites in src").toBe(9);
-    expect(listeners, "addEventListener sites in src").toBe(10);
+    // 11 as of the modal dialog contract: ModalShell adds one document-level
+    // keydown listener for Escape and the Tab trap, and removes it in the
+    // effect's cleanup - which is what the findings assertion above checked
+    // before this number was allowed to move.
+    expect(listeners, "addEventListener sites in src").toBe(11);
   });
 });
