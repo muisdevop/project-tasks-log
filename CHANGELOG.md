@@ -1,10 +1,13 @@
 # Changelog
 
 Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-format. Versioning follows SemVer; the package version is still `0.1.0` because
-this is the first release-tracked build.
+format. Versioning follows SemVer.
 
-## Unreleased
+## [Unreleased]
+
+Nothing staged.
+
+## [0.2.0] - 2026-10-09
 
 Audit remediation campaign (93 findings, 2026-10-07 audit workbook). Entries are
 tagged with the finding ids they close.
@@ -75,10 +78,10 @@ tagged with the finding ids they close.
 - `LICENSE` (MIT) and this `CHANGELOG.md` (PM-02).
 - `.gitignore` entries for archives and scratch files, so a repository snapshot
   can never be committed by accident (`*.zip`, `*.tar.gz`, `.tmp-*`).
-  PM-01 note: `project-tasks-log.zip` is untracked and ignored, and it was never
-  committed (`git log --all --diff-filter=A -- project-tasks-log.zip` is empty),
-  but it still sits on disk at the repo root — it holds a `dev.db` snapshot with
-  real client/project/task names, so delete it rather than leave it to rot.
+  PM-01 note: `project-tasks-log.zip` was untracked and never committed
+  (`git log --all --diff-filter=A -- project-tasks-log.zip` is empty), and the
+  operator has now deleted it — it held a `dev.db` snapshot with real
+  client/project/task names.
 
 ### Changed
 - Elapsed time, task start times and completion outputs are computed from server
@@ -97,6 +100,32 @@ tagged with the finding ids they close.
   security posture, and a Known limitations section (BF-01, PM-03, BF-04).
 - Nine unused `@tiptap/*` extension packages removed; `@tiptap/extension-link`,
   which the editor imports, is now declared explicitly.
+- Reports read one clock: `src/lib/business-time.ts` (`startOfLocalDay`,
+  `endOfLocalDay`, `localDayKey`, `parseLocalDayStart`, `localDayWindow`) is the only
+  place a day boundary is computed, so the export window, the attendance day bounds and
+  the day-group key are the same value. The old UTC `T00:00:00Z`/`T23:59:59.999Z`
+  round-trip that shifted a non-UTC day by hours is gone, and
+  `tests/unit/export-timezone.test.ts` proves the equivalence under UTC, Asia/Jakarta
+  and America/Los_Angeles (FL-07).
+- `/api/export` is now bounded and streamed: `MAX_EXPORT_ROWS = 5_000` (queried as
+  `take: MAX+1`, answered with a clear 400 telling the caller to narrow the window) and
+  the HTML fallback is emitted as a `ReadableStream` through `reportHtmlChunks` /
+  `htmlStreamFromChunks`, byte-identical to the previous single string (PF-02).
+- Export row types are derived from the Prisma selects with `satisfies`
+  (`EXPORT_TASK_FIELDS`, `EXPORT_PROJECT_FIELDS`, `EXPORT_JOB_FIELDS`,
+  `EXPORT_SUBTASK_FIELDS`, `FieldProvenance`), so a renamed column breaks the
+  typecheck instead of silently blanking a report column (AR-05).
+- `src/lib/prisma.ts` refuses to guess: the provider is resolved from
+  `PRISMA_SCHEMA_PATH` -> `DB_PROVIDER` -> `DATABASE_URL` scheme and any contradiction
+  throws before an adapter is constructed, with a message that quotes `file:` URLs but
+  never a password, user or host (ST-03).
+- Nested agent scratch directories are excluded from git, ESLint and typecheck
+  (`.gitignore /.qoder/`, `eslint.config.mjs` globalIgnores), so a stale worktree copy
+  can no longer be linted, built or committed by accident.
+- `vitest.config.ts` gives the bcrypt suites real headroom (`testTimeout: 15_000`,
+  `hookTimeout: 60_000`) instead of cheapening the hashing: `bcryptjs` is pure JS at
+  cost 12 and a rate-limit test performs up to six of those comparisons while every
+  test file runs in a parallel worker.
 
 ### Fixed
 - Board/queue rendering, dialog focus handling, form validation, empty/error states
@@ -104,3 +133,13 @@ tagged with the finding ids they close.
   BG-02, UI-01, UI-02, UI-05, UI-07, UI-09, UX-01, UX-04, UX-07, UX-08).
 - `on_hold` was missing from the stats buckets, so the dashboard disagreed with the
   board (UX-08).
+- PDF export inside the container. The AGENTS.md docker gate found that Alpine
+  Chromium has no usable GPU/EGL in the image and only 64 MB of `/dev/shm`, so
+  `page.setContent` died with `ProtocolError: Network.enable timed out` and every
+  containerised export silently degraded to the HTML fallback.
+  `buildPuppeteerLaunchOptions` now always passes `--disable-gpu` and
+  `--disable-dev-shm-usage` next to the sandbox flags, pinned by
+  `tests/unit/export-pdf-render.test.ts` and `tests/integration/export.test.ts` (AR-06).
+- Duplicate break records: `POST /api/breaks/log` derives a deterministic
+  idempotency key and answers a replay with `Break-Deduplicated: true` instead of
+  inserting a second row (FL-01).

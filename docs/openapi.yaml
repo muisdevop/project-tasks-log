@@ -3,7 +3,7 @@
 openapi: "3.1.0"
 info:
   title: "GID Task Flow API"
-  version: "0.1.0"
+  version: "0.2.0"
   description: "REST contract for GID Task Flow, a single-user task and time-tracking app. Request bodies are generated from the zod schemas in `src/lib/validators.ts`; response shapes mirror the routes' actual payloads. All endpoints except `/api/health` and `/api/auth/login` require one of two credentials: the `stl_session` session cookie, or an `Authorization: Bearer gid_<40 hex>` API token (AI-02, scoped `read`/`write`; mutating routes need `write`, and `/api/tokens` plus `/api/admin/events` are cookie-only and answer 403 to any Bearer). MF-05 list vocabulary: `GET /api/jobs`, `/api/projects`, `/api/tasks`, `/api/subtasks` and `/api/attendance` share the optional `q`/`limit`/`cursor` query parameters — sending `limit` and/or `cursor` opts the response into the paged shape with `nextCursor`; without them responses are unchanged. `GET /api/admin/events` is always paged with the same vocabulary plus its own filters. AI-03: the POSTs on jobs/projects/tasks/breaks/breaks-log/attendance/tokens accept an `Idempotency-Key` request header for safe agent retries (see the parameter). MF-04: wrapped routes stamp an `X-Request-Id` response header and log one structured `api.request` line per call — include it in bug reports. Note: generated object schemas show `additionalProperties: false`, but the routes use zod's default object behaviour, which ignores unknown keys instead of rejecting them. This file is generated — do not edit by hand; run `npm run docs:openapi`."
   license:
     name: "MIT"
