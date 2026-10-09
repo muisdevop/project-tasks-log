@@ -5,7 +5,78 @@ format. Versioning follows SemVer.
 
 ## [Unreleased]
 
+The 0.2.0 re-audit kept going until the report was clean, and that second pass
+found real defects in the layer nothing had tested yet. Entries below are tagged
+with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
+
+### Added
+- React component-level tests (OPEN-01). `vitest.config.ts` now declares two
+  projects instead of one environment: `node` for the lib and route-handler
+  suite, which keeps running against real Prisma in production `NODE_ENV`, and
+  `components`, a jsdom project pinned to `NODE_ENV=development` because
+  `React.act` does not exist in a production React build. 44 tests over
+  `ModalShell`, the task board and subtask editing
+  (`tests/unit/components/`), with `render-helpers.ts` recording every fetch so a
+  request body is asserted rather than assumed. Dev dependencies only
+  (`jsdom`, `@testing-library/*`); nothing in the shipped bundle changes.
+- Automated accessibility gates (RA-07), which the audit could previously only
+  record as *not claimed*. `tests/unit/components/accessibility.test.tsx` runs
+  axe-core over the rendered components in jsdom and carries a control case that
+  asserts the same scan reports `button-name` and `aria-dialog-name` on bad
+  markup - a gate that cannot fail is indistinguishable from a gate that never
+  ran. `tests/e2e/accessibility.spec.ts` injects the same axe-core into
+  Chromium, WebKit and Firefox at 1440px and scans seven routes with
+  `color-contrast` and the landmark rules enabled, the two axe cannot judge
+  without real pixels and a real document. 21 route x engine scans pass.
+  `axe-core` is now a declared devDependency rather than a transitive of
+  `eslint-plugin-jsx-a11y`.
+
 ### Fixed
+- `ModalShell` was not a dialog to assistive technology (RA-01). It rendered a
+  plain `div`: no `role`, no `aria-modal`, no name, no Escape, no focus handling,
+  so a screen reader announced a task form as unnamed page text and Tab walked
+  straight out of the modal into the page behind it. It is now
+  `role="dialog"` + `aria-modal="true"` + `aria-labelledby` aimed at the visible
+  heading (`PageHeader` gained a `headingId` prop for exactly that), Escape
+  closes, focus moves to the first control on open and back to the opener on
+  close, and Tab wraps inside the panel. The document `keydown` listener is
+  removed on cleanup, which is why the ST-04 timer/listener guard's expected
+  listener count moved from 10 to 11.
+- Controls that had no accessible name (RA-02). axe reported `select-name` and
+  `label` as *critical*: the heading selector in `rich-text-editor.tsx`, the
+  report-title selector in `export-page-content.tsx`, the break-type selector in
+  `global-break-widget.tsx`, the default-title radios in
+  `report-title-options-manager.tsx`, and the three `field-label` fields in
+  `breaks-config.tsx` plus the input form in `confirm-dialog.tsx` - each of those
+  labels was a sibling with no `for`, which does not name anything. The two
+  mechanisms worth recording: neither axe nor Testing Library's role/name queries
+  read a `placeholder` as a name, and a `<label>` only names a control through
+  `htmlFor`/`id` or by wrapping it. Fixed with `htmlFor` pairs (via `useId` where
+  the component is reused), `aria-label` on the selectors and radios, and the
+  repo's existing `sr-only` label convention on the board and subtask inputs.
+- The check-in and check-out buttons failed their own contrast budget (RA-06).
+  White on `bg-green-500` measures **2.21:1** against the 4.5:1 the app's token
+  table promises, and the red twin was worse, while `globals.css` already shipped
+  `.btn-success` (4.6:1) and `.btn-danger` (5.5:1). `job-attendance.tsx` now uses
+  those tokens, so the ratio comes from the documented scale instead of a
+  hand-picked colour. Only a real browser can see this class of defect: jsdom has
+  no painted pixels, which is why the e2e axe gate exists.
+- Failures were displayed but never announced (RA-04). The task board and the
+  subtask list rendered their error strings in hand-rolled `div`s, so a rejected
+  save - a 409 state-machine conflict, a 503 from a paged search - changed pixels
+  and told assistive technology nothing. Both now use the repo's `StatusBanner`,
+  which carries `role="alert"` for the error tone.
+- The subtask delete button could be focused while invisible (RA-03). It was
+  `opacity-0` with only a hover rule restoring it, so keyboard users reached a
+  control they could not see and could activate blindly. Added
+  `focus-visible:opacity-100`.
+- The rich-text surface had no role or name (RA-05). A `contenteditable` div is
+  not a textbox to assistive technology unless it says so, and its placeholder is
+  a CSS affordance nothing can read; the editor now sets `role="textbox"`,
+  `aria-label` from the placeholder and `aria-multiline="true"`.
+- The sidebar wordmark was announced twice (RA-02 sweep): the logo `img` carried
+  `alt="GID Task Flow"` next to the text "GID Task Flow". It is decorative now
+  (`alt=""`), and the link keeps its name from the visible text.
 - The app shell no longer forces a horizontal scrollbar at the `md` breakpoint:
   `SidebarLayout`'s `<main>` carried `flex-1` with the CSS default
   `min-width: auto`, so it refused to shrink below the min-content width of the

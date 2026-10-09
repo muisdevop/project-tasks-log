@@ -297,6 +297,16 @@ missing from the OpenAPI document.
   business-hours arithmetic, validators, redirect safety, rich-text extraction,
   startup checks, sessions, api tokens, idempotency, rate limiting, security
   events, stats cache, export helpers/HTML/PDF stubs.
+- Component tests (`tests/unit/components/`) render the interactive board
+  components in jsdom with Testing Library queries — no server, so a fetch is
+  whatever the test stubs. They cover what the browser matrix cannot assert
+  cheaply: the modal dialog contract (`role="dialog"`, `aria-modal`, Escape,
+  focus moves in and back out, Tab stays inside), every control having a real
+  accessible name, subtask fetch/toggle/delete round-trips, per-row busy state,
+  and the paginated board's params and cursor. `vitest.config.ts` runs them as a
+  second project pinned to `NODE_ENV=development`, because `React.act` is absent
+  from a production React build and the `node` project must keep exercising
+  production code paths.
 - Integration tests (`tests/integration/`) import the real route handlers and run
   them against a throwaway SQLite file: auth, api tokens, task state machine and
   races, break logging (including rollback), subtasks, attendance, stats,
@@ -321,10 +331,11 @@ missing from the OpenAPI document.
   hard-delete guard, admin event paging, logout. CI runs it against both
   providers after the health check. It exists because unit, integration and
   browser tests all passed over a container-only PDF failure (audit AR-06).
-- Not covered today: pixel-level visual regression baselines, automated
-  accessibility checks, and React component-level tests (no
-  `@testing-library/*` dependency — component behaviour is covered by the
-  browser matrix and the route-handler tests, not by isolated renders).
+- Not covered today: pixel-level visual regression baselines (the matrix checks
+  geometry and console hygiene, not screenshot diffs) and automated WCAG axe
+  scans. Accessible *names* and the dialog contract are now asserted in the
+  component suite; colour contrast and landmark coverage are still a manual
+  review.
 
 ## Docker and Coolify
 
