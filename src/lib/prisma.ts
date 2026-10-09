@@ -147,12 +147,26 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
  * error surfaces on the first query rather than at import time — which is what
  * keeps `next build` compiling in an environment that has no database at all.
  */
+/**
+ * One client per module instance, always.
+ *
+ * The memo *has* to live in module scope as well as on `globalThis`: `globalThis`
+ * is only populated outside production, so a production process that relied on it
+ * alone rebuilt the client on every single property access — each `prisma.task.*`
+ * call constructing a new `PrismaClient` and a new driver adapter (a new connection
+ * pool, never disconnected). The container smoke run of 2026-10-09 made that
+ * observable, and `tests/unit/prisma-provider-mismatch.test.ts` now pins it by
+ * counting adapter constructions under `NODE_ENV=production`.
+ */
+let clientForModule: PrismaClient | undefined = globalForPrisma.prisma;
+
 function resolveClient(): PrismaClient {
-  const existing = globalForPrisma.prisma;
-  if (existing) return existing;
+  if (clientForModule) return clientForModule;
   const created = createClient();
-  // Outside production the cache lives on globalThis so a hot reload reuses the
-  // connection pool instead of opening a new one per module evaluation.
+  clientForModule = created;
+  // Outside production the cache additionally lives on `globalThis`, so a hot
+  // reload reuses the connection pool instead of opening a new one per module
+  // evaluation. In production the module itself is the lifetime boundary.
   if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = created;
   return created;
 }

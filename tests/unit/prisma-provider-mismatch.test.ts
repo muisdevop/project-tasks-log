@@ -261,23 +261,61 @@ describe("prisma provider resolution fails closed (ST-03)", () => {
   it("forwards property definitions and deletions to the real client", async () => {
     const mod = await importPrisma({ DB_PROVIDER: "sqlite", DATABASE_URL: "file:./data/app.db" });
     firstUse(mod);
-    const cached = (globalThis as { prisma?: Record<string, unknown> }).prisma;
-    expect(cached).toBeTypeOf("object");
+    // Everything is observed through the exported proxy, never through
+    // `globalThis.prisma`: `resolveClient()` only publishes the cache outside
+    // production, so reading the global made this case pass locally (NODE_ENV=test)
+    // and fail in CI (NODE_ENV=production) — see the dedicated cache test below.
     // This is what `vi.spyOn(prisma, …)` does internally: the trap has to land
     // the definition on the client behind the proxy, otherwise the `get` trap
     // keeps returning the original method and the spy is never observed.
     // (Written by hand instead of via `vi.spyOn` so no spy outlives the case —
     // vitest restores registered spies after the environment is restored, and
     // restoring onto a lazily bound client would re-resolve the config.)
+    const view = mod.prisma as unknown as Record<string, unknown>;
     const stub = () => "stubbed";
     Object.defineProperty(mod.prisma, "$connect", {
       value: stub,
       configurable: true,
       writable: true,
     });
-    expect(cached!.$connect).toBe(stub);
+    // The descriptor comes from the real client behind the proxy (the `get…
+    // Descriptor` trap forwards to `resolveClient()`), so this is the raw stub.
+    // The plain read cannot be compared by identity: the `get` trap deliberately
+    // binds functions to the client, which is what keeps `this` inside Prisma
+    // methods correct, so `view.$connect` is a *bound* stub.
+    expect(Object.getOwnPropertyDescriptor(mod.prisma, "$connect")?.value).toBe(stub);
     expect((mod.prisma.$connect as unknown as () => string)()).toBe("stubbed");
-    expect(delete (mod.prisma as unknown as Record<string, unknown>).$connect).toBe(true);
-    expect(cached!.$connect).toBeUndefined();
+    expect(delete view.$connect).toBe(true);
+    expect(view.$connect).toBeUndefined();
+  });
+
+  it("publishes the client on globalThis only outside production", async () => {
+    // The branch the CI environment exercises: a production boot must not keep a
+    // client alive on a process-wide global, while development reuses one across
+    // hot reloads. Both modes still resolve configuration the same way.
+    vi.stubEnv("NODE_ENV", "development");
+    const dev = await importPrisma({ DB_PROVIDER: "sqlite", DATABASE_URL: "file:./dev-cache.db" });
+    firstUse(dev);
+    expect((globalThis as { prisma?: unknown }).prisma).toBeTypeOf("object");
+    expect(recorder.built).toHaveLength(1);
+
+    vi.stubEnv("NODE_ENV", "production");
+    const prod = await importPrisma({ DB_PROVIDER: "sqlite", DATABASE_URL: "file:./prod-cache.db" });
+    firstUse(prod);
+    expect((globalThis as { prisma?: unknown }).prisma).toBeUndefined();
+    // Production still builds exactly one client. Before the module-scope memo in
+    // `resolveClient()` the only cache was `globalThis`, which production does not
+    // populate, so *every* proxied access constructed a new PrismaClient and a new
+    // driver adapter - a fresh connection pool per query, none ever disconnected.
+    void prod.prisma.$transaction;
+    void prod.prisma.task;
+    void prod.prisma.$connect;
+    // Two separate imports, two adapters — the proxy never silently reuses the
+    // development client in a production process, and repeated reads on the
+    // production proxy do not add more.
+    expect(recorder.built.map((b) => b.connection)).toEqual([
+      "file:./dev-cache.db",
+      "file:./prod-cache.db",
+    ]);
   });
 });

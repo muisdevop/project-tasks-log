@@ -239,7 +239,16 @@ describe("sqlite snapshot primitives", () => {
   });
 
   it("reads app version from package.json without failing when absent", () => {
-    expect(readAppVersion(process.cwd())).toBe("0.1.0");
+    // Asserted against package.json rather than a literal: pinning "0.1.0" here
+    // meant the 0.2.0 release bump failed the suite on CI, where NODE_ENV differs
+    // from a developer shell and nothing else re-ran these files.
+    const declared = (
+      JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as {
+        version: string;
+      }
+    ).version;
+    expect(readAppVersion(process.cwd())).toBe(declared);
+    expect(readAppVersion(process.cwd())).toMatch(/^\d+\.\d+\.\d+$/);
     expect(readAppVersion(path.join(tempDir, "nope"))).toBe("0.0.0");
   });
 
