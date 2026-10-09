@@ -196,15 +196,72 @@ From `next.config.ts` on every response: `X-Content-Type-Options: nosniff`,
 
 ## 7. Known gaps left open on purpose
 
+Rewritten during the 2026-10-09 re-audit because four of its bullets had gone
+stale while the section still claimed them — which is worse than an open gap.
+
 - No CSRF tokens and no `Origin` allow-list (section 2).
-- Idempotency is wired into `/api/tokens` only; `/api/tasks`, `/api/breaks`,
-  `/api/stats` and `/api/export` still need `withIdempotency(...)` around their
-  mutating work (module JSDoc has the exact snippet).
-- Routes that call `requireAuth()` without forwarding their `Request` remain
-  cookie-only — by design until each is wired for Bearer.
-- `docs/openapi.yaml` does not yet describe `/api/tokens`, so
-  `npm run docs:openapi:check` cannot prove that contract.
 - The limiter and idempotency stores are per-process; multi-replica deployments
   need a shared store.
 - Token use is metered and logged, but there is no per-token route allow-list:
   a `write` token can reach every wired route.
+- `POST /api/auth/logout` calls `requireAuth()` without forwarding the `Request`,
+  so it is cookie-only. Deliberate: a Bearer token is scoped to the machine that
+  owns it and must not be able to revoke the browser session it was minted from.
+- `docs/openapi.yaml` generates object schemas with `additionalProperties: false`
+  while the routes use zod's default object behaviour (unknown keys ignored, not
+  rejected). The spec states this in its `info.description`; tightening it would
+  break existing clients, so it is documented rather than fixed.
+
+Closed since the original writing, and now gated: `withIdempotency(...)` wraps the
+POSTs on jobs, projects, tasks, breaks, `breaks/log`, attendance and tokens;
+`/api/tokens` and `/api/admin/events` are in the generated contract, so
+`npm run docs:openapi:check` proves them (21 paths).
+
+## 8. Dependency advisories (SEC-01) — accepted, measured, and reported every run
+
+`npm audit --omit=dev` on the `0.2.0` tip reports **32 advisories in the runtime
+tree (9 moderate, 23 high)**; the full tree including dev tooling reports 44.
+None has a fix that can be taken without breaking the product, so they are
+recorded here rather than "resolved" by a downgrade nobody reviewed:
+
+- **The Prisma 7 chain dominates** (`prisma`, `@prisma/config`, `@prisma/dev`,
+  `@mrleebo/prisma-ast`, `chevrotain`/`@chevrotain/*`, `deepmerge-ts`, `effect`,
+  `valibot`, `lodash`, `mysql2`, `hono`/`@hono/node-server`). npm's proposed fix
+  is a **semver-major downgrade to `prisma@6.19.3`**, which removes driver-adapter
+  support and breaks the dual SQLite/Postgres schema setup and `npm run db:parity`
+  — a worse security posture, not a better one.
+- **The Puppeteer chain** (`puppeteer`, `puppeteer-core`, `@puppeteer/browsers`,
+  `extract-zip`) needs `puppeteer@25`, another major. Mitigating context: the
+  browser loads only locally generated report HTML through `page.setContent`,
+  navigates to no remote origin, runs `headless: true` with a 60-second protocol
+  timeout, and it runs inside a digest-pinned Alpine image whose Chromium package
+  comes from that pinned base. The launch uses
+  `--no-sandbox`/`--disable-setuid-sandbox`, which is the honest trade-off for
+  running Chromium as the non-root `node` user in a container and is why an
+  upstream Chromium advisory here is treated as materially exploitable rather
+  than academic.
+- **The rich-text chain** (`@tiptap/*`, `prosemirror-view`, `markdown-it`,
+  `linkify-it`, `dompurify`, `js-yaml`, `undici`, `ws`, `ip-address`, `basic-ftp`,
+  `defu`, `source-map-js`) is largely transitive under `@tiptap@3`. Note
+  `prosemirror-view <1.42.3` (paste-handling XSS): this app sanitises note HTML
+  with `isomorphic-dompurify` before it is stored or rendered, and the editor is
+  driven by the authenticated operator's own paste, so the practical exposure is
+  self-XSS in a single-user tool — not the multi-user stored-XSS the advisory
+  assumes.
+
+One consequence of SEC-14's pinning is worth stating plainly: the base image is
+digest-pinned (`node:20-alpine3.20@sha256:3bc9a4…`) and Chromium is apk-pinned to
+`131.0.6778.108-r0`, so the browser in the shipped image does **not** receive
+security updates until the pins are deliberately moved. Reproducibility was
+chosen over auto-updating; the price is that Chromium CVEs land here as a
+reviewed maintenance task rather than as an automatic patch, and the `--disable-gpu`
+PDF regression test plus a container smoke run are what make that review safe.
+
+What is being done instead of a fake green: CI reports the count on every run
+(`Dependency advisory posture (SEC-01)`, non-blocking by design so a new
+upstream advisory is visible in the log rather than silently tolerated), and the
+upgrade itself is a scheduled work item — `prisma` 7.x patch line, then
+`puppeteer` 25, then `@tiptap` — each requiring `npm run db:parity`, the export
+integration tests and the container PDF check to pass before it lands. The
+critical Next.js DoS advisory that the original audit found is genuinely gone:
+`next@16.4.0` is above the fixed version.

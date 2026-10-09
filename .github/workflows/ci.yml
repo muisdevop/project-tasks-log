@@ -41,6 +41,21 @@ jobs:
         # dev dependencies explicitly so a production NODE_ENV cannot hollow out
         # the toolchain.
         run: npm ci --include=dev
+      - name: Dependency advisory posture (SEC-01)
+        # SEC-01 is an accepted risk, and an accepted risk that nobody re-measures
+        # is just an untracked one. This reports the runtime-tree count on every
+        # run without failing the pipeline: the fixes npm offers are a
+        # semver-major Prisma downgrade (breaks driver adapters and db:parity) and
+        # a Puppeteer 25 major, so they are scheduled upgrade work, not something
+        # to force in a PR. docs/security.md section 8 carries the full rationale.
+        continue-on-error: true
+        run: |
+          set +e
+          echo "runtime tree:"
+          npm audit --omit=dev 2>&1 | tail -2
+          echo "full tree (dev tooling included):"
+          npm audit 2>&1 | tail -2
+          exit 0
       - name: Compose files parse (Docker / Coolify deploy path)
         # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
         # `docker compose config`, so when the demo secrets were removed the dev

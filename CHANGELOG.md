@@ -82,6 +82,16 @@ tagged with the finding ids they close.
   (`git log --all --diff-filter=A -- project-tasks-log.zip` is empty), and the
   operator has now deleted it — it held a `dev.db` snapshot with real
   client/project/task names.
+- `docs/security.md` section 8, "Dependency advisories": the accepted-risk
+  posture written down with the actual numbers instead of a hand-wave — 32
+  runtime advisories (9 moderate / 23 high), grouped by root cause (Prisma 7
+  chain, Puppeteer chain, rich-text chain), each with why npm's own fix is worse
+  than the risk, the `--no-sandbox` trade-off, and the fact that SEC-14's
+  Chromium pin means CVEs arrive as reviewed maintenance rather than automatic
+  patches (SEC-01).
+- A non-blocking `Dependency advisory posture (SEC-01)` step in CI, so an
+  accepted risk keeps being measured on every run rather than rotting into an
+  untracked one.
 
 ### Changed
 - Elapsed time, task start times and completion outputs are computed from server
@@ -175,3 +185,12 @@ tagged with the finding ids they close.
   literal `"0.1.0"` from `package.json` (it broke on the 0.2.0 bump) and one read
   `globalThis.prisma`, which production does not set. Both now assert against the
   source of truth, and nothing in the suite may hardcode a version string.
+- `docs/security.md` section 7 listed four gaps that had already been closed —
+  idempotency was in fact wired into seven route files, `/api/tokens` and
+  `/api/admin/events` are in the generated contract (21 paths), and the
+  Bearer-forwarding note no longer matched the routes. A stale "known gap" is
+  worse than a gap, because it tells the next reader not to look. The section now
+  lists only what is still open, with the one deliberate cookie-only route
+  (`/api/auth/logout`) explained rather than apologised for, and each closed item
+  is stated as closed and gated. (PM-02, found by re-reading the docs against the
+  tree during the 2026-10-09 re-audit.)
