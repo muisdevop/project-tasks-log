@@ -120,13 +120,20 @@ jobs:
       SESSION_SECRET: ci-smoke-session-secret-0123456789-abcd
       SMOKE_PASSWORD: ci-smoke-password
     steps:
+      # The container smoke script lives in the repo, not in the standalone
+      # image, so this job needs the checkout + a Node on the runner. No npm
+      # install: scripts/container-smoke.mjs is dependency-free (global fetch).
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - uses: actions/download-artifact@v4
         with:
           name: stl-ci-image
       - name: Load image
         run: gunzip -c stl-ci.tar.gz | docker load
 
-      - name: Create bcrypt hash for login smoke
+      - name: Create bcrypt hash for the container smoke login
         id: hash
         run: |
           HASH=$(docker run --rm -e SMOKE_PASSWORD="$SMOKE_PASSWORD" --entrypoint node stl-ci:latest \
@@ -184,21 +191,17 @@ jobs:
           done
           docker inspect stl-smoke; exit 1
 
-      - name: Login smoke request
-        run: |
-          code=$(curl -sS -o /tmp/login.json -w '%{http_code}' \
-            -X POST http://127.0.0.1:3000/api/auth/login \
-            -H 'Content-Type: application/json' \
-            -d "{\"username\":\"admin\",\"password\":\"$SMOKE_PASSWORD\"}")
-          cat /tmp/login.json
-          echo "HTTP $code"
-          [ "$code" = "200" ]
-          # wrong password must be rejected
-          bad=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -X POST http://127.0.0.1:3000/api/auth/login \
-            -H 'Content-Type: application/json' \
-            -d "{\"username\":\"admin\",\"password\":\"wrong-password\"}")
-          [ "$bad" = "401" ]
+      - name: Functional container smoke (${{ matrix.db }})
+        # The AGENTS.md docker gate as a script: 28 checks over the real image -
+        # auth refusal, task lifecycle with server-side timing, idempotent
+        # writes, break dedupe, stats, export, PDF-from-Alpine-Chromium (AR-06),
+        # token scopes/revocation, hard-delete guard, admin paging, logout.
+        env:
+          APP_USERNAME: admin
+          APP_PASSWORD: ${{ env.SMOKE_PASSWORD }}
+          EXPECTED_PROVIDER: ${{ matrix.db }}
+          REQUIRE_PDF: "1"
+        run: npm run --silent smoke:container -- http://127.0.0.1:3000
 
       - name: Show container logs on failure
         if: failure()

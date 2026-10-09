@@ -21,7 +21,7 @@ no tags, no licence).
 | Bundle budget | `npm run bundle:budget` | exit 0 |
 | Build | `npm run build` | exit 0 |
 | Browser matrix | `npm run test:e2e` | exit 0 (needs `npm run test:e2e:install` once) |
-| Container | `docker build -t gid-task-flow .` then boot on SQLite **and** Postgres | `/api/health` returns ok, login works |
+| Container | `docker build -t gid-task-flow .`, boot on SQLite **and** Postgres, then `APP_USERNAME=… APP_PASSWORD=… REQUIRE_PDF=1 npm run smoke:container -- http://127.0.0.1:PORT` | `TOTAL 28 checks, 0 failed` on **both** providers. Health and login alone proved nothing: the 2026-10-09 pass found a container-only PDF degradation (AR-06) that every other gate passed over, so the gate is the script, not a checklist in someone's head. |
 | Compose files | `docker compose -f docker-compose.yml config -q` (with `SESSION_SECRET` + `APP_PASSWORD_HASH` set) and the same for `docker-compose.prod.yml` | exit 0 — both files must parse, and `docker-compose.yml` must still **refuse** an empty `APP_PASSWORD_HASH`. CI runs this as its own step, because nothing else ever did and a broken dev file went unnoticed for a whole wave. |
 
 `AGENTS.md` is the canonical definition of done; `.github/workflows/ci.yml`

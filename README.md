@@ -110,6 +110,7 @@ Every row is a real entry in `package.json` `scripts`.
 | `npm run db:migrate:sqlite-to-postgres` | `tsx scripts/migrate-sqlite-to-postgres.ts` data move |
 | `npm run db:seed` | `tsx prisma/seed.ts` demo data |
 | `npm run db:parity` | `node scripts/check-schema-parity.mjs` — fails if the two Prisma schemas drift |
+| `npm run smoke:container -- <baseUrl>` | `node scripts/container-smoke.mjs` — 28 functional checks against a *running* container (`APP_USERNAME`/`APP_PASSWORD`, `REQUIRE_PDF=1` to demand a real PDF) |
 | `npm run db:backup` | `tsx scripts/backup.ts` — labelled snapshot of the active provider (`docs/backup-restore.md`) |
 | `npm run db:restore` | `tsx scripts/restore.ts` — verifies and restores one of those snapshots |
 | `npm run password:hash -- "pw"` | `tsx scripts/hash-password.ts`, bcrypt cost 12, for `APP_PASSWORD_HASH` |
@@ -313,9 +314,17 @@ missing from the OpenAPI document.
   reclaims that port from a leftover `next` process before wiping the file, and
   shuts its own server down. It is deliberately not Playwright's `webServer`
   option, because `webServer` boots before `globalSetup` and cannot seed first.
-- Not covered today: the production Puppeteer->Chromium PDF byte path in CI (the
-  matrix asserts the download is non-empty, which is the HTML fallback in dev),
-  pixel-level visual regression baselines, and automated accessibility checks.
+- `npm run smoke:container` is the container gate: it logs into a *running*
+  image and walks the real contracts — task lifecycle with server-side timing,
+  `Idempotency-Key` replay, break dedupe, stats, export, a PDF produced by the
+  image's own Alpine Chromium (`REQUIRE_PDF=1`), token mint/scope/revocation, the
+  hard-delete guard, admin event paging, logout. CI runs it against both
+  providers after the health check. It exists because unit, integration and
+  browser tests all passed over a container-only PDF failure (audit AR-06).
+- Not covered today: pixel-level visual regression baselines, automated
+  accessibility checks, and React component-level tests (no
+  `@testing-library/*` dependency — component behaviour is covered by the
+  browser matrix and the route-handler tests, not by isolated renders).
 
 ## Docker and Coolify
 
@@ -358,13 +367,15 @@ DB_PROVIDER=postgres docker compose -f docker-compose.prod.yml --profile postgre
 
 - Contribution rules, the branch/PR convention and the tagging/release
   procedure: [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
-- Release history: [`CHANGELOG.md`](CHANGELOG.md). Tags: none exist yet — the
-  first annotated tag is the maintainer's step and is spelled out in
-  `docs/CONTRIBUTING.md`.
+- Release history: [`CHANGELOG.md`](CHANGELOG.md). Check `git tag -l` for what
+  has actually shipped; `v0.2.0` is the annotated tag for this audit
+  remediation campaign, and per `docs/CONTRIBUTING.md` a tag is only ever
+  created after CI is green at that exact commit.
 - `AGENTS.md` states the definition of done, and `.github/workflows/ci.yml`
   enforces lint, typecheck, tests, coverage, build, bundle budget, schema
-  parity, OpenAPI freshness, the image build, and a container boot + login smoke
-  against **both** SQLite and Postgres. CI only runs once the work is pushed to
+  parity, OpenAPI freshness, compose-file parsing, the image build, and a
+  container boot plus `npm run smoke:container` against **both** SQLite and
+  Postgres. CI only runs once the work is pushed to
   GitHub — the workflow exists in-tree, and unpushed commits are unverified by it.
 
 Known limitations

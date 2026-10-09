@@ -92,6 +92,17 @@ tagged with the finding ids they close.
 - A non-blocking `Dependency advisory posture (SEC-01)` step in CI, so an
   accepted risk keeps being measured on every run rather than rotting into an
   untracked one.
+- `scripts/container-smoke.mjs` (`npm run smoke:container`): the AGENTS.md docker
+  gate as code — 28 functional checks (auth refusal and cookie login, task
+  lifecycle with server-side timing, `Idempotency-Key` replay, break dedupe,
+  stats, `/api/export/data`, a real `%PDF` from the image's own Alpine Chromium
+  under `REQUIRE_PDF=1`, token mint/scope/revocation, the hard-delete guard,
+  admin event paging, logout) run against the booted container on both providers.
+  CI's `smoke` job now executes it instead of the two curl requests it used to
+  make, which is what caught AR-06 by hand and could not catch it again. A run
+  that hits the login limiter (5 per 5 min per IP, i.e. twice per re-run) aborts
+  with the `Retry-After` instead of reporting twenty misleading failures.
+  (AR-06, MF-01, PM-04, TC-01)
 
 ### Changed
 - Elapsed time, task start times and completion outputs are computed from server

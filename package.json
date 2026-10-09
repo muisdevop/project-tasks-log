@@ -26,6 +26,7 @@
     "db:backup": "tsx scripts/backup.ts",
     "db:restore": "tsx scripts/restore.ts",
     "db:parity": "node scripts/check-schema-parity.mjs",
+    "smoke:container": "node scripts/container-smoke.mjs",
     "password:hash": "tsx scripts/hash-password.ts",
     "docs:openapi": "tsx scripts/generate-openapi.ts",
     "docs:openapi:check": "tsx scripts/generate-openapi.ts --check",
