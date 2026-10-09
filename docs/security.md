@@ -257,11 +257,15 @@ chosen over auto-updating; the price is that Chromium CVEs land here as a
 reviewed maintenance task rather than as an automatic patch, and the `--disable-gpu`
 PDF regression test plus a container smoke run are what make that review safe.
 
-What is being done instead of a fake green: CI reports the count on every run
+What is being done instead of a fake green: CI reports both counts on every run
 (`Dependency advisory posture (SEC-01)`, non-blocking by design so a new
-upstream advisory is visible in the log rather than silently tolerated), and the
-upgrade itself is a scheduled work item — `prisma` 7.x patch line, then
-`puppeteer` 25, then `@tiptap` — each requiring `npm run db:parity`, the export
-integration tests and the container PDF check to pass before it lands. The
-critical Next.js DoS advisory that the original audit found is genuinely gone:
-`next@16.4.0` is above the fixed version.
+upstream advisory is visible in the log rather than silently tolerated). The
+full-tree line asks for `npm audit --include=dev` explicitly, because the
+quality job exports `NODE_ENV=production` and npm then hides dev dependencies
+from a plain `npm audit` too — the same trap that once hollowed out the whole
+toolchain install. The upgrade itself is a scheduled work item — `prisma` 7.x
+patch line, then `puppeteer` 25, then `@tiptap` — each requiring
+`npm run db:parity`, the export integration tests and
+`npm run smoke:container` (which asserts the real PDF) to pass before it lands.
+The critical Next.js DoS advisory that the original audit found is genuinely
+gone: `next@16.4.0` is above the fixed version.

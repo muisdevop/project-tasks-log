@@ -156,6 +156,13 @@ tagged with the finding ids they close.
   (PM-01, AI-01: a fresh clone can now `cp .env.example .env`).
 
 ### Fixed
+- The CI advisory step measured the same tree twice. The quality job exports
+  `NODE_ENV=production`, and `npm audit` hides dev dependencies in that mode, so
+  the line labelled "full tree (dev tooling included)" printed the runtime count
+  again — a reporting bug in the step whose whole purpose is honest measurement
+  (found while regenerating the verification log, SEC-01). It now asks for
+  `npm audit --include=dev`, which reports 44 advisories against the runtime
+  tree's 32.
 - Board/queue rendering, dialog focus handling, form validation, empty/error states
   and duplicate element ids across the task board, job pages and settings (BG-01,
   BG-02, UI-01, UI-02, UI-05, UI-07, UI-09, UX-01, UX-04, UX-07, UX-08).

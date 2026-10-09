@@ -54,7 +54,10 @@ jobs:
           echo "runtime tree:"
           npm audit --omit=dev 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
           echo "full tree (dev tooling included):"
-          npm audit 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
+          # This job exports NODE_ENV=production, and npm then hides dev
+          # dependencies from `npm audit` as well - a plain `npm audit` here
+          # silently prints the runtime number twice. Ask for dev explicitly.
+          npm audit --include=dev 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
           exit 0
       - name: Compose files parse (Docker / Coolify deploy path)
         # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
