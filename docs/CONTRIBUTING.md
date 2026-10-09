@@ -40,11 +40,13 @@ rather than a stale generate. The same ordering applies after
 `npm run db:generate:postgres` in CI. `npm run db:parity` checks the two schemas
 agree; it cannot check which client is on disk.
 
-## 2. Branch and PR workflow (the repo does not do this yet)
+## 2. Branch and PR workflow
 
-Today: one branch (`master`), and features land as direct commits on it. That is
-why audit finding PM-01 could not name a branch, issue or PR for the work in
-progress. Move to:
+This is the workflow the repository now uses: the whole `0.2.0` audit campaign
+was executed on `chore/audit-remediation-2026-10` and reviewed through Draft PR
+#2, with CI green on every pushed head. Before it, features landed as direct
+commits on `master`, which is why audit finding PM-01 could not name a branch,
+issue or PR for the work in progress. Keep doing:
 
 1. `git switch -c feat/<short-slug>` off `master`.
 2. Commit small, with the imperative style already in the history
@@ -97,6 +99,10 @@ Rules
 - Tag names are prefixed with `v`.
 - Tags are annotated (`-a`/`-m`), never lightweight — `git tag -l -n99` must show
   a readable description.
+- **Never tag a commit whose pipeline is not green.** The tag is the claim that
+  the artefact works, and CI at that exact SHA is the evidence — not the run on
+  the commit before it. Check `gh run list --branch <sha-branch> --limit 1`
+  shows `completed success` for the head you are about to tag.
 - A release cut changes only `CHANGELOG.md` + `package.json` + lockfile. If you
   need a code fix, it belongs to the release's own PR, not this commit.
 - `0.x` is honest about immaturity: breaking changes inside `0.x` bump MINOR
@@ -105,13 +111,14 @@ Rules
   simultaneously accurate and supported.
 - Never rewrite or force-push a published tag; cut the next version instead.
 
-The immediate step: the campaign work in the `Unreleased` block of
-`CHANGELOG.md` is release-worthy content, so the next release is **`0.2.0`**, cut
-on 2026-10-09. The version edit and the tag are the maintainer's *decision*; an
-agent may execute them only under a recorded authorization for that specific
-action (the 2026-10-09 release and the `chore/audit-remediation-2026-10` push +
-Draft PR were both approved that way). Merge this release with a **merge commit**,
-not squash: `v0.2.0` is annotated onto the release commit on the branch, and a
+`0.2.0` (2026-10-09) is the audit remediation campaign: the content was already
+in `[0.2.0]` in `CHANGELOG.md` and `package.json` already said `0.2.0`, so the
+release commit is the campaign's own tip rather than a separate version bump.
+The version edit and the tag are the maintainer's *decision*; an agent may
+execute them only under a recorded authorization for that specific action (the
+2026-10-09 release and the `chore/audit-remediation-2026-10` push + Draft PR
+were both approved that way). Merge this release with a **merge commit**, not
+squash: `v0.2.0` is annotated onto the release commit on the branch, and a
 squash would leave the tag unreachable from `master`.
 
 ## 4. Documentation duties
