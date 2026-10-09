@@ -41,6 +41,18 @@ import {
 
 const OUTPUT_PATH = resolve(process.cwd(), "docs/openapi.yaml");
 
+/**
+ * PM-02: the contract version is read from `package.json`, never typed here, so a
+ * release bump cannot leave `docs/openapi.yaml` describing the previous build.
+ * `npm run docs:openapi:check` then fails if the committed document was generated
+ * before the version changed.
+ */
+const APP_VERSION: string = (
+  JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
+
 /** Convert a zod schema into an OpenAPI 3.1 JSON Schema object. */
 function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   const produced = z.toJSONSchema(schema, { target: "openapi-3.1" }) as Record<string, unknown>;
@@ -1845,7 +1857,7 @@ const document = {
   openapi: "3.1.0",
   info: {
     title: "GID Task Flow API",
-    version: "0.1.0",
+    version: APP_VERSION,
     description:
       "REST contract for GID Task Flow, a single-user task and time-tracking app. " +
       "Request bodies are generated from the zod schemas in `src/lib/validators.ts`; response " +

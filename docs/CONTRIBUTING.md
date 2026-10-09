@@ -97,9 +97,13 @@ Rules
 - Never rewrite or force-push a published tag; cut the next version instead.
 
 The immediate step: the campaign work in the `Unreleased` block of
-`CHANGELOG.md` is release-worthy content, so the next release should be
-**`0.2.0`**. The version edit and the tag are the maintainer's action (agents
-working this repo do not run git write commands).
+`CHANGELOG.md` is release-worthy content, so the next release is **`0.2.0`**, cut
+on 2026-10-09. The version edit and the tag are the maintainer's *decision*; an
+agent may execute them only under a recorded authorization for that specific
+action (the 2026-10-09 release and the `chore/audit-remediation-2026-10` push +
+Draft PR were both approved that way). Merge this release with a **merge commit**,
+not squash: `v0.2.0` is annotated onto the release commit on the branch, and a
+squash would leave the tag unreachable from `master`.
 
 ## 4. Documentation duties
 
