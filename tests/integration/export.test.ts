@@ -59,8 +59,10 @@ beforeAll(async () => {
     })
   ).id;
 
-  // Tasks. endedAt/startedAt are UTC-noon so they sit inside the UTC day
-  // window the route builds regardless of this machine's timezone offset.
+  // Tasks. The instants are mid-morning/midday UTC so they land inside the
+  // LOCAL 2026-03-31 window the route now builds (FL-07) for the offsets this
+  // suite is run under, and next to the middle of it so a shift in either
+  // direction cannot flip them in or out.
   await prisma.task.create({
     data: {
       projectId: projectA,
@@ -177,7 +179,15 @@ describe("/api/export happy paths (Puppeteer mocked, no browser launch)", () => 
     expect(mockPuppeteerState.lastHtml).toContain("Alpha done task");
     expect(mockPuppeteerState.lastOptions).toMatchObject({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      // AR-06: the container flags are part of the contract — Alpine Chromium in
+      // the image dies during GPU init without `--disable-gpu`, which made every
+      // docker export fall back to HTML (found by the AGENTS.md docker gate).
+      args: expect.arrayContaining([
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+      ]),
     });
   });
 
@@ -201,6 +211,33 @@ describe("/api/export happy paths (Puppeteer mocked, no browser launch)", () => 
     // Attendance section.
     expect(html).toContain("Work Time Summary");
     expect(html).toContain("Total Work Time: 08:30:00");
+  });
+
+  it("streams the HTML fallback body in several chunks (PF-02)", async () => {
+    mockPuppeteerState.fail = true;
+    silenceConsole();
+    const res = await get("?timePeriod=day&groupBy=date");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+
+    const body = res.body;
+    expect(body, "fallback response must be a stream, not a buffered string").not.toBeNull();
+    const reader = body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    let chunks = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks += 1;
+      text += decoder.decode(value, { stream: true });
+    }
+    // One chunk per report section: the document is assembled incrementally
+    // instead of being concatenated into one giant string before it is sent.
+    expect(chunks).toBeGreaterThan(1);
+    expect(text).toContain("<!DOCTYPE html>");
+    expect(text).toContain("Alpha done task");
+    expect(text.trimEnd()).toContain("</html>");
   });
 
   it("filters by jobIds and projectIds (CSV) and ignores foreign ids", async () => {

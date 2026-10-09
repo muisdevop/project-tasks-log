@@ -114,7 +114,16 @@ describe("buildPuppeteerLaunchOptions", () => {
     expect(buildPuppeteerLaunchOptions({ NODE_ENV: "production" })).toEqual({
       headless: true,
       protocolTimeout: 60_000,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      // AR-06: the docker gate (2026-10-09) showed Chromium dying in GPU init
+      // inside the image — every container export silently fell back to HTML
+      // with `ProtocolError: Network.enable timed out`. These two flags are the
+      // fix, so they are pinned rather than left to the implementation.
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+      ],
       executablePath: PROD_CHROMIUM_FALLBACK_PATH,
     });
   });
@@ -123,7 +132,19 @@ describe("buildPuppeteerLaunchOptions", () => {
     mocks.existsSync.mockReturnValue(false);
     const options = buildPuppeteerLaunchOptions({ NODE_ENV: "development" });
     expect(options).not.toHaveProperty("executablePath");
-    expect(options.args).toEqual(["--no-sandbox", "--disable-setuid-sandbox"]);
+    expect(options.args).toEqual([
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+    ]);
+  });
+
+  it("always renders headless with a bounded protocol timeout", () => {
+    const options = buildPuppeteerLaunchOptions({ NODE_ENV: "development" });
+    expect(options.headless).toBe(true);
+    expect(options.protocolTimeout).toBe(60_000);
+    expect(options.args).toContain("--disable-gpu");
   });
 });
 

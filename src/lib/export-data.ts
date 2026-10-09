@@ -1,5 +1,6 @@
 import { Prisma, TaskStatus } from "@prisma/client";
 import { HttpError } from "@/lib/api-error";
+import { localDayWindow } from "@/lib/business-time";
 import { withQueryTimeout } from "@/lib/db-resilience";
 import { prisma } from "@/lib/prisma";
 import {
@@ -27,6 +28,18 @@ import {
 
 /** Cap the reportable window so a bad request cannot generate an unbounded PDF. */
 export const MAX_EXPORT_SPAN_DAYS = 366;
+
+/**
+ * PF-02: cap the *rows* a report may materialise.
+ *
+ * The span cap alone is not a bound: a dense 366-day window can name tens of
+ * thousands of tasks, and this report has no pagination — the rows, their
+ * grouping and their subtasks are all held in memory while the document is
+ * assembled. Fetching one row past the ceiling is how the limit is detected
+ * (`take: MAX_EXPORT_ROWS + 1`), so the request fails with an actionable 400
+ * instead of degrading the container.
+ */
+export const MAX_EXPORT_ROWS = 5_000;
 
 /** Default report heading when the caller supplies no `reportTitle`. */
 export const DEFAULT_REPORT_TITLE = "Activity Report";
@@ -59,6 +72,74 @@ export const TASK_SELECT = {
 
 export type ExportTaskRecord = Prisma.TaskGetPayload<{ select: typeof TASK_SELECT }>;
 
+/**
+ * AR-05 — the compile-time seam between the Prisma query and the report.
+ *
+ * `ExportTask` (declared in `src/lib/export-helpers`) is still what the grouping
+ * helpers and the HTML template are written against, and it cannot simply become
+ * `ExportTaskRecord` because fixtures and older callers build partial objects:
+ * its `description`/`logNotes`/`subtasks`/… are optional. That wideness is
+ * precisely the silent-drift hole the audit flagged — deleting `description: true`
+ * from `TASK_SELECT` would leave `ExportTaskRecord` *assignable* to `ExportTask`
+ * (an absent optional field is legal), and the report would render `undefined`.
+ *
+ * `FieldProvenance` removes optionality from the equation: every field name the
+ * template contract declares must also be a key of the row the query actually
+ * returns, and the object literal has to name each one. Which edits now fail
+ * `npx tsc --noEmit` instead of shipping silently:
+ *  - a column removed from `TASK_SELECT` (or renamed in the Prisma schema) — its
+ *    mapped type collapses to `["missing-in-TASK_SELECT", …]`, which the string
+ *    literal in the list below can no longer satisfy;
+ *  - a field added to `ExportTask` that the select does not provide — the literal
+ *    is then missing a required key *and* that key collapses to the error tuple;
+ *  - the same two drifts one level down, on `project`, on `project.job` and on
+ *    `subtasks`.
+ */
+type FieldProvenance<Row, Shape> = {
+  [K in keyof Shape]-?: K extends keyof Row ? K : ["missing-in-TASK_SELECT", K];
+};
+
+export const EXPORT_TASK_FIELDS = {
+  id: "id",
+  title: "title",
+  description: "description",
+  status: "status",
+  startedAt: "startedAt",
+  endedAt: "endedAt",
+  elapsedSeconds: "elapsedSeconds",
+  completionOutput: "completionOutput",
+  cancellationReason: "cancellationReason",
+  logNotes: "logNotes",
+  subtasks: "subtasks",
+  project: "project",
+} satisfies FieldProvenance<ExportTaskRecord, ExportTask>;
+
+export const EXPORT_PROJECT_FIELDS = {
+  id: "id",
+  name: "name",
+  job: "job",
+} satisfies FieldProvenance<
+  ExportTaskRecord["project"],
+  Required<ExportTask>["project"]
+>;
+
+export const EXPORT_JOB_FIELDS = {
+  id: "id",
+  name: "name",
+} satisfies FieldProvenance<
+  NonNullable<ExportTaskRecord["project"]["job"]>,
+  NonNullable<Required<ExportTask>["project"]["job"]>
+>;
+
+export const EXPORT_SUBTASK_FIELDS = {
+  id: "id",
+  title: "title",
+  isCompleted: "isCompleted",
+} satisfies FieldProvenance<
+  ExportTaskRecord["subtasks"][number],
+  Required<ExportTask>["subtasks"][number]
+>;
+
 export const ATTENDANCE_SELECT = {
   id: true,
   jobId: true,
@@ -73,7 +154,17 @@ export type ExportAttendanceRecord = Prisma.JobAttendanceGetPayload<{
   select: typeof ATTENDANCE_SELECT;
 }>;
 
-/** Resolved UTC-bounded export window plus the `YYYY-MM-DD` labels used in titles. */
+/**
+ * Resolved export window plus the `YYYY-MM-DD` labels used in titles (FL-07).
+ *
+ * `startDate`/`endDate` are *local calendar days*; `startDateObj`/`endDateObj`
+ * are the UTC-absolute instants that bracket them (`localDayWindow`), so a
+ * window query, the day groups built from the same rows, and the attendance day
+ * windows are all derived from one convention. They are deliberately *not* UTC
+ * midnights: parsing a local label as `…T00:00:00Z` shifted every non-UTC
+ * deployment's "today" by the zone offset and split tasks between the filter
+ * that fetched them and the key they were grouped under.
+ */
 export type ExportDateWindow = {
   startDate: string;
   endDate: string;
@@ -149,22 +240,21 @@ export function resolveExportDateWindow(input: {
     }
   }
 
-  // Bounds are UTC so the window is the same calendar span regardless of the
-  // server's timezone. The NaN guard is defensive: `exportQuerySchema`
-  // regex-validates `YYYY-MM-DD` upstream, but this module is also callable
-  // directly (and unit-tested that way).
-  const startDateObj = new Date(`${startDate}T00:00:00Z`);
-  const endDateObj = new Date(`${endDate}T23:59:59.999Z`);
-  if (Number.isNaN(startDateObj.getTime()) || Number.isNaN(endDateObj.getTime())) {
+  // FL-07: the labels name LOCAL calendar days, so their bounds are the local
+  // midnight instants from the shared helper — never `…T00:00:00Z` (which read a
+  // local label back as UTC and shifted the window by the zone offset). The null
+  // check is defensive: `exportQuerySchema` regex-validates `YYYY-MM-DD`
+  // upstream, but this module is also callable directly (and unit-tested that
+  // way), and `localDayWindow` rejects a label that is not a real calendar day.
+  const bounds = localDayWindow(startDate, endDate);
+  if (!bounds) {
     throw new HttpError(400, "Invalid date format");
   }
+  const { start: startDateObj, end: endDateObj, spanDays } = bounds;
   if (startDateObj > endDateObj) {
     throw new HttpError(400, "Start date cannot be after end date");
   }
-  if (
-    endDateObj.getTime() - startDateObj.getTime() >
-    MAX_EXPORT_SPAN_DAYS * 24 * 60 * 60 * 1000
-  ) {
+  if (spanDays > MAX_EXPORT_SPAN_DAYS) {
     throw new HttpError(
       400,
       `Export range exceeds the maximum of ${MAX_EXPORT_SPAN_DAYS} days.`,
@@ -234,12 +324,23 @@ export function fetchExportTasks(
   projectIds: number[],
 ): Promise<ExportTaskRecord[]> {
   return withQueryTimeout(
-    () =>
-      prisma.task.findMany({
+    async () => {
+      const rows = await prisma.task.findMany({
         where: buildTaskWhereInput(window, jobIds, projectIds),
         select: TASK_SELECT,
         orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
-      }),
+        // PF-02: read one row past the ceiling so "too many" is detected without
+        // a second counting query.
+        take: MAX_EXPORT_ROWS + 1,
+      });
+      if (rows.length > MAX_EXPORT_ROWS) {
+        throw new HttpError(
+          400,
+          `Export matches more than ${MAX_EXPORT_ROWS} tasks. Narrow the date range or the job/project filters.`,
+        );
+      }
+      return rows;
+    },
     { label: "export task fetch", timeoutMs: EXPORT_QUERY_TIMEOUT_MS },
   );
 }
@@ -249,12 +350,23 @@ export function fetchAttendanceRecords(
   jobIds: number[],
 ): Promise<ExportAttendanceRecord[]> {
   return withQueryTimeout(
-    () =>
-      prisma.jobAttendance.findMany({
+    async () => {
+      const rows = await prisma.jobAttendance.findMany({
         where: buildAttendanceWhereInput(window, jobIds),
         select: ATTENDANCE_SELECT,
         orderBy: { checkInTime: "asc" },
-      }),
+        // PF-02: same ceiling as tasks — a truncated Work Time Summary would
+        // understate the total it prints, so it is refused, not clipped.
+        take: MAX_EXPORT_ROWS + 1,
+      });
+      if (rows.length > MAX_EXPORT_ROWS) {
+        throw new HttpError(
+          400,
+          `Export matches more than ${MAX_EXPORT_ROWS} attendance rows. Narrow the date range or the job filters.`,
+        );
+      }
+      return rows;
+    },
     { label: "export attendance fetch", timeoutMs: EXPORT_QUERY_TIMEOUT_MS },
   );
 }

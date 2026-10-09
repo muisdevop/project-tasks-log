@@ -10,6 +10,12 @@ import { REPORT_STYLES } from "@/lib/export-html-styles";
  * document used both as the PDF source and as the HTML download served when
  * Chromium is unavailable. Nothing here imports Prisma, the HTTP layer or
  * Puppeteer, which makes every branch unit-testable.
+ *
+ * PF-02: the document is emitted as an *iterator of chunks*
+ * (`reportHtmlChunks`) and `buildReportHtml` is that iterator joined, so the two
+ * renderings can never disagree. The route streams the iterator for the HTML
+ * fallback — the bulk of a report is the grouped task cards, and those now go
+ * out one section at a time instead of being concatenated into one giant string.
  */
 
 /** A row of the work-time table. */
@@ -155,43 +161,61 @@ function renderJobBlock(job: {
   `;
 }
 
-/** Grouped rows -> document body sections; the shape differs per grouping. */
-export function renderGroupedContent(grouping: ExportGrouping): string {
+/**
+ * Grouped rows -> document body sections as separate chunks; the shape differs
+ * per grouping. Chunk boundaries are chosen so that the *largest* part of the
+ * report — the task cards — is what gets split (PF-02): one chunk per date
+ * section, per job and, inside a date section, per job block; one chunk per
+ * project plus one per task card. `renderGroupedContent` is this generator
+ * joined, so the streamed and buffered renderings are the same bytes.
+ */
+export function* renderGroupedContentChunks(
+  grouping: ExportGrouping,
+): Generator<string> {
   if (grouping.kind === "date") {
-    return Object.values(grouping.groups)
-      .map(
-        (dateGroup) => `
+    for (const dateGroup of Object.values(grouping.groups)) {
+      yield `
           <div class="date-section">
             <div class="date-header">${escapeHtml(dateGroup.date)}</div>
 
-            ${Object.values(dateGroup.jobs)
-              .map((job) => renderJobBlock(job))
-              .join("")}
+            `;
+      for (const job of Object.values(dateGroup.jobs)) {
+        yield renderJobBlock(job);
+      }
+      yield `
           </div>
-        `,
-      )
-      .join("");
+        `;
+    }
+    return;
   }
 
   if (grouping.kind === "job") {
-    return Object.values(grouping.groups)
-      .map((job) => renderJobBlock(job))
-      .join("");
+    for (const job of Object.values(grouping.groups)) {
+      yield renderJobBlock(job);
+    }
+    return;
   }
 
-  return Object.values(grouping.groups)
-    .map(
-      (project) => `
+  for (const project of Object.values(grouping.groups)) {
+    yield `
           <div class="project-section-primary">
             <div class="project-header-primary">
               ${escapeHtml(project.name)}
               ${project.job ? ` <span class="job-name">(${escapeHtml(project.job.name)})</span>` : ""}
             </div>
-            ${project.tasks.map((task) => renderTaskCard(task)).join("")}
+            `;
+    for (const task of project.tasks) {
+      yield renderTaskCard(task);
+    }
+    yield `
           </div>
-        `,
-    )
-    .join("");
+        `;
+  }
+}
+
+/** Grouped rows -> document body sections; the shape differs per grouping. */
+export function renderGroupedContent(grouping: ExportGrouping): string {
+  return Array.from(renderGroupedContentChunks(grouping)).join("");
 }
 
 /** Work-time table; empty input renders nothing at all (no heading). */
@@ -262,11 +286,15 @@ export function renderSummary(totals: ReportTotals): string {
   `;
 }
 
-/** Full standalone report document — the PDF source and the HTML fallback. */
-export function buildReportHtml(input: ReportHtmlInput): string {
+/**
+ * The report document as an iterator of strings — the streaming unit for the
+ * HTML fallback (PF-02). Nothing is concatenated beyond the current chunk, so
+ * peak memory is one section instead of the whole document.
+ */
+export function* reportHtmlChunks(input: ReportHtmlInput): Generator<string> {
   const generatedOn = (input.generatedOn ?? new Date()).toLocaleString();
 
-  return `
+  yield `
     <!DOCTYPE html>
     <html>
     <head>
@@ -284,7 +312,11 @@ export function buildReportHtml(input: ReportHtmlInput): string {
 
       ${renderAttendanceSection(input.attendance)}
 
-      ${renderGroupedContent(input.grouping)}
+      `;
+
+  yield* renderGroupedContentChunks(input.grouping);
+
+  yield `
 
       <div class="footer">
         GID Task Flow - Activity Report
@@ -292,4 +324,38 @@ export function buildReportHtml(input: ReportHtmlInput): string {
     </body>
     </html>
   `;
+}
+
+/** Full standalone report document — the PDF source and the HTML fallback. */
+export function buildReportHtml(input: ReportHtmlInput): string {
+  return Array.from(reportHtmlChunks(input)).join("");
+}
+
+/**
+ * Turn a chunk iterator into a Web `ReadableStream` the route can answer with,
+ * following the streaming pattern in
+ * `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/route.md`
+ * (`new Response(stream)` over an iterator's `next()`). Encoding happens per
+ * chunk, so a consumer that never reads the tail costs nothing (PF-02).
+ */
+export function htmlStreamFromChunks(
+  chunks: Iterable<string>,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const iterator = chunks[Symbol.iterator]();
+
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const next = iterator.next();
+      if (next.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(next.value));
+    },
+    cancel(reason) {
+      // Client hung up: stop generating the rest of the document.
+      iterator.return?.(reason);
+    },
+  });
 }

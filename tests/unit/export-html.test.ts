@@ -12,12 +12,15 @@ import {
   escapeHtml,
   formatDuration,
   formatTime,
+  htmlStreamFromChunks,
   renderAttendanceSection,
   renderGroupedContent,
   renderSummary,
   renderTaskCard,
+  reportHtmlChunks,
   stripHtmlToText,
   type AttendanceRow,
+  type ReportHtmlInput,
 } from "@/lib/export-html";
 
 function makeTask(overrides: Partial<ExportTask> = {}): ExportTask {
@@ -327,5 +330,98 @@ describe("buildReportHtml", () => {
       generatedOn: new Date(2026, 2, 30),
     });
     expect(html).not.toContain("attendance-section");
+  });
+});
+
+describe("reportHtmlChunks / htmlStreamFromChunks (PF-02)", () => {
+  const input: ReportHtmlInput = {
+    grouping: groupExportTasks(
+      [
+        makeTask(),
+        makeTask({
+          id: 2,
+          title: "Beta task",
+          endedAt: new Date(2026, 2, 31, 17, 0, 0),
+          project: { id: 11, name: "Beta", job: { id: 101, name: "Client B" } },
+        }),
+        makeTask({
+          id: 3,
+          title: "Gamma task",
+          status: "cancelled",
+          endedAt: new Date(2026, 2, 31, 18, 0, 0),
+        }),
+      ],
+      "date",
+    ),
+    title: "Activity Report - 2026-03-30 to 2026-03-31 (Grouped by Date)",
+    totals: {
+      totalTasks: 3,
+      totalCompleted: 2,
+      totalCancelled: 1,
+      totalElapsedSeconds: 5_400,
+    },
+    attendance: [makeAttendanceRow()],
+    generatedOn: new Date(2026, 2, 31, 18, 0, 0),
+  };
+
+  /** Read a `ReadableStream<Uint8Array>` to the end, as a client would. */
+  async function collect(stream: ReadableStream<Uint8Array>): Promise<string> {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    let chunks = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks += 1;
+      text += decoder.decode(value, { stream: true });
+    }
+    reader.releaseLock();
+    expect(chunks, "chunk count").toBeGreaterThan(0);
+    return text;
+  }
+
+  it("joins to exactly the buffered document, for every grouping", () => {
+    const rows = [makeTask(), makeTask({ id: 2, title: "Beta task", status: "cancelled" })];
+    for (const by of ["date", "job", "project"] as const) {
+      const perGrouping: ReportHtmlInput = { ...input, grouping: groupExportTasks(rows, by) };
+      expect(Array.from(reportHtmlChunks(perGrouping)).join("")).toBe(
+        buildReportHtml(perGrouping),
+      );
+    }
+  });
+
+  it("streams the body so the assembled document equals the full report", async () => {
+    const chunks = Array.from(reportHtmlChunks(input));
+    // The whole point of PF-02: the bulk (grouped sections) arrives as several
+    // pieces, never as one pre-concatenated string.
+    expect(chunks.length).toBeGreaterThan(4);
+    expect(chunks.some((chunk) => chunk.includes("date-section"))).toBe(true);
+
+    const body = await collect(htmlStreamFromChunks(chunks));
+    expect(body).toBe(buildReportHtml(input));
+    expect(body.startsWith("\n    <!DOCTYPE html>")).toBe(true);
+    expect(body.trimEnd().endsWith("</html>")).toBe(true);
+  });
+
+  it("does not generate the rest of the document once the reader cancels", async () => {
+    const seen: string[] = [];
+    const counted = (function* () {
+      for (const chunk of reportHtmlChunks(input)) {
+        seen.push(chunk);
+        yield chunk;
+      }
+    })();
+
+    const stream = htmlStreamFromChunks(counted);
+    const reader = stream.getReader();
+    await reader.read();
+    await reader.read();
+    const generatedAfterTwo = seen.length;
+    await reader.cancel("client hung up");
+    // Let the pull loop settle; nothing more may have been generated.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seen.length).toBe(generatedAfterTwo);
+    expect(generatedAfterTwo).toBeLessThan(Array.from(reportHtmlChunks(input)).length);
   });
 });

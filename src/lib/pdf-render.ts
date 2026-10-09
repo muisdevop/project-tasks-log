@@ -57,7 +57,20 @@ export function buildPuppeteerLaunchOptions(
   const options: PuppeteerLaunchOptions = {
     headless: true,
     protocolTimeout: 60_000,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      // AR-06, proven by the AGENTS.md docker gate on 2026-10-09: Alpine Chromium
+      // inside the image has no usable GPU/EGL, so the GPU process died during
+      // init (`eglInitialize … EGL_NOT_INITIALIZED`) and Puppeteer's CDP session
+      // never became ready — `ProtocolError: Network.enable timed out` — which
+      // made every container export silently fall back to HTML. `--disable-gpu`
+      // is what makes the shipped PDF path actually work;
+      // `--disable-dev-shm-usage` covers the 64 MB `/dev/shm` a container gets by
+      // default, which a long report can otherwise exhaust mid-print.
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+    ],
   };
 
   const executablePath = resolveChromiumExecutablePath(env);
@@ -65,7 +78,16 @@ export function buildPuppeteerLaunchOptions(
   return options;
 }
 
-/** Render the report document to PDF bytes. Throws when the browser step fails. */
+/**
+ * Render the report document to PDF bytes. Throws when the browser step fails.
+ *
+ * PF-02: this path is buffered on purpose. `page.setContent()` needs the whole
+ * document and Chromium's `page.pdf()` resolves with the complete file, so there
+ * is no incremental form of a PDF to stream. What the route does instead is keep
+ * the source HTML alive only as a temporary argument, and the copy below is the
+ * one `Response` body type the platform accepts (`BodyInit`), not a re-layout of
+ * the report.
+ */
 export async function renderPdfBytes(
   html: string,
   env: NodeJS.ProcessEnv = process.env,

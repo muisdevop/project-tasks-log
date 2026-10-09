@@ -10,12 +10,17 @@ import { HttpError } from "@/lib/api-error";
 import { prisma } from "@/lib/prisma";
 import type { ExportTask } from "@/lib/export-helpers";
 import {
+  MAX_EXPORT_ROWS,
   MAX_EXPORT_SPAN_DAYS,
   buildAttendanceWhereInput,
   buildTaskWhereInput,
   collectGroupedTasks,
   computeAttendanceSeconds,
   computeTaskTotals,
+  EXPORT_JOB_FIELDS,
+  EXPORT_PROJECT_FIELDS,
+  EXPORT_SUBTASK_FIELDS,
+  EXPORT_TASK_FIELDS,
   fetchAttendanceRecords,
   fetchExportTasks,
   groupExportTasks,
@@ -124,8 +129,12 @@ describe("resolveExportDateWindow", () => {
     const result = resolveExportDateWindow({ timePeriod: "day" });
     expect(result.startDate).toBe("2026-07-04");
     expect(result.endDate).toBe("2026-07-04");
-    expect(result.startDateObj.toISOString()).toBe("2026-07-04T00:00:00.000Z");
-    expect(result.endDateObj.toISOString()).toBe("2026-07-04T23:59:59.999Z");
+    // FL-07: the bounds bracket the LOCAL calendar day, they are not UTC
+    // midnights any more. Pinned against locally-constructed instants so the
+    // assertion is true in every zone; tests/unit/export-timezone.test.ts pins
+    // the exact per-zone offsets (including a DST day).
+    expect(result.startDateObj).toEqual(new Date(2026, 6, 4, 0, 0, 0, 0));
+    expect(result.endDateObj).toEqual(new Date(2026, 6, 4, 23, 59, 59, 999));
   });
 
   it("derives week and month windows", () => {
@@ -268,7 +277,34 @@ describe("fetch helpers", () => {
         subtasks: { select: { id: true, title: true, isCompleted: true } },
       }),
       orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
+      // PF-02: one row past the ceiling is read so "too many" is detected.
+      take: MAX_EXPORT_ROWS + 1,
     });
+  });
+
+  it("refuses a task scan past the row ceiling instead of materialising it", async () => {
+    // The stub returns ceiling+1 rows, i.e. exactly what the `take` lets through.
+    mockedPrisma.task.findMany.mockResolvedValue(
+      Array.from({ length: MAX_EXPORT_ROWS + 1 }, () => makeTaskRecord()),
+    );
+
+    await expect(fetchExportTasks(makeWindow(), [], [])).rejects.toThrow(
+      `Export matches more than ${MAX_EXPORT_ROWS} tasks. Narrow the date range or the job/project filters.`,
+    );
+    // A ceiling breach is a client-fixable 400, never a 500.
+    mockedPrisma.task.findMany.mockResolvedValue(
+      Array.from({ length: MAX_EXPORT_ROWS + 1 }, () => makeTaskRecord()),
+    );
+    await expect(fetchExportTasks(makeWindow(), [], [])).rejects.toBeInstanceOf(HttpError);
+  });
+
+  it("still returns a report that sits exactly on the ceiling", async () => {
+    mockedPrisma.task.findMany.mockResolvedValue(
+      Array.from({ length: MAX_EXPORT_ROWS }, () => makeTaskRecord()),
+    );
+    await expect(fetchExportTasks(makeWindow(), [], [])).resolves.toHaveLength(
+      MAX_EXPORT_ROWS,
+    );
   });
 
   it("queries attendance ordered by check-in", async () => {
@@ -277,7 +313,17 @@ describe("fetch helpers", () => {
 
     await expect(fetchAttendanceRecords(makeWindow(), [])).resolves.toEqual(rows);
     expect(mockedPrisma.jobAttendance.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { checkInTime: "asc" } }),
+      expect.objectContaining({ orderBy: { checkInTime: "asc" }, take: MAX_EXPORT_ROWS + 1 }),
+    );
+  });
+
+  it("refuses an attendance scan past the row ceiling", async () => {
+    mockedPrisma.jobAttendance.findMany.mockResolvedValue(
+      Array.from({ length: MAX_EXPORT_ROWS + 1 }, () => makeAttendanceRecord()),
+    );
+
+    await expect(fetchAttendanceRecords(makeWindow(), [])).rejects.toThrow(
+      `Export matches more than ${MAX_EXPORT_ROWS} attendance rows. Narrow the date range or the job filters.`,
     );
   });
 });
@@ -353,6 +399,38 @@ describe("grouping and totals", () => {
     // Prisma rows must stay structurally compatible.
     const row: ExportTask = makeTaskRecord();
     expect(row.project.job?.name).toBe("Client A");
+  });
+});
+
+describe("AR-05 typing seam", () => {
+  it("names every field the report contract reads off the Prisma row", () => {
+    // The real guarantee is compile-time: `satisfies FieldProvenance<…>` in
+    // `src/lib/export-data.ts` fails `tsc --noEmit` if `TASK_SELECT` (or the
+    // schema) drops one of these columns, even though `ExportTask` marks several
+    // of them optional. These assertions repeat the claim at runtime so a row
+    // fixture that stops carrying a field the template reads is caught here too.
+    expect(Object.values(EXPORT_TASK_FIELDS)).toEqual([
+      "id",
+      "title",
+      "description",
+      "status",
+      "startedAt",
+      "endedAt",
+      "elapsedSeconds",
+      "completionOutput",
+      "cancellationReason",
+      "logNotes",
+      "subtasks",
+      "project",
+    ]);
+    expect(Object.values(EXPORT_PROJECT_FIELDS)).toEqual(["id", "name", "job"]);
+    expect(Object.values(EXPORT_JOB_FIELDS)).toEqual(["id", "name"]);
+    expect(Object.values(EXPORT_SUBTASK_FIELDS)).toEqual(["id", "title", "isCompleted"]);
+
+    const row = makeTaskRecord();
+    for (const name of Object.values(EXPORT_TASK_FIELDS)) {
+      expect(row, name).toHaveProperty(name);
+    }
   });
 });
 

@@ -12,7 +12,8 @@ import {
   resolveExportDateWindow,
   resolveReportNaming,
 } from "@/lib/export-data";
-import { buildReportHtml } from "@/lib/export-html";
+import { buildReportHtml, htmlStreamFromChunks, reportHtmlChunks } from "@/lib/export-html";
+import type { ReportHtmlInput } from "@/lib/export-html";
 import { renderPdfBytes } from "@/lib/pdf-render";
 
 /**
@@ -22,6 +23,10 @@ import { renderPdfBytes } from "@/lib/pdf-render";
  * codes, `Content-Disposition` and the concurrency guard. Aggregation is in
  * `@/lib/export-data`, the document template in `@/lib/export-html`, and the
  * Chromium step in `@/lib/pdf-render`.
+ *
+ * PF-02: the HTML fallback is *streamed* chunk by chunk from the template
+ * iterator; the PDF response stays buffered because Chromium itself only hands
+ * back a complete file.
  */
 
 export const dynamic = "force-dynamic";
@@ -108,15 +113,21 @@ export async function GET(request: Request) {
       endDate: window.endDate,
     });
 
-    const htmlContent = buildReportHtml({
+    const report: ReportHtmlInput = {
       grouping,
       title: naming.title,
       totals,
       attendance: attendanceRecords,
-    });
+    };
 
     try {
-      const pdfBuffer = await renderPdfBytes(htmlContent);
+      // PF-02, deliberately still buffered: `page.setContent()` needs the whole
+      // document and `page.pdf()` gives back the complete file as one buffer, so
+      // there is nothing to stream on this path. What is *not* kept alive any
+      // more is the HTML next to the PDF — `buildReportHtml(...)` is passed as a
+      // temporary argument and becomes collectable as soon as the bytes return,
+      // instead of being held in a route-level `const` for the fallback branch.
+      const pdfBuffer = await renderPdfBytes(buildReportHtml(report));
       return downloadResponse(
         Buffer.from(pdfBuffer),
         "application/pdf",
@@ -126,9 +137,12 @@ export async function GET(request: Request) {
       console.error("Puppeteer PDF generation failed:", puppeteerError);
 
       // Chromium is unavailable in slim images: serve the same document as a
-      // downloadable HTML report instead of failing the export.
+      // downloadable HTML report instead of failing the export. The document is
+      // generated section by section and pushed through a `ReadableStream`
+      // (PF-02), so a month-long report costs one chunk of memory at a time
+      // instead of a second full string plus its encoded copy.
       return downloadResponse(
-        htmlContent,
+        htmlStreamFromChunks(reportHtmlChunks(report)),
         "text/html",
         `${naming.filenameBase}.html`,
       );

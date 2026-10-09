@@ -149,6 +149,41 @@ sequence is a convention, and `docs/CONTRIBUTING.md` repeats it.
 7. **Single-process state.** Rate-limit buckets, idempotency entries and the
    stats cache live in memory; they are not shared and do not survive a restart.
 
+## 5. Time and timezones (FL-07)
+
+One rule, stated once and enforced by `src/lib/business-time.ts`:
+
+- An **instant** is a UTC-absolute `Date`. That is what Prisma columns store,
+  what `gte`/`lte` compare, and what `toISOString()` serialises in API bodies.
+- A **`YYYY-MM-DD` label** (`startDate`/`endDate`, the `from`/`to` list filters, a
+  day group key) always names a **local** calendar day in the server's timezone —
+  `TZ` when set, otherwise the container's zone, which is UTC unless the operator
+  configures it. A label never means "UTC midnight to UTC midnight".
+- **Day bucketing and day bounds come from the same place**: `startOfLocalDay` /
+  `endOfLocalDay` / `localDayWindow` (bounds) and `localDayKey` (the bucket
+  label), which are the local-field convention `workingTimeDiffSeconds` already
+  used for the work-day windows. Bounds are "next local midnight minus 1 ms",
+  not a stamped `23:59:59.999`, so a 23- or 25-hour DST day is covered exactly —
+  and `[start, end]` selects the same storable instants as the attendance route's
+  `[local midnight, next local midnight)` (`dayBounds` in
+  `src/app/api/attendance/route.ts`, `dateWindowFilter` in `src/lib/validators.ts`).
+
+The bug this closes: the export used to compute its labels from local fields and
+then re-parse them as UTC (`new Date("2026-03-31T00:00:00Z")` in
+`resolveExportDateWindow`), while rows were grouped on local day keys. Outside
+UTC the "today" window slid by the zone offset, so an early shift was fetched but
+grouped on the previous day, or dropped from the report entirely.
+`tests/unit/export-timezone.test.ts` pins the rule under `UTC`, `Asia/Jakarta`
+(fixed +07) and `America/Los_Angeles` (DST) by mutating `process.env.TZ`, and
+asserts the export window, the export day groups and the attendance window
+select the same instants; `localDateKey` (used by the grouping helpers in
+`src/lib/export-helpers`) is checked against `localDayKey` so the two cannot
+drift silently.
+
+Rendering is local by design: `formatTime`/`buildReportHtml` use
+`toLocaleString()`, and elapsed arithmetic never crosses a timezone boundary
+inside a single request.
+
 ---
 
 ## ADR-001: The product is single-user by design
