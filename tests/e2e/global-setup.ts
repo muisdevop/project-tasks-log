@@ -296,6 +296,47 @@ async function seed() {
   console.log(`[e2e] seeded job #${job.id} / project #${project.id} with one in-progress task at ${BASE_URL}`);
 }
 
+/**
+ * The page routes the matrix navigates to, compiled before any test clock starts.
+ *
+ * `next dev` compiles a route on its first request, so without this warm-up that
+ * compile is billed to whichever browser test happened to arrive first. It showed up
+ * as `Test timeout of 90000ms exceeded` on `[webkit-tablet] /projects` in a full
+ * 9-project run while the same test took 3s in isolation — a harness cost, not an
+ * app defect, and one that `retries: 1` on CI would simply hide. Warming here also
+ * puts a number on the compile: a route that ever needs more than
+ * COMPILE_BUDGET_MS fails setup with its own time rather than leaving a mystery.
+ */
+const PAGE_ROUTES = [
+  "/dashboard",
+  "/jobs",
+  "/projects",
+  "/settings",
+  "/admin",
+  "/export",
+  `/projects/{projectId}/tasks`,
+];
+const COMPILE_BUDGET_MS = 60_000;
+
+async function warmRoutes(cookie: string, projectId: number) {
+  const slow: string[] = [];
+  for (const template of PAGE_ROUTES) {
+    const pathname = template.replace("{projectId}", String(projectId));
+    const started = Date.now();
+    const response = await fetch(`${BASE_URL}${pathname}`, { headers: { Cookie: cookie } });
+    await response.text();
+    const ms = Date.now() - started;
+    console.log(`[e2e] warmed ${pathname} in ${ms}ms (HTTP ${response.status})`);
+    if (ms > COMPILE_BUDGET_MS) slow.push(`${pathname}: ${ms}ms > ${COMPILE_BUDGET_MS}ms`);
+  }
+  if (slow.length) {
+    throw new Error(
+      `A page route took longer than the compile budget to serve cold: ${slow.join(", ")}. ` +
+        `Any browser test that reached it first would have timed out at Playwright's 90s.`,
+    );
+  }
+}
+
 export default async function globalSetup() {
   fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
   await removeDatabase();
@@ -306,6 +347,8 @@ export default async function globalSetup() {
   try {
     await waitForHealth(server);
     await seed();
+    const { projectId } = JSON.parse(fs.readFileSync(SEED_PATH, "utf8")) as { projectId: number };
+    await warmRoutes(await login(), projectId);
   } catch (error) {
     server.stop();
     throw error;

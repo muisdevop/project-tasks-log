@@ -31,7 +31,45 @@ with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
   `axe-core` is now a declared devDependency rather than a transitive of
   `eslint-plugin-jsx-a11y`.
 
+- The 3 x 3 Playwright matrix now runs in CI. `.github/workflows/ci.yml` installed
+  `@playwright/test` and had a `tests/e2e/` directory, but no job ever executed it, so
+  every "128 scenarios green" number in the audit was a single local measurement
+  nobody else could repeat. A `Responsive + axe matrix` job now runs
+  `npx playwright test` (all nine projects) and uploads the HTML report on failure.
+  The re-audit that found this also found the matrix's first local red —
+  `[webkit-tablet] /projects` hit Playwright's 90s once and passed in 3s in isolation
+  — so `tests/e2e/global-setup.ts` now requests every page route once before the
+  tests start. `next dev` compiles a route on its first request, and that compile was
+  being billed to whichever browser arrived first; warm-up moves it outside every test
+  budget and prints the per-route time, and setup now fails with that number if a
+  route ever takes more than 60s to serve cold.
+- An engines gate that runs in the runtime it is about. `engines` ranges are now
+  checked by `npm ci --include=dev` executed inside the digest-pinned base image,
+  because `.npmrc`'s `engine-strict=true` makes an engines violation a hard refusal on
+  Node 20 while a Node 24 developer machine only warns — the exact asymmetry that
+  made RA-09 invisible locally.
+
 ### Fixed
+- SEC-01's accepted-risk rationale was wrong, and the fix it argued against was
+  available. The workbook and `docs/security.md` stated that no advisory had a
+  non-breaking remedy and that npm's Prisma fix was a downgrade to `prisma@6.19.3`;
+  that had been measured with `npm audit fix --force`. Plain `npm audit fix` takes
+  `prisma` 7.5.0 → 7.10.0, `puppeteer` 24.40.0 → 24.43.1 and `@tiptap/*`
+  3.21.0 → 3.31.4 as same-major upgrades, including `prosemirror-view` 1.42.6 (above
+  the paste-XSS fix the old text had rationalised). The runtime tree went from
+  31 advisories (9 moderate, 22 high) to 20 (7 moderate, 13 high), and the full tree
+  from 43 to 26, with no declared range in `package.json` moving. Taking `prisma@7.10.0`
+  needed one override — its newer `@prisma/dev` pulls `@prisma/streams-local`, whose
+  engines are `>=22.0.0` in *every* published version, which `engine-strict` refuses
+  on the Node 20 image and CI — so `@prisma/dev` is pinned back to the `0.20.0` this
+  project already shipped with, with the `hono`/`valibot` leaves it pins raised to
+  their patched versions. What still has no non-major remedy is now named per package
+  from npm's own `fixAvailable` data instead of inferred.
+- `puppeteer@24.43.1` removed `networkidle0` from `page.setContent`'s `waitUntil`
+  union; `src/lib/pdf-render.ts` waits for `load` now, which for a document handed
+  over whole by `setContent()` already means every referenced resource has finished.
+  `npm run typecheck` is what caught it, and the unit test that pins the call was
+  updated with it.
 - The toolchain now refuses a dependency that cannot run on the shipped Node (RA-09).
   CI caught what this host could not: `jsdom@30` declares `engines.node` as
   `^22.22.2 || ^24.15.0 || >=26.0.0`, so the new component suite died in CI's forked

@@ -42,12 +42,14 @@ jobs:
         # the toolchain.
         run: npm ci --include=dev
       - name: Dependency advisory posture (SEC-01)
-        # SEC-01 is an accepted risk, and an accepted risk that nobody re-measures
-        # is just an untracked one. This reports the runtime-tree count on every
-        # run without failing the pipeline: the fixes npm offers are a
-        # semver-major Prisma downgrade (breaks driver adapters and db:parity) and
-        # a Puppeteer 25 major, so they are scheduled upgrade work, not something
-        # to force in a PR. docs/security.md section 8 carries the full rationale.
+        # SEC-01 is a partly-remediated risk with the rest accepted in writing, and an
+        # accepted risk that nobody re-measures is just an untracked one. This reports
+        # both counts on every run without failing the pipeline: after `npm audit fix`
+        # took everything same-major, the 20 advisories left in the runtime tree have
+        # only semver-major remedies (prisma 6.19.3 downgrades the client and drops
+        # driver adapters, puppeteer 25.13.0 and @tailwindcss/typography 0.5.4 are
+        # majors), so they are scheduled upgrade work, not something to force into a
+        # PR. docs/security.md section 8 carries the rationale and the numbers.
         continue-on-error: true
         run: |
           set +e
@@ -59,6 +61,18 @@ jobs:
           # silently prints the runtime number twice. Ask for dev explicitly.
           npm audit --include=dev 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
           exit 0
+      - name: Engines sweep over the installed tree (RA-09)
+        # Blocks the pipeline: an `engines.node` range that excludes the runtime the
+        # image ships on is a toolchain defect, and this host mix (developer on a newer
+        # Node than the base image) is exactly why npm's default warning behaviour is
+        # not enough. The control case is in the script's header.
+        run: npm run engines:check
+      - name: engine-strict install probe in the base image (RA-09)
+        # Runs the real `npm ci --include=dev` inside `node:20-alpine3.20`, where
+        # `.npmrc`'s `engine-strict=true` turns the same violation into a refusal at
+        # install time. Reading ranges and enforcing them are different checks: this is
+        # the one that reproduces what a deploy actually does.
+        run: npm run engines:probe
       - name: Compose files parse (Docker / Coolify deploy path)
         # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
         # `docker compose config`, so when the demo secrets were removed the dev
@@ -95,6 +109,37 @@ jobs:
         run: npm run build
       - name: Bundle budget
         run: npm run bundle:budget
+
+  e2e:
+    name: Responsive + axe matrix (3 engines x 3 viewports)
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      # TC-04 follow-up found by the 2026-10-10 re-audit: this pipeline installed
+      # @playwright/test but never ran it, so every "the 3x3 matrix is green" claim
+      # in the audit was a local, unrepeatable measurement - and one local run had a
+      # 90s timeout that CI could not have caught. `tests/e2e/global-setup.ts` owns
+      # its own dev server, port and SQLite file, so this job needs no database or
+      # secret setup beyond the toolchain.
+      - name: Install
+        run: npm ci --include=dev
+      - name: Generate Prisma client
+        run: npx prisma generate --schema prisma/schema.sqlite.prisma
+      - name: Install browsers
+        run: npm run test:e2e:install
+      - name: Matrix (128 scenarios, axe on the 3 desktop engines)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
 
   docker-build:
     name: Build Docker image
