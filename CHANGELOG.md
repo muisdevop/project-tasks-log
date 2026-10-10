@@ -70,6 +70,18 @@ with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
   over whole by `setContent()` already means every referenced resource has finished.
   `npm run typecheck` is what caught it, and the unit test that pins the call was
   updated with it.
+- The engines probe now installs where it will not leave debris behind (RA-12). It went
+  red on GitHub Actions for a reason that had nothing to do with `engines`: the install
+  wrote ~800 packages onto a bind mount as the container's root, so the script's own
+  cleanup trap failed as the runner user after `npm ci` had already succeeded. The same
+  script failed differently here, because a Git Bash `/tmp` is not the daemon's `/tmp` —
+  the bind source resolved inside the VM, the container saw an empty directory, and npm
+  reported a misleading "no package-lock.json". The manifests are mounted read-only and
+  the install runs in the image's own filesystem now, the host path is normalised first,
+  and a `PROBE_INPUT_MISSING` guard names the cause instead of npm's error. Both a
+  two-package fixture (installs, cleans up) and a `jsdom@30` fixture (refused with
+  `EBADENGINE` on `node v20.19.2 / npm 10.8.2`) were run against it, because a gate that
+  cannot fail proves nothing.
 - The toolchain now refuses a dependency that cannot run on the shipped Node (RA-09).
   CI caught what this host could not: `jsdom@30` declares `engines.node` as
   `^22.22.2 || ^24.15.0 || >=26.0.0`, so the new component suite died in CI's forked

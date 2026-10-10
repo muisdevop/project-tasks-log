@@ -300,7 +300,15 @@ for `npm audit --include=dev` explicitly, because the quality job exports
 the class rather than the individual case: the engines sweep over every installed
 `package.json`, and `npm ci --include=dev` executed *inside the pinned base image*, so
 an `engines` violation is caught as an install refusal on the runtime it applies to
-instead of as a red build minutes later. The remaining majors — `prisma` 7.x → the
+instead of as a red build minutes later. That probe installs into the image's own
+filesystem with the manifests mounted read-only rather than onto a bind mount: writing
+`node_modules` back as the container's root leaves the CI runner unable to delete the
+temp directory its own cleanup trap points at, and a host `/tmp` is not the daemon's
+`/tmp`, so the source path has to be normalised before Git Bash can see the input at
+all. Both were found by running the gate on two platforms instead of trusting one, and
+the probe carries its own control case — a `jsdom@30` fixture is refused with
+`EBADENGINE` on `node v20.19.2 / npm 10.8.2` — so it is demonstrably a gate, not a
+formality. The remaining majors — `prisma` 7.x → the
 puppeteer 25 line, then `@tiptap` — are scheduled upgrade work, each requiring
 `npm run db:parity`, the export integration tests and `npm run smoke:container` (which
 asserts the real PDF) to pass before it lands.
