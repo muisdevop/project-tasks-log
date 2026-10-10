@@ -111,7 +111,11 @@ export async function renderPdfStream(
   let printable: ReadableStream<Uint8Array>;
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0", timeout: 30_000 });
+    // `load` (not `networkidle0`): puppeteer 24.43 dropped the networkidle options
+    // from this type, and for a document handed over whole by `setContent()` the load
+    // event already means every referenced resource has finished — the extra idle
+    // window was waiting for nothing.
+    await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
     printable = await page.createPDFStream({
       format: "A4",
       printBackground: true,

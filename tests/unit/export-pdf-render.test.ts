@@ -195,7 +195,7 @@ describe("renderPdfStream", () => {
       buildPuppeteerLaunchOptions({ NODE_ENV: "production" }),
     );
     expect(mocks.setContent).toHaveBeenCalledWith("<html>report</html>", {
-      waitUntil: "networkidle0",
+      waitUntil: "load",
       timeout: 30_000,
     });
     expect(mocks.createPDFStream).toHaveBeenCalledWith(PDF_OPTIONS);

@@ -217,37 +217,67 @@ POSTs on jobs, projects, tasks, breaks, `breaks/log`, attendance and tokens;
 `/api/tokens` and `/api/admin/events` are in the generated contract, so
 `npm run docs:openapi:check` proves them (21 paths).
 
-## 8. Dependency advisories (SEC-01) — accepted, measured, and reported every run
+## 8. Dependency advisories (SEC-01) — remediated as far as the runtime allows, measured, reported every run
 
-`npm audit --omit=dev` on the `0.2.0` tip reports **32 advisories in the runtime
-tree (9 moderate, 23 high)**; the full tree including dev tooling reports 44.
-None has a fix that can be taken without breaking the product, so they are
-recorded here rather than "resolved" by a downgrade nobody reviewed:
+This section used to say that none of the advisories had "a fix that can be taken
+without breaking the product". **That was wrong, and the 2026-10-10 re-audit caught
+it**: the claim had been measured against `npm audit fix --force` (which does offer
+only the breaking downgrades) and then written as if it described `npm audit fix`.
+The non-major path was there all along and is now taken:
 
-- **The Prisma 7 chain dominates** (`prisma`, `@prisma/config`, `@prisma/dev`,
-  `@mrleebo/prisma-ast`, `chevrotain`/`@chevrotain/*`, `deepmerge-ts`, `effect`,
-  `valibot`, `lodash`, `mysql2`, `hono`/`@hono/node-server`). npm's proposed fix
-  is a **semver-major downgrade to `prisma@6.19.3`**, which removes driver-adapter
-  support and breaks the dual SQLite/Postgres schema setup and `npm run db:parity`
-  — a worse security posture, not a better one.
+| | runtime tree (`--omit=dev`) | full tree (`--include=dev`) |
+| --- | --- | --- |
+| before, at `2f1dd67` | 31 (9 moderate, 22 high) | 43 (1 low, 13 moderate, 29 high) |
+| after | **20 (7 moderate, 13 high)** | **26 (1 low, 7 moderate, 18 high)** |
+
+Same-major upgrades applied by `npm audit fix`: `prisma` 7.5.0 → **7.10.0**,
+`puppeteer`/`puppeteer-core` 24.40.0 → **24.43.1**, `@tiptap/*` 3.21.0 → **3.31.4**,
+`prosemirror-view` 1.41.7 → **1.42.6** (above the 1.42.3 paste-handling fix the old
+text had argued was impractical rather than available), plus `ws`, `lodash`,
+`effect`, `dompurify`, `valibot` and the `@prisma/*` chain. `package.json`'s declared
+ranges did not move; only the lockfile did.
+
+Two consequences had to be handled in code or config, not prose:
+
+- **`prisma@7.10.0` cannot simply be taken.** Its newer `@prisma/dev` depends on
+  `@prisma/streams-local`, and *every* published version of that package declares
+  `engines.node >=22.0.0` — including the one before it. On the Node 20.19.2 that the
+  digest-pinned image and CI run, `.npmrc`'s `engine-strict=true` turns that into a
+  refusal at install time (RA-09's whole point). The fix is an `overrides` entry
+  pinning `@prisma/dev` back to `0.20.0` — the version this project already shipped
+  with, which does not pull that package. `@prisma/dev` backs the `prisma dev`
+  command, which this product never invokes; the sweep over every installed
+  `package.json` reports 0 ranges excluding the shipped runtime again.
+- **`puppeteer@24.43.1` removed `networkidle0`** from `setContent`'s `waitUntil`
+  union, which `npm run typecheck` caught in `src/lib/pdf-render.ts`. It now waits for
+  `load`: for a document handed over whole by `setContent()`, `load` already means
+  every referenced resource has finished, so the idle window was waiting for nothing.
+  The unit test that pins that call was updated with it.
+
+What genuinely remains needs a semver-major and is accepted with rationale — npm's own
+`fixAvailable` data now says so per package rather than being inferred:
+
+- **The Prisma 7 chain** (`prisma`, `@prisma/config`, `@prisma/dev`,
+  `@mrleebo/prisma-ast`, `chevrotain`/`@chevrotain/*`, `deepmerge-ts`,
+  `lodash`, `mysql2`) reports its only remedy as a **downgrade to
+  `prisma@6.19.3`**, which removes driver-adapter support and breaks the dual
+  SQLite/Postgres schema setup and `npm run db:parity` — a worse security posture, not
+  a better one. Chevrotain's own patched line is 10 → 13, a major `@mrleebo/prisma-ast`
+  cannot take; that parser is what `prisma migrate deploy` uses at container start.
 - **The Puppeteer chain** (`puppeteer`, `puppeteer-core`, `@puppeteer/browsers`,
-  `extract-zip`) needs `puppeteer@25`, another major. Mitigating context: the
-  browser loads only locally generated report HTML through `page.setContent`,
-  navigates to no remote origin, runs `headless: true` with a 60-second protocol
-  timeout, and it runs inside a digest-pinned Alpine image whose Chromium package
-  comes from that pinned base. The launch uses
-  `--no-sandbox`/`--disable-setuid-sandbox`, which is the honest trade-off for
-  running Chromium as the non-root `node` user in a container and is why an
-  upstream Chromium advisory here is treated as materially exploitable rather
-  than academic.
-- **The rich-text chain** (`@tiptap/*`, `prosemirror-view`, `markdown-it`,
-  `linkify-it`, `dompurify`, `js-yaml`, `undici`, `ws`, `ip-address`, `basic-ftp`,
-  `defu`, `source-map-js`) is largely transitive under `@tiptap@3`. Note
-  `prosemirror-view <1.42.3` (paste-handling XSS): this app sanitises note HTML
-  with `isomorphic-dompurify` before it is stored or rendered, and the editor is
-  driven by the authenticated operator's own paste, so the practical exposure is
-  self-XSS in a single-user tool — not the multi-user stored-XSS the advisory
-  assumes.
+  `extract-zip`, `basic-ftp`, `get-uri`, `pac-proxy-agent`, `proxy-agent`) reports
+  `puppeteer@25.13.0`, a major. Mitigating context: the browser loads only locally
+  generated report HTML through `page.setContent`, navigates to no remote origin, runs
+  `headless: true` with a 60-second protocol timeout, and it runs inside a
+  digest-pinned Alpine image whose Chromium package comes from that pinned base. The
+  launch uses `--no-sandbox`/`--disable-setuid-sandbox`, which is the honest trade-off
+  for running Chromium as the non-root `node` user in a container and is why an
+  upstream Chromium advisory here is treated as materially exploitable rather than
+  academic.
+- **`@tailwindcss/typography`** (with `postcss-selector-parser` behind it) reports
+  `0.5.4`, a downgrade. The plugin only restyles the rendered note HTML, which
+  `isomorphic-dompurify` has already sanitised at write time and again at render, so
+  the input the advisory's XSS assumes is not what reaches it.
 
 One consequence of SEC-14's pinning is worth stating plainly: the base image is
 digest-pinned (`node:20-alpine3.20@sha256:3bc9a4…`) and Chromium is apk-pinned to
@@ -256,16 +286,24 @@ security updates until the pins are deliberately moved. Reproducibility was
 chosen over auto-updating; the price is that Chromium CVEs land here as a
 reviewed maintenance task rather than as an automatic patch, and the `--disable-gpu`
 PDF regression test plus a container smoke run are what make that review safe.
+The alternative — moving the image to Node 22, which every remaining `engines` range
+would accept — was considered during this remediation and rejected for a release cut:
+it re-pins the base digest and the apk Chromium version together, and both are what the
+PDF path is verified against.
 
 What is being done instead of a fake green: CI reports both counts on every run
-(`Dependency advisory posture (SEC-01)`, non-blocking by design so a new
-upstream advisory is visible in the log rather than silently tolerated). The
-full-tree line asks for `npm audit --include=dev` explicitly, because the
-quality job exports `NODE_ENV=production` and npm then hides dev dependencies
-from a plain `npm audit` too — the same trap that once hollowed out the whole
-toolchain install. The upgrade itself is a scheduled work item — `prisma` 7.x
-patch line, then `puppeteer` 25, then `@tiptap` — each requiring
-`npm run db:parity`, the export integration tests and
-`npm run smoke:container` (which asserts the real PDF) to pass before it lands.
-The critical Next.js DoS advisory that the original audit found is genuinely
-gone: `next@16.4.0` is above the fixed version.
+(`Dependency advisory posture (SEC-01)`, non-blocking by design so a new upstream
+advisory is visible in the log rather than silently tolerated). The full-tree line asks
+for `npm audit --include=dev` explicitly, because the quality job exports
+`NODE_ENV=production` and npm then hides dev dependencies from a plain `npm audit` too
+— the same trap that once hollowed out the whole toolchain install. Two gates now guard
+the class rather than the individual case: the engines sweep over every installed
+`package.json`, and `npm ci --include=dev` executed *inside the pinned base image*, so
+an `engines` violation is caught as an install refusal on the runtime it applies to
+instead of as a red build minutes later. The remaining majors — `prisma` 7.x → the
+puppeteer 25 line, then `@tiptap` — are scheduled upgrade work, each requiring
+`npm run db:parity`, the export integration tests and `npm run smoke:container` (which
+asserts the real PDF) to pass before it lands.
+The critical Next.js DoS advisory that the original audit found is genuinely gone:
+`next@16.4.0` is above the fixed version.
+
