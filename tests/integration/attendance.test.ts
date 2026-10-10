@@ -210,4 +210,60 @@ describe("/api/attendance check-in / check-out flow", () => {
     expect(res.status).toBe(200);
     expect(await jsonOf(res)).toEqual({ attendance: null });
   });
+
+  // PAR-04: the FL-04 checks above are read-then-write, which PostgreSQL — READ
+  // COMMITTED, one BEGIN per interactive transaction — cannot make atomic. These two
+  // tests are about the partial unique index the route now depends on, so the first
+  // one goes straight to the database and does not exercise any handler code.
+  it("the database refuses a second open row for the same job (PAR-04)", async () => {
+    await prisma.jobAttendance.create({ data: { jobId, checkInTime: at(31, 9, 0) } });
+
+    let code: string | undefined;
+    try {
+      await prisma.jobAttendance.create({ data: { jobId, checkInTime: at(31, 9, 1) } });
+    } catch (error) {
+      code = (error as { code?: string }).code;
+    }
+    expect(code).toBe("P2002");
+    expect(await prisma.jobAttendance.count({ where: { jobId, checkOutTime: null } })).toBe(1);
+
+    // The predicate is what makes this survivable: only OPEN rows are unique. Closing
+    // today's row must free the job to check in again, and a second job is independent.
+    await prisma.jobAttendance.updateMany({
+      where: { jobId, checkOutTime: null },
+      data: { checkOutTime: at(31, 17, 0), totalWorkSeconds: 8 * 3600 },
+    });
+    await prisma.jobAttendance.create({ data: { jobId, checkInTime: at(31, 17, 30) } });
+    await prisma.jobAttendance.create({ data: { jobId: otherJobId, checkInTime: at(31, 9, 0) } });
+    expect(await prisma.jobAttendance.count({ where: { jobId } })).toBe(2);
+    expect(await prisma.jobAttendance.count({ where: { jobId: otherJobId, checkOutTime: null } })).toBe(1);
+  });
+
+  it("two concurrent check-ins produce exactly one open row and one 409 (PAR-04)", async () => {
+    await issueAuthCookie(prisma);
+    const results = await Promise.all([
+      attendancePost(apiRequest("/api/attendance", { method: "POST", body: { jobId } })),
+      attendancePost(apiRequest("/api/attendance", { method: "POST", body: { jobId } })),
+    ]);
+    const statuses = results.map((res) => res.status).sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+
+    const conflict = results.find((res) => res.status === 409)!;
+    expect(String((await jsonOf(conflict)).error)).toContain("Already checked in");
+    expect(await prisma.jobAttendance.count({ where: { jobId, checkOutTime: null } })).toBe(1);
+  });
+
+  it("maps the index violation to the same 409 the pre-check gives (PAR-04)", async () => {
+    await issueAuthCookie(prisma);
+    // Deterministic on purpose: an open row that is neither stale (check-in before
+    // today) nor "today" is invisible to both reads in openCheckIn, so the insert is
+    // reached and only the partial unique index can stop it. Without the P2002 mapping
+    // the database's correct refusal leaves as a 500.
+    await prisma.jobAttendance.create({ data: { jobId, checkInTime: at(32, 9, 0) } });
+
+    const res = await attendancePost(apiRequest("/api/attendance", { method: "POST", body: { jobId } }));
+    expect(res.status).toBe(409);
+    expect(String((await jsonOf(res)).error)).toContain("Already checked in");
+    expect(await prisma.jobAttendance.count({ where: { jobId, checkOutTime: null } })).toBe(1);
+  });
 });

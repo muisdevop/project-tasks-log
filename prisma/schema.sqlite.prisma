@@ -137,6 +137,13 @@ model JobAttendance {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // PAR-04: the engine, not this transaction, is the authority on "at most one
+  // open check-in per job". A partial unique index
+  // (`ON "JobAttendance"("jobId") WHERE "checkOutTime" IS NULL`) enforces it in
+  // both migration sets; Prisma schemas cannot express a partial index, so the
+  // object exists only in SQL and `npm run db:parity:migrations` keeps the two
+  // definitions identical. The integration harness applies that file after
+  // `db push` so the tests run against the same constraint as a deployment.
   @@index([jobId])
   @@index([checkInTime])
 }

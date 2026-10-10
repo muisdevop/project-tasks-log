@@ -42,7 +42,14 @@ async function listBreaks(request: Request) {
       () =>
         prisma.breakType.findMany({
           where: { jobId },
-          orderBy: [{ createdAt: "asc" }, { name: "asc" }],
+          // PAR-08: `name` used to be the tie-break, but text ordering follows the
+          // column collation and the two shipped providers differ by default
+          // (SQLite compares BINARY, so every uppercase sorts before every
+          // lowercase; a Postgres `en_US.utf8` database folds case). The row *set*
+          // was never at risk — this only reorders rows created in the same
+          // instant — but `id` is an integer on both, so the list now renders in
+          // one order regardless of where the app runs.
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         }),
       { label: "break type list" },
     );

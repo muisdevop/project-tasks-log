@@ -114,7 +114,7 @@ Every row is a real entry in `package.json` `scripts`.
 | `npm run db:migrate:sqlite-to-postgres` | `tsx scripts/migrate-sqlite-to-postgres.ts` data move |
 | `npm run db:seed` | `tsx prisma/seed.ts` demo data |
 | `npm run db:parity` | `node scripts/check-schema-parity.mjs` — fails if the two Prisma schemas drift |
-| `npm run db:parity:migrations` | `node scripts/check-migration-parity.mjs` — fails if the two *migration sets* seed different tables, or if a constant default is written as an unquoted bracket token (PAR-02, PAR-03) |
+| `npm run db:parity:migrations` | `node scripts/check-migration-parity.mjs` — fails if the two *migration sets* seed different tables, if a constant default is written as an unquoted bracket token without a later repair migration (PAR-02, PAR-03), or if a partial unique index is missing from either set, differs between them, or is created without first resolving the rows the old race produced (PAR-04, PAR-09) |
 | `npm run smoke:container -- <baseUrl>` | `node scripts/container-smoke.mjs` — 28 functional checks against a *running* container (`APP_USERNAME`/`APP_PASSWORD`, `REQUIRE_PDF=1` to demand a real PDF) |
 | `npm run db:backup` | `tsx scripts/backup.ts` — labelled snapshot of the active provider (`docs/backup-restore.md`) |
 | `npm run db:restore` | `tsx scripts/restore.ts` — verifies and restores one of those snapshots |

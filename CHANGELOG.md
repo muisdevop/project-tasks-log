@@ -4,6 +4,58 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- The fourth re-audit pass looked at the code the third pass had just written and found a
+  defect class nobody had tested: **PAR-09**. `20261010180500` can only create its unique
+  index because the statement above it closes the rows the old race produced — but on a
+  database that already holds two open check-ins, the `CREATE UNIQUE INDEX` alone fails
+  (`UNIQUE constraint failed: JobAttendance.jobId`, measured), the migration aborts, and the
+  deployment never boots. Nothing in the suite
+  could see that: the integration tests build a clean schema with `db push`, and
+  `db:parity:migrations` compared text. Two things now hold it. `scripts/check-migration-parity.mjs`
+  gained rule E (a required partial index must be preceded in the same file by a statement that
+  resolves existing violations, checked in **both** sets — measured: removing the backfill from
+  one set or from both exits 1, and rule C still fires when only the predicate diverges).
+  And `tests/unit/migration-attendance-backfill.test.ts` replays the *real* SQLite migration
+  files in directory order onto a temp database with `better-sqlite3` (a declared dependency),
+  plants three open rows on one job plus controls, applies the migration, and asserts the
+  outcome row by row: one open row per job, the highest id keeps its seconds, the losers close
+  at their own check-in time with zero, closed history untouched, a second open row refused, a
+  second *closed* row allowed, the index still present after the `Job` rebuild in
+  `20261010182000`, and that rebuild's default now parsing as JSON. Proven to fail: deleting the
+  backfill from the migration turns 3 of its 4 tests red, restoring turns them green. The same
+  fixture ran against Postgres 16 with the shipped files — `UPDATE 2`, `CREATE INDEX`,
+  `duplicate key value violates unique constraint "JobAttendance_one_open_check_in"` for the
+  open control, `INSERT 0 1` for the closed one. `POST /api/attendance`'s contract text in
+  `docs/openapi.yaml` was regenerated to say the constraint is the database's now, not the
+  transaction's, since both paths answer the same 409.
+- The four provider-parity findings the previous pass deliberately left open are fixed,
+  each one measured on both shipped engines rather than argued from the schema.
+  **PAR-04** (High, the one-open-check-in race) is closed where it can be closed for both
+  providers: a partial unique index `JobAttendance_one_open_check_in` on
+  `("jobId") WHERE "checkOutTime" IS NULL`, written identically into both migration sets,
+  backed by an in-migration backfill that closes orphaned open rows first so no existing
+  deployment can fail at boot, and `src/app/api/attendance/route.ts` maps the resulting
+  `P2002` to the same 409 its pre-check already returns. A Postgres-only `FOR UPDATE`
+  would have left SQLite unprotected; this cannot. Proven on real data — Postgres answers
+  `duplicate key value violates unique constraint "JobAttendance_one_open_check_in"`,
+  SQLite answers `SQLITE_CONSTRAINT_UNIQUE` with `open rows = 1` — plus three integration
+  tests including two concurrent requests that yield exactly `[200, 409]`.
+  Because `db push` builds the test database from the schema alone and Prisma cannot
+  express a partial index, `tests/integration/helpers/harness.ts` now applies the
+  SQLite file through `RAW_SQL_OBJECT_MIGRATIONS`, and `npm run db:parity:migrations`
+  pins all three halves (both sets declare it, the harness applies it).
+  **PAR-03** (the unquoted `DEFAULT [1, 2, 3, 4, 5]`) is repaired by a new SQLite
+  migration that rebuilds `Job` copy-and-swap with `DEFAULT '[1, 2, 3, 4, 5]'`; a fresh
+  `migrate deploy` now stores `"[1, 2, 3, 4, 5]"` which parses as JSON, and Prisma's own
+  `migrate diff` reports no drift in either direction, so the shipped schema files stayed
+  truthful. The parity check's shrink-only exception list now requires a `repairedBy`
+  migration that exists, quotes the default, and sorts after the defective version.
+  **PAR-06** (NULL `endedAt` ordering) now requests `{ sort: "desc", nulls: "first" }`
+  explicitly, which the generator resolves to `NULLS FIRST` on Postgres and an `IS NULL`
+  ordering term on SQLite, so the same export rows come first on both. **PAR-08**
+  (collation-dependent tie-break) replaces `name: "asc"` with `id: "asc"` in
+  `src/app/api/breaks/route.ts`, and a test inserts `apple` then `Tea` in the same
+  instant to prove adjacency by id rather than by collation.
 - Two commands that had never been run against a real database, and the gate that now
   watches both of them (RA-20, PAR-02, PAR-03). (a) `npm run db:migrate:postgres` was
   `prisma migrate deploy --schema prisma/postgres/schema.prisma`; the root
@@ -30,8 +82,9 @@ format. Versioning follows SemVer.
   `better-sqlite3`: the DDL loads, and an insert that omits the column stores the string
   `1, 2, 3, 4, 5` — not valid JSON. The application is not exposed (`src/app/api/jobs/route.ts`
   always supplies `workDays`), and repairing it means rebuilding `Job` — the table three
-  others reference — on data that is already shipped, so it is recorded as a tracked
-  exception rather than fixed blind here. What is new is `scripts/check-migration-parity.mjs`
+  others reference — on data that is already shipped, so at that pass it was recorded as a
+  tracked exception rather than fixed blind; the first bullet above is the repair. What is
+  new is `scripts/check-migration-parity.mjs`
   (`npm run db:parity:migrations`, wired into CI next to `db:parity`): `db:parity` compares
   the two *schema files* and could see none of this, so the new check compares the
   *migration sets* — which tables each one seeds, and any constant default written as a
@@ -123,9 +176,10 @@ with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
   on SQLite. Five further parity differences — the default `Job` row only the SQLite
   migrations insert, the unquoted `workDays` JSON default, the one-open-check-in race, the
   NULL-`endedAt` ordering that changes which rows survive the export row cap, and
-  collation-dependent text tie-breaks — are recorded as findings PAR-02/03/04/06/08 in the
-  re-audit sheet instead of fixed blind: they need new migrations on *both* providers plus
-  a locking decision, and editing already-applied migrations is not a remedy.
+  collation-dependent text tie-breaks — were recorded as findings PAR-02/03/04/06/08 in the
+  re-audit sheet instead of fixed blind: they need new migrations on *both* providers plus a
+  locking decision, and editing already-applied migrations is not a remedy. All five are now
+  fixed additively, in the first bullets of this section.
 - SEC-01's accepted-risk rationale was wrong, and the fix it argued against was
   available. The workbook and `docs/security.md` stated that no advisory had a
   non-breaking remedy and that npm's Prisma fix was a downgrade to `prisma@6.19.3`;

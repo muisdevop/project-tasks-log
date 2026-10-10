@@ -158,6 +158,20 @@ export type TestDbContext = {
 };
 
 /**
+ * Schema objects a Prisma schema cannot express exist only in the migration sets,
+ * and `db push` — which is how these tests build their database — never reads
+ * migrations. Today that is one file: the PAR-04 partial unique index
+ * `JobAttendance_one_open_check_in`. Applying it here means the suite is run under
+ * the same constraint a real deployment has; skip it and the duplicate-open-check-in
+ * tests would be asserting a rule the test database does not enforce.
+ * `npm run db:parity:migrations` (rule C) requires the same statement to be present
+ * in both provider sets, so the file named here cannot silently disappear.
+ */
+const RAW_SQL_OBJECT_MIGRATIONS = [
+  "prisma/migrations/20261010180500_attendance_one_open_check_in/migration.sql",
+];
+
+/**
  * Creates an isolated SQLite file under the OS temp dir, points every DB
  * related env var at it, drops the cached globalThis.prisma singleton and
  * pushes prisma/schema.sqlite.prisma into the fresh file. Must be awaited
@@ -199,6 +213,17 @@ export async function setupTestDatabase(
       timeout: 180_000,
     },
   );
+
+  for (const file of RAW_SQL_OBJECT_MIGRATIONS) {
+    // Prisma 7 removed `db execute --url`: the datasource comes from prisma.config.ts,
+    // which reads DATABASE_URL — and dotenv does not overwrite the value set above.
+    execSync(`npx prisma db execute --file "${file}"`, {
+      cwd: REPO_ROOT,
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      stdio: "pipe",
+      timeout: 120_000,
+    });
+  }
 
   return { tempDir, dbFile, databaseUrl };
 }

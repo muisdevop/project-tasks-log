@@ -115,6 +115,29 @@ describe("/api/breaks CRUD", () => {
     expect((await breaksDelete(apiRequest("/api/breaks?id=1"))).status).toBe(401);
   });
 
+  // PAR-08: the tie-break used to be `name`, and text ordering is collation-dependent —
+  // SQLite compares BINARY, so "Tea" sorts before "apple", while a PostgreSQL database on
+  // an `en_US.utf8` locale folds case and sorts "apple" first. The list now breaks ties on
+  // `id`, an integer on both providers. The uppercase name is inserted *last* so this
+  // assertion can only pass on id order: on the old SQLite collation order it flips.
+  it("orders same-instant break types by id, not by collation (PAR-08)", async () => {
+    await authed();
+    const sameInstant = at(12, 0);
+    const apple = await prisma.breakType.create({
+      data: { jobId: jobA, name: "apple", type: "other", createdAt: sameInstant },
+    });
+    const tea = await prisma.breakType.create({
+      data: { jobId: jobA, name: "Tea", type: "other", createdAt: sameInstant },
+    });
+
+    const res = await breaksGet(apiRequest(`/api/breaks?jobId=${jobA}`));
+    expect(res.status).toBe(200);
+    const rows = (await jsonOf(res)).breaks as Array<{ id: number }>;
+    const positionOf = (id: number) => rows.findIndex((row) => row.id === id);
+    expect(positionOf(apple.id)).toBeGreaterThanOrEqual(0);
+    expect(positionOf(tea.id)).toBe(positionOf(apple.id) + 1);
+  });
+
   it("validates payloads (missing name, oversized duration, bad jobId)", async () => {
     await authed();
     let res = await breaksPost(

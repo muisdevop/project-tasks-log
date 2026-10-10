@@ -120,6 +120,24 @@ sequence is a convention, and `docs/CONTRIBUTING.md` repeats it.
    to boot instead of converging, which also breaks the Coolify deploy path.
    The transaction + guarded update + the concurrency test stay the enforcement
    mechanism.
+
+   That reasoning about *tooling blindness* is now handled rather than accepted. The
+   attendance invariant (PAR-04) ships as a partial unique index
+   `JobAttendance_one_open_check_in` in both migration sets, and the three objections
+   above are answered one by one: the backfill runs in the same migration so a database
+   that already holds two open rows converges instead of refusing to boot; the index is
+   applied to the harness's `db push` databases
+   (`RAW_SQL_OBJECT_MIGRATIONS` in `tests/integration/helpers/harness.ts`), so the tests
+   see the constraint production has; and `npm run db:parity:migrations` fails if the two
+   definitions diverge or if that harness list stops applying the file. The backfill itself is
+   gated twice over (PAR-09): rule E of that script refuses a required partial index whose file
+   does not resolve existing violations *before* the `CREATE`, because an un-backfilled index
+   makes `migrate deploy` fail on exactly the live data the race produced, and
+   `tests/unit/migration-attendance-backfill.test.ts` replays the shipped SQLite migration files
+   onto a temp database with planted duplicates and asserts which row survives. The task case above
+   still declines the same tool for its own reasons — a unique index on
+   `(projectId) WHERE status='in_progress'` would turn today's clean auto-hold into a 500 —
+   so the difference is the enforcement goal, not the mechanism.
 3. **A break ends as exactly one completed break task**, written transactionally
    after banking the task that was running. FL-01 closes the double-log path
    from both ends: the widget/overlay send a **deterministic** `Idempotency-Key`

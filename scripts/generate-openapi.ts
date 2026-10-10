@@ -795,9 +795,11 @@ const paths: Record<string, unknown> = {
       tags: ["Attendance"],
       summary: "Check in",
       description:
-        "Rejected when an open visit already exists for the job; the check and the write happen " +
-        "in one transaction (FL-04). Idempotent via `Idempotency-Key` (check-in only — check-out " +
-        "is not wrapped).",
+        "Rejected when an open visit already exists for the job. FL-04 checked that inside one " +
+        "transaction; PAR-04 made it a database invariant, so the second open row is refused by " +
+        "the partial unique index `JobAttendance_one_open_check_in` (present in both migration " +
+        "sets) and the route answers with the same 409 either way. Idempotent via " +
+        "`Idempotency-Key` (check-in only — check-out is not wrapped).",
       parameters: [paramRef("IdempotencyKey")],
       requestBody: requiredBody(REF("AttendanceInput")),
       responses: {

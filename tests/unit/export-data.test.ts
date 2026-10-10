@@ -276,7 +276,9 @@ describe("fetch helpers", () => {
         elapsedSeconds: true,
         subtasks: { select: { id: true, title: true, isCompleted: true } },
       }),
-      orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
+      // PAR-06: the NULL placement is named because the two providers disagree by
+      // default, and this test is what notices it silently disappearing.
+      orderBy: [{ endedAt: { sort: "desc", nulls: "first" } }, { createdAt: "asc" }],
       // PF-02: one row past the ceiling is read so "too many" is detected.
       take: MAX_EXPORT_ROWS + 1,
     });

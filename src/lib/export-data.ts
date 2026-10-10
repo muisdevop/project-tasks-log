@@ -328,7 +328,16 @@ export function fetchExportTasks(
       const rows = await prisma.task.findMany({
         where: buildTaskWhereInput(window, jobIds, projectIds),
         select: TASK_SELECT,
-        orderBy: [{ endedAt: "desc" }, { createdAt: "asc" }],
+        // PAR-06: `endedAt` is nullable (a running task has none) and the two
+        // shipped engines place NULLs differently when nothing says otherwise —
+        // PostgreSQL sorts DESC with NULLs first, SQLite treats NULL as smaller
+        // than every value, so the same report opened with the open tasks on one
+        // provider and closed with them on the other. Naming the placement makes
+        // the row order identical everywhere: an unfinished task is the most
+        // recent activity in the window, so it leads. (The row *set* was never at
+        // risk — the `take` below is a count check, so the ceiling triggers the
+        // same way on both providers.)
+        orderBy: [{ endedAt: { sort: "desc", nulls: "first" } }, { createdAt: "asc" }],
         // PF-02: read one row past the ceiling so "too many" is detected without
         // a second counting query.
         take: MAX_EXPORT_ROWS + 1,

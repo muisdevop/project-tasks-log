@@ -191,6 +191,13 @@ async function checkIn(request: Request, log: RequestLogContext) {
  * open check-in per job per day. Stale open rows from previous days are
  * auto-closed at the day boundary before checking, so a crash yesterday can
  * never block today's check-in.
+ *
+ * PAR-04: the transaction alone could not guarantee that invariant. On
+ * PostgreSQL it is a plain BEGIN under READ COMMITTED, so two concurrent
+ * check-ins both read "no open row" and both insert. The authority is now the
+ * partial unique index `JobAttendance_one_open_check_in` (both migration sets),
+ * which refuses the second open row at the engine; this route maps that refusal
+ * to the same 409 the in-transaction check produces.
  */
 async function openCheckIn(input: { jobId: number; notes?: string | null }) {
   const { jobId, notes } = input;
@@ -224,13 +231,28 @@ async function openCheckIn(input: { jobId: number; notes?: string | null }) {
       );
     }
 
-    return tx.jobAttendance.create({
-      data: {
-        jobId,
-        checkInTime: new Date(),
-        notes: notes ?? null,
-      },
-    });
+    try {
+      return await tx.jobAttendance.create({
+        data: {
+          jobId,
+          checkInTime: new Date(),
+          notes: notes ?? null,
+        },
+      });
+    } catch (error) {
+      // PAR-04: the read above and this insert are not one atomic step on
+      // PostgreSQL, so the loser of that race gets P2002 from the partial unique
+      // index. Answer with the same 409 the unlocked path already gives — without
+      // it, toErrorResponse turns the database's correct refusal into a 500 and
+      // the client retries the check-in it already has open.
+      if ((error as { code?: unknown }).code === "P2002") {
+        throw new HttpError(
+          409,
+          "Already checked in for this job today. Please check out first.",
+        );
+      }
+      throw error;
+    }
   });
 }
 

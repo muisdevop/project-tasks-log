@@ -17,7 +17,7 @@ no tags, no licence).
 | Integration only | `npm run test:integration` | exit 0 (spins a temp SQLite DB) |
 | Coverage ratchet | `npm run test:coverage` | over the thresholds in `vitest.config.ts` (60% lines/functions/statements, 50% branches, on `src/lib` + `src/app/api`) |
 | Schema parity | `npm run db:parity` | exit 0 |
-| Migration-set parity | `npm run db:parity:migrations` | exit 0 |
+| Migration-set parity | `npm run db:parity:migrations` | exit 0 — it compares the two migration **sets** (the schema diff cannot see seeded rows), pins that every raw-SQL schema object (a partial unique index: `JobAttendance_one_open_check_in`) is declared identically in both sets, **backfilled before it is created** (PAR-09 — otherwise a deployment that already holds duplicate rows fails `migrate deploy`), **and** applied by `tests/integration/helpers/harness.ts`, and fails on any new `DEFAULT [` that stores a non-JSON string on SQLite. `tests/unit/migration-attendance-backfill.test.ts` replays the real SQLite migration files over planted duplicates to prove the backfill behaves |
 | Contract freshness | `npm run docs:openapi:check` | exit 0 after `npm run docs:openapi` if routes changed |
 | Bundle budget | `npm run bundle:budget` | exit 0 |
 | Build | `npm run build` | exit 0 |
@@ -163,5 +163,9 @@ Findings from the PM-01/PM-02 pass, each verified with the command shown.
 4. New query/credential path: is it scoped by `requireWriteAccess`, rate limited
    by bucket, and does it emit a security event where relevant?
 5. Schema change: SQLite **and** Postgres migrations written, `npm run db:parity` **and** `npm run db:parity:migrations`
-   green?
+   green? If the migration creates something the Prisma schema cannot express (a partial
+   unique index, a seeded row), it must be written into **both** migration sets *and* the
+   SQLite file added to `RAW_SQL_OBJECT_MIGRATIONS` in `tests/integration/helpers/harness.ts`
+   — `db push` builds the test database from the schema alone, so without that entry the
+   constraint exists in production and is invisible to every integration test.
 6. `CHANGELOG.md` updated, and does it claim anything the tests do not prove?
