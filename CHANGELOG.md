@@ -39,12 +39,18 @@ with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
   about engines by default, and the developer machine ran Node 24. Two changes,
   because pinning jsdom back to `26.1.0` (engines `>=18`) would have fixed today's run
   and left the same trap armed for the next install: `package.json` now declares
-  `engines.node` as `^20.19.0 || ^22.12.0 || >=24.0.0` (the floor comes from `prisma@7`,
-  the image is `node:20-alpine3.20` measured at `v20.20.2`, and the README had been
-  stating "no `engines` field exists" as if that were acceptable), and `.npmrc` sets
+  `engines.node` as `^20.19.0 || ^22.12.0 || >=24.0.0`. The floor is `prisma@7`'s own
+  `^20.19`; the digest-pinned `node:20-alpine3.20` builder reports `v20.19.2`, one patch
+  clear of it, and the README had been stating "no `engines` field exists"
+  as if that were acceptable. `.npmrc` sets
   `engine-strict=true` so an incompatible package stops `npm ci` with its name and
-  range instead of surfacing three jobs later. A sweep of all 527 installed
-  `package.json` files finds no remaining range that excludes Node 20 or Node 24.
+  range instead of surfacing three jobs later. The pre-fix Docker build transcript is
+  the proof that warnings alone were not enough: it prints 18 `npm warn EBADENGINE
+  Unsupported engine` blocks - `jsdom@30.1.2` and eight of its dependencies, once per
+  install step - each against `current: { node: 'v20.19.2', npm: '10.8.2' }`, and the
+  build still succeeded. A re-sweep of the installed tree at this change finds
+  1379 `node_modules/**/package.json` files, 482 of which declare `engines.node`, and
+  none of those ranges excludes either `20.19.2` or `24.18.0`.
   `.npmrc` is deliberately not copied into the image, so the release build path is
   unchanged.
 - `ModalShell` was not a dialog to assistive technology (RA-01). It rendered a
