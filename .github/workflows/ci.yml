@@ -1,0 +1,265 @@
+# MF-01 / PM-04: CI pipeline matching AGENTS.md's definition of done
+# (install -> lint -> typecheck -> tests -> coverage -> build -> bundle
+# budget -> docker build -> boot on BOTH sqlite and postgres with a health
+# check and a login smoke request). Script names below are the real ones in
+# package.json (lint, typecheck, test:coverage, build, bundle:budget).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, tests, build, bundle budget
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: production
+      DB_PROVIDER: sqlite
+      DATABASE_URL: file:./ci.db
+      SESSION_SECRET: ci-only-secret-not-used-at-runtime-0123456
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install
+        # This job pins NODE_ENV=production for the build/test steps, and npm then
+        # silently skips devDependencies - which is every tool this pipeline calls
+        # (tsx, vitest, eslint, typescript, @playwright/test, tailwindcss). The
+        # failure only appeared the first time CI actually ran, on 2026-10-09:
+        # `npm run docs:openapi:check` died with `sh: 1: tsx: not found`. Install
+        # dev dependencies explicitly so a production NODE_ENV cannot hollow out
+        # the toolchain.
+        run: npm ci --include=dev
+      - name: Dependency advisory posture (SEC-01)
+        # SEC-01 is a partly-remediated risk with the rest accepted in writing, and an
+        # accepted risk that nobody re-measures is just an untracked one. This reports
+        # both counts on every run without failing the pipeline: after `npm audit fix`
+        # took everything same-major, the 20 advisories left in the runtime tree have
+        # only semver-major remedies (prisma 6.19.3 downgrades the client and drops
+        # driver adapters, puppeteer 25.13.0 and @tailwindcss/typography 0.5.4 are
+        # majors), so they are scheduled upgrade work, not something to force into a
+        # PR. docs/security.md section 8 carries the rationale and the numbers.
+        continue-on-error: true
+        run: |
+          set +e
+          echo "runtime tree:"
+          npm audit --omit=dev 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
+          echo "full tree (dev tooling included):"
+          # This job exports NODE_ENV=production, and npm then hides dev
+          # dependencies from `npm audit` as well - a plain `npm audit` here
+          # silently prints the runtime number twice. Ask for dev explicitly.
+          npm audit --include=dev 2>&1 | grep -E "[0-9]+ vulnerabilit" | tail -1
+          exit 0
+      - name: Engines sweep over the installed tree (RA-09)
+        # Blocks the pipeline: an `engines.node` range that excludes the runtime the
+        # image ships on is a toolchain defect, and this host mix (developer on a newer
+        # Node than the base image) is exactly why npm's default warning behaviour is
+        # not enough. The control case is in the script's header.
+        run: npm run engines:check
+      - name: engine-strict install probe in the base image (RA-09)
+        # Runs the real `npm ci --include=dev` inside `node:20-alpine3.20`, where
+        # `.npmrc`'s `engine-strict=true` turns the same violation into a refusal at
+        # install time. Reading ranges and enforcing them are different checks: this is
+        # the one that reproduces what a deploy actually does.
+        run: npm run engines:probe
+      - name: Compose files parse (Docker / Coolify deploy path)
+        # AR-08 follow-up, found by the 2026-10-09 re-audit: nothing ever ran
+        # `docker compose config`, so when the demo secrets were removed the dev
+        # file became unparseable YAML (`key: ${V:?msg with ": " in it}` needs
+        # quoting) and stayed that way. This step asserts both files parse AND
+        # that the required-secret guards still refuse an empty environment.
+        run: |
+          set -euo pipefail
+          SESSION_SECRET=0123456789abcdef0123456789abcdef \
+          APP_PASSWORD_HASH='$2b$12$ciOnlyPlaceholderHashValueAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
+            docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.prod.yml config -q
+          if APP_PASSWORD_HASH= SESSION_SECRET= \
+               docker compose -f docker-compose.yml config -q 2>/dev/null; then
+            echo "docker-compose.yml accepted an empty APP_PASSWORD_HASH - guard lost"
+            exit 1
+          fi
+          echo "both compose files parse; required-secret guards fire"
+      - name: Generate Prisma client
+        run: npx prisma generate --schema prisma/schema.sqlite.prisma
+      - name: SQLite/Postgres schema parity
+        run: npm run db:parity
+      - name: Migration-set parity (seeded tables + constant defaults)
+        run: npm run db:parity:migrations
+      - name: OpenAPI document matches the routes
+        run: npm run docs:openapi:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npx vitest run
+      - name: Coverage (thresholds in vitest.config.ts)
+        run: npx vitest run --coverage
+      - name: Build
+        run: npm run build
+      - name: Bundle budget
+        run: npm run bundle:budget
+
+  e2e:
+    name: Responsive + axe matrix (3 engines x 3 viewports)
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      # TC-04 follow-up found by the 2026-10-10 re-audit: this pipeline installed
+      # @playwright/test but never ran it, so every "the 3x3 matrix is green" claim
+      # in the audit was a local, unrepeatable measurement - and one local run had a
+      # 90s timeout that CI could not have caught. `tests/e2e/global-setup.ts` owns
+      # its own dev server, port and SQLite file, so this job needs no database or
+      # secret setup beyond the toolchain.
+      - name: Install
+        run: npm ci --include=dev
+      - name: Generate Prisma client
+        run: npx prisma generate --schema prisma/schema.sqlite.prisma
+      - name: Install browsers
+        run: npm run test:e2e:install
+      - name: Matrix (128 scenarios, axe on the 3 desktop engines)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+
+  docker-build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t stl-ci:latest .
+      - name: Save image for smoke jobs
+        run: docker save stl-ci:latest | gzip > stl-ci.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stl-ci-image
+          path: stl-ci.tar.gz
+
+  smoke:
+    name: Boot container (${{ matrix.db }})
+    runs-on: ubuntu-latest
+    needs: docker-build
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres]
+    env:
+      SESSION_SECRET: ci-smoke-session-secret-0123456789-abcd
+      SMOKE_PASSWORD: ci-smoke-password
+    steps:
+      # The container smoke script lives in the repo, not in the standalone
+      # image, so this job needs the checkout + a Node on the runner. No npm
+      # install: scripts/container-smoke.mjs is dependency-free (global fetch).
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@v4
+        with:
+          name: stl-ci-image
+      - name: Load image
+        run: gunzip -c stl-ci.tar.gz | docker load
+
+      - name: Create bcrypt hash for the container smoke login
+        id: hash
+        run: |
+          HASH=$(docker run --rm -e SMOKE_PASSWORD="$SMOKE_PASSWORD" --entrypoint node stl-ci:latest \
+            -e "console.log(require('bcryptjs').hashSync(process.env.SMOKE_PASSWORD, 12))")
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Run container (sqlite)
+        if: matrix.db == 'sqlite'
+        run: |
+          docker volume create smoke-sqlite-data
+          docker run -d --name stl-smoke -p 3000:3000 \
+            -v smoke-sqlite-data:/data \
+            -e DB_PROVIDER=sqlite \
+            -e SESSION_SECRET="$SESSION_SECRET" \
+            -e APP_USERNAME=admin \
+            -e APP_PASSWORD_HASH='${{ steps.hash.outputs.hash }}' \
+            stl-ci:latest
+
+      - name: Run container (postgres)
+        if: matrix.db == 'postgres'
+        run: |
+          docker network create smoke-net
+          docker run -d --name stl-pg --network smoke-net \
+            -e POSTGRES_DB=tasklogger -e POSTGRES_USER=tasklogger -e POSTGRES_PASSWORD=tasklogger \
+            postgres:16-alpine
+          # wait for pg_isready before starting the app
+          for i in $(seq 1 30); do
+            docker exec stl-pg pg_isready -U tasklogger -d tasklogger && break
+            sleep 2
+          done
+          docker run -d --name stl-smoke --network smoke-net -p 3000:3000 \
+            -e DB_PROVIDER=postgres \
+            -e DATABASE_URL=postgresql://tasklogger:tasklogger@stl-pg:5432/tasklogger?schema=public \
+            -e SESSION_SECRET="$SESSION_SECRET" \
+            -e APP_USERNAME=admin \
+            -e APP_PASSWORD_HASH='${{ steps.hash.outputs.hash }}' \
+            stl-ci:latest
+
+      - name: Wait for /api/health + verify Docker HEALTHCHECK
+        run: |
+          ok=false
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then ok=true; break; fi
+            echo "waiting..."
+            sleep 3
+          done
+          $ok || { docker logs stl-smoke; exit 1; }
+          echo
+          # AR-06: the image-level HEALTHCHECK must report healthy too.
+          for i in $(seq 1 20); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' stl-smoke)
+            echo "container health: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 5
+          done
+          docker inspect stl-smoke; exit 1
+
+      - name: Functional container smoke (${{ matrix.db }})
+        # The AGENTS.md docker gate as a script: 28 checks over the real image -
+        # auth refusal, task lifecycle with server-side timing, idempotent
+        # writes, break dedupe, stats, export, PDF-from-Alpine-Chromium (AR-06),
+        # token scopes/revocation, hard-delete guard, admin paging, logout.
+        env:
+          APP_USERNAME: admin
+          APP_PASSWORD: ${{ env.SMOKE_PASSWORD }}
+          EXPECTED_PROVIDER: ${{ matrix.db }}
+          REQUIRE_PDF: "1"
+        run: npm run --silent smoke:container -- http://127.0.0.1:3000
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs stl-smoke
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f stl-smoke stl-pg || true
+          docker volume rm smoke-sqlite-data || true
+          docker network rm smoke-net || true

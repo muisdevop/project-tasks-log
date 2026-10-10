@@ -2,8 +2,21 @@
  * Export helper functions for date calculations and data grouping
  */
 
-export type TimePeriod = "day" | "week" | "month" | "duration";
+export type TimePeriod = "day" | "week" | "month" | "range";
 export type GroupByOption = "date" | "job" | "project";
+
+/**
+ * Format a date as a local calendar date key (YYYY-MM-DD) using the
+ * machine's local timezone. Using toISOString().split("T")[0] would group
+ * by UTC date, which shifts tasks into the wrong day for non-UTC users.
+ */
+export function localDateKey(date: Date): string {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 /**
  * Calculate the start and end dates for a given time period
@@ -12,7 +25,7 @@ export type GroupByOption = "date" | "job" | "project";
  * @returns Object with start and end dates in ISO format (YYYY-MM-DD)
  */
 export function calculateTimePeriodDates(
-  timePeriod: TimePeriod,
+  timePeriod: Exclude<TimePeriod, "range">,
   referenceDate: Date = new Date()
 ): { start: string; end: string } {
   const ref = new Date(referenceDate);
@@ -21,7 +34,7 @@ export function calculateTimePeriodDates(
   ref.setHours(0, 0, 0, 0);
 
   if (timePeriod === "day") {
-    const dateStr = ref.toISOString().split("T")[0];
+    const dateStr = localDateKey(ref);
     return { start: dateStr, end: dateStr };
   }
 
@@ -30,8 +43,8 @@ export function calculateTimePeriodDates(
     const end = new Date(start);
     end.setDate(end.getDate() + 6);
     return {
-      start: start.toISOString().split("T")[0],
-      end: end.toISOString().split("T")[0],
+      start: localDateKey(start),
+      end: localDateKey(end),
     };
   }
 
@@ -39,14 +52,12 @@ export function calculateTimePeriodDates(
     const start = getMonthStart(ref);
     const end = getMonthEnd(ref);
     return {
-      start: start.toISOString().split("T")[0],
-      end: end.toISOString().split("T")[0],
+      start: localDateKey(start),
+      end: localDateKey(end),
     };
   }
 
-  // For duration, this should not be called directly
-  // Instead, explicit startDate and endDate should be provided
-  throw new Error("Duration requires explicit start/end dates");
+  throw new Error(`Unsupported time period: ${timePeriod satisfies never}`);
 }
 
 /**
@@ -104,8 +115,8 @@ export function calculateDurationPreset(
   start.setDate(start.getDate() - (presetDays - 1)); // -1 because we include today
 
   return {
-    start: start.toISOString().split("T")[0],
-    end: end.toISOString().split("T")[0],
+    start: localDateKey(start),
+    end: localDateKey(end),
   };
 }
 
@@ -188,7 +199,7 @@ export function groupTasksByDate(tasks: ExportTask[]): GroupedByDate {
   for (const task of tasks) {
     // Use endedAt or startedAt for date - prefer endedAt if available
     const dateObj = task.endedAt || task.startedAt;
-    const dateStr = new Date(dateObj).toISOString().split("T")[0];
+    const dateStr = localDateKey(new Date(dateObj));
 
     const jobId = task.project?.job?.id || "no-job";
     const jobName = task.project?.job?.name || "No Job";

@@ -1,0 +1,84 @@
+# AR-08 / BF-01: production compose variant promised by the README
+# (`docker-compose -f docker-compose.prod.yml up -d`). Self-contained: run it
+# standalone, not layered on the dev file.
+#
+#   sqlite (default):  docker compose -f docker-compose.prod.yml up -d
+#   postgres:          DB_PROVIDER=postgres \
+#                      docker compose -f docker-compose.prod.yml --profile postgres up -d
+#
+# Set real secrets in the environment or an .env file next to this compose
+# file - the app hard-fails startup (SEC-03) with a missing/known-default
+# SESSION_SECRET, so no demo defaults are provided here on purpose.
+# Required: SESSION_SECRET (>=16 chars, unique), APP_PASSWORD_HASH
+# (npm run password:hash -- "<password>"). APP_USERNAME defaults to "admin".
+#
+# DATABASE_URL is deliberately not set: the container entrypoint resolves it
+# from DB_PROVIDER + DATABASE_URL_SQLITE/DATABASE_URL_POSTGRES (AR-08), so
+# switching providers is env-only, no image rebuild, no override of a baked
+# default. Coolify note: DB hostnames always come from env (Coolify randomizes
+# container names; no DNS alias is hardcoded anywhere).
+
+services:
+  app:
+    # Publish/roll your own tagged image; uncomment the build block only if
+    # you intentionally build on the production host.
+    image: ${APP_IMAGE:-gid-task-flow:latest}
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    ports:
+      - "${PORT:-3000}:3000"
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL_SQLITE: ${DATABASE_URL_SQLITE:-file:/data/dev.db}
+      # Must be non-empty when DB_PROVIDER=postgres; the entrypoint errors
+      # clearly otherwise, so an empty default is safe for the sqlite path.
+      DATABASE_URL_POSTGRES: ${DATABASE_URL_POSTGRES:-}
+      APP_USERNAME: ${APP_USERNAME:-admin}
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:-}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required (unique, >=16 chars)}
+    volumes:
+      - tasklogger-prod-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tasklogger}
+      POSTGRES_USER: ${POSTGRES_USER:-tasklogger}
+      # NOTE: compose validates `:?` markers even for profile-disabled services,
+      # so a hard-required default would break the plain sqlite path. Set a
+      # real POSTGRES_PASSWORD in your .env when enabling --profile postgres.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - tasklogger-prod-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasklogger} -d ${POSTGRES_DB:-tasklogger}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tasklogger-prod-data:
+  tasklogger-prod-postgres-data:

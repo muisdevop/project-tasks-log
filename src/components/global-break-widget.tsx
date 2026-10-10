@@ -1,8 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { formatElapsed } from "@/lib/business-time";
+import { resolveActiveJobId } from "@/lib/navigation";
+import { useStoredState } from "@/hooks/use-stored-state";
+import { isCancelledRequest } from "@/lib/abort";
+import {
+  ACTIVE_BREAK_KEY,
+  logFinishedBreak,
+  type ActiveBreak,
+} from "@/lib/breaks";
 
 type BreakType = {
   id: number;
@@ -13,140 +21,126 @@ type BreakType = {
   isActive: boolean;
 };
 
-type ActiveBreak = {
-  id: number;
-  breakTypeId: number;
-  jobId: number;
-  startTime: Date;
-  duration: number | null;
-  name: string;
-};
+type ProjectRef = { id: number; name?: string; jobId: number };
+
+type ProjectsResponse = { projects?: ProjectRef[] };
+type BreaksResponse = { breaks?: BreakType[] };
+
+const PROJECTS_CACHE_KEY = "break-widget-projects-cache";
 
 export function GlobalBreakWidget() {
   const router = useRouter();
   const pathname = usePathname();
   const [breaks, setBreaks] = useState<BreakType[]>([]);
-  const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(null);
   const [selectedBreak, setSelectedBreak] = useState<number | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [breakError, setBreakError] = useState<string | null>(null);
 
-  const resolveActiveJobId = useCallback(async () => {
-    const jobMatch = pathname?.match(/^\/jobs\/(\d+)/);
-    if (jobMatch) {
-      const parsed = Number(jobMatch[1]);
-      if (Number.isInteger(parsed) && parsed > 0) {
-        setActiveJobId(parsed);
-        return parsed;
-      }
-    }
+  // Storage-backed so the first client render matches server markup (BG-02) and an
+  // in-progress break survives reloads; useStoredState syncs it from localStorage.
+  const [activeBreak, setActiveBreak] = useStoredState<ActiveBreak | null>(ACTIVE_BREAK_KEY, null);
+  const [projects, setProjects] = useStoredState<ProjectRef[]>(PROJECTS_CACHE_KEY, [], "session");
 
-    const projectMatch = pathname?.match(/^\/projects\/(\d+)\/(tasks|settings)/);
-    if (projectMatch) {
-      const projectId = Number(projectMatch[1]);
-      if (Number.isInteger(projectId) && projectId > 0) {
-        try {
-          const response = await fetch(`/api/projects/${projectId}`);
-          if (response.ok) {
-            const data = await response.json();
-            const jobId = Number(data.project?.jobId);
-            if (Number.isInteger(jobId) && jobId > 0) {
-              setActiveJobId(jobId);
-              return jobId;
-            }
-          }
-        } catch (err) {
-          console.error("Failed to resolve job context from project:", err);
-        }
-      }
-    }
+  // AR-04: job context is derived from the pathname with the shared resolver, which
+  // only recognizes job/project-task routes (no local regex that also matches /settings).
+  const activeJobId = resolveActiveJobId(pathname ?? "", projects);
 
-    setActiveJobId(null);
-    return null;
-  }, [pathname]);
-
+  // Project list backing the resolver; fetched once so navigation stays instant.
   useEffect(() => {
-    const stored = localStorage.getItem("activeBreak");
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      setActiveBreak({
-        ...parsed,
-        startTime: new Date(parsed.startTime),
-      });
-    }
-  }, []);
-
-  useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
 
-    async function loadBreakContext() {
-      const jobId = await resolveActiveJobId();
-      if (cancelled) return;
-      if (!jobId) {
-        setBreaks([]);
-        setSelectedBreak(null);
-        return;
+    const run = async () => {
+      try {
+        const response = await fetch("/api/projects", { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const data = (await response.json()) as ProjectsResponse;
+          if (!cancelled) setProjects(data.projects ?? []);
+        }
+      } catch (err) {
+        if (cancelled || isCancelledRequest(err)) return;
+        // Best-effort lookup: the widget degrades to "no job context" and the next
+        // navigation retries it. Browsers cancel an in-flight fetch when the document
+        // unloads, which arrives here as `TypeError: Failed to fetch`, so a console
+        // *error* would fire on ordinary fast navigation — RS-04's matrix proved that
+        // is noise, not a defect.
+        console.warn("Break widget: project context unavailable, will retry:", err);
       }
-      await fetchBreaks(jobId);
-    }
+    };
 
-    loadBreakContext();
+    void run();
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [resolveActiveJobId]);
+  }, [setProjects]);
 
   useEffect(() => {
-    if (!activeBreak) {
-      setElapsedSeconds(0);
-      return;
-    }
+    if (!activeJobId) return;
 
-    const interval = setInterval(() => {
-      const elapsed = Math.floor((new Date().getTime() - activeBreak.startTime.getTime()) / 1000);
-      setElapsedSeconds(elapsed);
-    }, 1000);
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const run = async () => {
+      try {
+        const response = await fetch(`/api/breaks?jobId=${activeJobId}`, { signal: controller.signal });
+        const data = response.ok ? ((await response.json()) as BreaksResponse) : null;
+        if (cancelled) return;
+        setBreaks((data?.breaks ?? []).filter((breakType) => breakType.isActive));
+      } catch (err) {
+        if (cancelled || isCancelledRequest(err)) return;
+        // Same navigation-cancelled race as the project lookup above; the widget
+        // shows an empty break list and refetches on the next route.
+        console.warn("Break widget: break list unavailable, will retry:", err);
+        setBreaks([]);
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [activeJobId]);
+
+  useEffect(() => {
+    if (!activeBreak) return;
+
+    const startTime = new Date(activeBreak.startTime).getTime();
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    };
+
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
 
     return () => clearInterval(interval);
   }, [activeBreak]);
 
-  async function fetchBreaks(jobId: number) {
-    try {
-      const response = await fetch(`/api/breaks?jobId=${jobId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setBreaks(data.breaks?.filter((b: BreakType) => b.isActive) || []);
-      } else {
-        setBreaks([]);
-      }
-    } catch (err) {
-      console.error("Failed to fetch breaks:", err);
-      setBreaks([]);
-    }
-  }
-
-  async function startBreak() {
+  function startBreak() {
     if (!selectedBreak || !activeJobId) return;
 
     const breakType = breaks.find((b) => b.id === selectedBreak);
     if (!breakType) return;
 
     setLoading(true);
+    setBreakError(null);
 
     const newBreak: ActiveBreak = {
       id: Date.now(),
       breakTypeId: breakType.id,
       jobId: activeJobId,
-      startTime: new Date(),
+      startTime: new Date().toISOString(),
       duration: breakType.duration,
       name: breakType.name,
     };
 
+    // useStoredState mirrors this into localStorage for the overlay and reloads.
     setActiveBreak(newBreak);
-    localStorage.setItem("activeBreak", JSON.stringify(newBreak));
 
     // Dispatch event to notify break-pause-overlay
     window.dispatchEvent(new CustomEvent("breakStarted", { detail: newBreak }));
@@ -157,70 +151,34 @@ export function GlobalBreakWidget() {
   }
 
   async function endBreak() {
-    if (!activeBreak) return;
+    if (!activeBreak || loading) return;
 
     setLoading(true);
+    setBreakError(null);
 
-    // Calculate actual break duration
-    const actualDuration = Math.floor((new Date().getTime() - activeBreak.startTime.getTime()) / 1000);
+    // One server call, one transaction: the break task is created already
+    // completed, so it can never be left half-written (UX-03).
+    const result = await logFinishedBreak(activeBreak, pathname);
 
-    // Create a break task in the current project; fallback to the first project in the job.
-    const projectMatch = pathname?.match(/\/projects\/(\d+)\/tasks/);
-    let projectId: number | null = projectMatch ? parseInt(projectMatch[1]) : null;
-
-    if (!projectId && activeBreak.jobId) {
-      try {
-        const projectsRes = await fetch("/api/projects");
-        if (projectsRes.ok) {
-          const data = await projectsRes.json();
-          const firstProject = (data.projects || []).find((project: { id: number; jobId: number }) => project.jobId === activeBreak.jobId);
-          projectId = firstProject?.id ?? null;
-        }
-      } catch (err) {
-        console.error("Failed to resolve project for break logging:", err);
-      }
-    }
-
-    if (projectId) {
-      try {
-        const response = await fetch("/api/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            projectId,
-            title: `${activeBreak.name} Break`,
-            description: `Break duration: ${formatElapsed(actualDuration)}`,
-            startedAt: activeBreak.startTime.toISOString(),
-          }),
-        });
-
-        if (response.ok) {
-          const taskData = await response.json();
-          await fetch("/api/tasks", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              taskId: taskData.task.id,
-              action: "complete",
-              details: `Break completed. Duration: ${formatElapsed(actualDuration)}`,
-              elapsedSeconds: actualDuration,
-            }),
-          });
-        }
-      } catch (err) {
-        console.error("Failed to log break:", err);
-      }
+    if (!result.ok) {
+      // Keep the break active so the timer and a retry are still available.
+      setBreakError(result.error);
+      setLoading(false);
+      return;
     }
 
     setActiveBreak(null);
-    localStorage.removeItem("activeBreak");
 
     // Dispatch event to notify break-pause-overlay
     window.dispatchEvent(new CustomEvent("breakEnded"));
 
     setLoading(false);
+    // Re-read server data instead of a full page reload, which would discard the
+    // in-memory state of every board on the route.
     router.refresh();
   }
+
+  const visibleBreaks = activeJobId ? breaks : [];
 
   const remainingSeconds = activeBreak?.duration
     ? Math.max(0, activeBreak.duration * 60 - elapsedSeconds)
@@ -231,7 +189,7 @@ export function GlobalBreakWidget() {
   if (pathname === "/login") return null;
 
   return (
-    <div className="fixed right-6 top-6 z-50">
+    <div className="fixed bottom-3 right-3 z-50 max-w-[calc(100vw-1.5rem)] md:bottom-auto md:right-6 md:top-6 md:max-w-none">
       {activeBreak ? (
         <div
           className={`overflow-hidden rounded-2xl border border-white/20 shadow-2xl backdrop-blur-xl transition-all ${
@@ -240,15 +198,15 @@ export function GlobalBreakWidget() {
               : "bg-orange-500/90 dark:bg-orange-600/90"
           }`}
         >
-          <div className="flex items-center gap-3 px-4 py-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20">
               <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-white">{activeBreak.name}</p>
-              <p className="text-2xl font-bold text-white">
+              <p className="text-2xl font-bold text-white tabular-nums">
                 {remainingSeconds !== null
                   ? formatElapsed(remainingSeconds)
                   : formatElapsed(elapsedSeconds)}
@@ -257,11 +215,19 @@ export function GlobalBreakWidget() {
             <button
               onClick={endBreak}
               disabled={loading}
-              className="ml-4 rounded-xl bg-white/20 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/30 disabled:opacity-50"
+              className="ml-auto shrink-0 rounded-xl bg-white/20 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/30 disabled:opacity-50"
             >
               {loading ? "Ending..." : "End Break"}
             </button>
           </div>
+          {breakError && (
+            <p
+              role="alert"
+              className="bg-white/15 px-4 py-2 text-xs font-medium text-white"
+            >
+              {breakError}
+            </p>
+          )}
           {remainingSeconds !== null && (
             <div className="h-1 bg-white/20">
               <div
@@ -277,9 +243,10 @@ export function GlobalBreakWidget() {
         <div className="relative">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 rounded-xl border border-white/20 bg-white/80 px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white/95 hover:shadow-xl dark:border-white/10 dark:bg-slate-900/80 dark:text-zinc-200 dark:hover:bg-slate-900/95"
+            aria-expanded={isExpanded}
+            className="flex items-center gap-2 rounded-xl border border-surface-border bg-surface-strong px-4 py-3 text-sm font-medium text-zinc-700 shadow-lg backdrop-blur-xl transition-all hover:bg-white/95 hover:shadow-xl dark:text-zinc-200 dark:hover:bg-slate-900/95"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-orange-500 to-amber-500 text-white">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-orange-500 to-amber-500 text-white">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -288,7 +255,7 @@ export function GlobalBreakWidget() {
           </button>
 
           {isExpanded && (
-            <div className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-2xl border border-white/20 bg-white/80 p-5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">
+            <div className="absolute bottom-full right-0 mb-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-surface-border bg-surface-strong p-5 shadow-2xl backdrop-blur-xl md:bottom-auto md:top-full md:mb-0 md:mt-2">
               <h3 className="mb-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100">Select Break Type</h3>
               {!activeJobId ? (
                 <div className="mb-3 rounded-xl border border-amber-200/60 bg-amber-50/80 p-3 text-xs text-amber-700 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-300">
@@ -296,13 +263,14 @@ export function GlobalBreakWidget() {
                 </div>
               ) : null}
               <select
+                aria-label="Break type"
                 value={selectedBreak || ""}
                 onChange={(e) => setSelectedBreak(e.target.value ? Number(e.target.value) : null)}
                 disabled={!activeJobId}
                 className="mb-3 w-full rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2.5 text-sm outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-orange-500 dark:focus:bg-zinc-800 dark:focus:ring-orange-900/30"
               >
                 <option value="">Choose a break...</option>
-                {breaks.map((breakType) => (
+                {visibleBreaks.map((breakType) => (
                   <option key={breakType.id} value={breakType.id}>
                     {breakType.name}
                     {breakType.duration && ` (${breakType.duration} min)`}
@@ -312,7 +280,7 @@ export function GlobalBreakWidget() {
               <button
                 onClick={startBreak}
                 disabled={!activeJobId || !selectedBreak || loading}
-                className="w-full rounded-xl bg-linear-to-r from-orange-500 to-amber-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
+                className="w-full rounded-xl bg-linear-to-r from-orange-700 to-amber-700 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/30 transition-all hover:shadow-xl hover:shadow-orange-500/40 disabled:opacity-50"
               >
                 {loading ? "Starting..." : "Start Break"}
               </button>

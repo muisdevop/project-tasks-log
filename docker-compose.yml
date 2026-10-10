@@ -1,3 +1,21 @@
+# AR-08: GID Task Flow - local/demo compose.
+#
+# Defaults run SQLite only (plain `docker compose up`). To test Postgres:
+#   DB_PROVIDER=postgres docker compose --profile postgres up
+#
+# DATABASE_URL is intentionally NOT baked into the image (AR-06/AR-08). The
+# container entrypoint resolves it in this order:
+#   DATABASE_URL (if non-empty) > DATABASE_URL_POSTGRES (postgres) or
+#   DATABASE_URL_SQLITE (sqlite, default file:/data/dev.db).
+# Postgres users simply set DB_PROVIDER=postgres and/or DATABASE_URL - there is
+# no stale SQLite default to fight. An explicit empty value means "derive from
+# the provider-specific URL below" (that is why DATABASE_URL defaults to "").
+#
+# NOTE (Coolify): Coolify appends a random suffix to container names, so never
+# rely on a fixed container-name DNS alias; the DB host must always come from
+# DATABASE_URL(_POSTGRES) env. The `postgres` host below is the compose SERVICE
+# name, valid only on this compose project's network.
+
 services:
   app:
     build:
@@ -5,30 +23,59 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    restart: unless-stopped # AR-08: match the postgres service policy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
       DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      # AR-08: empty by default = let the entrypoint pick DATABASE_URL_SQLITE /
+      # DATABASE_URL_POSTGRES below. Set a full URL here to override everything.
       DATABASE_URL: ${DATABASE_URL:-}
       DATABASE_URL_SQLITE: ${DATABASE_URL_SQLITE:-file:/data/dev.db}
       DATABASE_URL_POSTGRES: ${DATABASE_URL_POSTGRES:-postgresql://tasklogger:tasklogger@postgres:5432/tasklogger?schema=public}
       APP_USERNAME: ${APP_USERNAME:-admin}
-      APP_PASSWORD: ${APP_PASSWORD:-admin123}
-      SESSION_SECRET: ${SESSION_SECRET:-change-this-in-production}
+      # SEC-03: nothing publicly knownable is shipped as a default any more. A
+      # forgeable session key or a well-known password is exactly what the audit
+      # called out, so compose refuses to start until the operator provides
+      # their own values. Generate them once:
+      #   SESSION_SECRET=$(openssl rand -hex 32)
+      #   APP_PASSWORD_HASH="$(npm run password:hash -- 'your-password')"
+      # A committed hash of "admin123" would have been the same as no password
+      # for anyone who can read this file, so there is no demo fallback.
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      # Quoted, and deliberately so: the message text contains ": ", which an
+      # unquoted YAML scalar cannot carry (a plain `key: a: b` is a parse error,
+      # and `docker compose config` fails the whole file). docker-compose.yml was
+      # not parsed by anything until the 2026-10-09 re-audit added a CI step, which
+      # is how that regression slipped in with the removal of the demo defaults.
+      APP_PASSWORD_HASH: '${APP_PASSWORD_HASH:?APP_PASSWORD_HASH is required - run: npm run password:hash -- "<password>"}'
+      SESSION_SECRET: '${SESSION_SECRET:?SESSION_SECRET is required - run: openssl rand -hex 32}'
     volumes:
       - tasklogger-data:/data
     depends_on:
+      # AR-08: consistent healthcheck/depends_on; postgres is only present when
+      # the `postgres` profile is enabled, so the dependency is optional.
       postgres:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    # AR-08: example resource limits so one runaway chromium/PDF burst cannot
+    # starve the host. Tune to your box; `deploy` is respected by docker
+    # compose (v2) and Coolify.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
 
   postgres:
     image: postgres:16-alpine
+    profiles: ["postgres"] # AR-08: opt-in; plain `docker compose up` = sqlite
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tasklogger}
@@ -45,4 +92,3 @@ services:
 volumes:
   tasklogger-data:
   tasklogger-postgres-data:
-

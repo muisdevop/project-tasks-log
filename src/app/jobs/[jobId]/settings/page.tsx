@@ -42,10 +42,10 @@ export default async function JobSettingsPage({
     <SidebarLayout username={username}>
       <div className="mx-auto w-full max-w-3xl space-y-8">
         {/* Header */}
-        <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600 dark:text-blue-400">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700 dark:text-blue-400">
                 Job Configuration
               </p>
               <h1 className="mt-3 text-3xl font-bold text-zinc-900 dark:text-zinc-100">
@@ -57,7 +57,7 @@ export default async function JobSettingsPage({
             </div>
             <Link
               href={`/jobs/${job.id}`}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              className="text-sm font-medium text-blue-700 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
             >
               ← Back to Job
             </Link>

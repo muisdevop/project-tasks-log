@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireWriteAccess } from "@/lib/auth";
+import { toErrorResponse } from "@/lib/api-error";
 import { userProfileSchema } from "@/lib/validators";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const username = await requireAuth();
+    const username = await requireAuth(request);
 
     await prisma.userSettings.upsert({
       where: { id: 1 },
@@ -31,14 +32,16 @@ export async function GET() {
       },
       username,
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    // BG-06: a bare `catch` here reported every failure (locked DB, bad raw query)
+    // as "Unauthorized", which logged users out on server faults.
+    return toErrorResponse(error, "Unable to load profile.");
   }
 }
 
 export async function PATCH(request: Request) {
   try {
-    await requireAuth();
+    await requireWriteAccess(request);
     const json = await request.json();
     const parsed = userProfileSchema.safeParse(json);
 
@@ -89,7 +92,9 @@ export async function PATCH(request: Request) {
         bio: updated?.bio ?? "",
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Unable to update profile." }, { status: 500 });
+  } catch (error) {
+    // BG-06: UnauthorizedError must reach the client as 401; the catch-all 500
+    // made an expired session look like a server fault (and hid real ones).
+    return toErrorResponse(error, "Unable to update profile.");
   }
 }

@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 .env
+# ...but the template is tracked: it is the onboarding contract and the AI-agent
+# surface (AI-01) needs `cp .env.example .env` to work from a fresh clone. It
+# carries no credential material — APP_PASSWORD and APP_PASSWORD_HASH are empty.
+!.env.example
 
 # vercel
 .vercel
@@ -45,3 +49,28 @@ next-env.d.ts
 
 # local sqlite db
 dev.db
+
+# archives and scratch files (PM-01: repository snapshots must never be committed)
+*.zip
+*.tar.gz
+.tmp-*
+
+# e2e (Playwright) scratch: database, storage state, reports
+/e2e-playwright.db
+/e2e-playwright.db-shm
+/e2e-playwright.db-wal
+/.playwright-e2e/
+/.next-e2e/
+/test-results/
+/playwright-report/
+
+# Generated artifacts: coverage report and the audit workbook export
+/coverage/
+/audit-report/
+
+# Database snapshots written by `npm run db:backup` (MF-06)
+/backups/
+
+# Qoder/agent scratch: nested git worktrees hold full copies of this repo at an
+# older commit. They must never be committed, linted, typechecked or built.
+/.qoder/

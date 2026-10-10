@@ -30,6 +30,8 @@ model UserSettings {
   bio          String?
   reportTitleOptions Json?
   defaultReportTitle String?
+  // Bumped on password change / logout to invalidate outstanding sessions (SEC-06)
+  tokenVersion Int      @default(1)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -77,9 +79,14 @@ model Task {
   logNotes           String?
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
+  // Marks prayer/lockout break tasks so breaks listing does not rely on title suffixes (FL-05)
+  isBreak            Boolean    @default(false)
   project            Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   events             TaskEvent[]
   subtasks           SubTask[]
+
+  @@index([projectId, status])
+  @@index([status, endedAt])
 }
 
 model BreakType {
@@ -102,6 +109,8 @@ model TaskEvent {
   eventAt   DateTime      @default(now())
   meta      Json?
   task      Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 model SubTask {
@@ -112,6 +121,8 @@ model SubTask {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 // Job Attendance for checkin/checkout functionality
@@ -126,6 +137,32 @@ model JobAttendance {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  // PAR-04: the engine, not this transaction, is the authority on "at most one
+  // open check-in per job". A partial unique index
+  // (`ON "JobAttendance"("jobId") WHERE "checkOutTime" IS NULL`) enforces it in
+  // both migration sets; Prisma schemas cannot express a partial index, so the
+  // object exists only in SQL and `npm run db:parity:migrations` keeps the two
+  // definitions identical. The integration harness applies that file after
+  // `db push` so the tests run against the same constraint as a deployment.
   @@index([jobId])
   @@index([checkInTime])
+}
+
+// AI-02: scoped, revocable API tokens for agents / server-to-server callers.
+// Only the SHA-256 hash of the token is stored, never the plaintext.
+// `scope` is an enum-ish string kept as TEXT so both providers stay identical:
+// "read" authorizes GET only, "write" authorizes GET/POST/PATCH/DELETE. The two
+// allowed values are enforced by apiTokenCreateSchema in src/lib/validators.ts.
+model ApiToken {
+  id         Int       @id @default(autoincrement())
+  tokenHash  String    @unique
+  name       String
+  scope      String    @default("read")
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  @@index([revokedAt])
+  @@index([expiresAt])
 }

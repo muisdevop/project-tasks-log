@@ -1,13 +1,16 @@
 "use client";
 
 import { formatElapsed } from "@/lib/business-time";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
-import { RichTextEditor } from "./rich-text-editor";
+import { useMemo, useState } from "react";
+import { useStoredState } from "@/hooks/use-stored-state";
+import { readApiError, useApiMutation, useKeyedApiMutation } from "@/hooks/use-api-mutation";
+import { LazyRichTextEditor as RichTextEditor } from "./rich-text-editor-lazy";
 import { RichTextDisplay } from "./rich-text-display";
 import { TaskActionModal } from "./task-action-modal";
 import { LogNotesModal } from "./log-notes-modal";
-import { SubTasks } from "./subtasks";
+import { SubTasks, type SubTask } from "./subtasks";
+import { SectionCard } from "@/components/ui/card";
+import { StatusBanner } from "@/components/ui/status-banner";
 
 function formatDateTime(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -24,110 +27,75 @@ type Task = {
   completionOutput: string | null;
   cancellationReason: string | null;
   logNotes: string | null;
-  subtasks: {
-    id: number;
-    title: string;
-    isCompleted: boolean;
-  }[];
+  subtasks: SubTask[];
 };
 
-export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
-  const TASK_COLLAPSE_STORAGE_KEY = `task-board-collapsed-tasks:${projectId}`;
-  const FINISHED_DATE_EXPANDED_STORAGE_KEY = `task-board-expanded-finished-dates:${projectId}`;
-  const IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY = `task-board-collapsed-progress-dates:${projectId}`;
+/** MF-05 UI adoption: one client page of `/api/tasks`. Mirrors LIST_DEFAULT_LIMIT. */
+const TASK_PAGE_SIZE = 50;
 
-  const router = useRouter();
+type TaskBrowse = { tasks: Task[]; nextCursor: string | null };
+
+/** Keyed busy flag for the create form; task operations key themselves by task id. */
+const CREATE_KEY = "create";
+
+export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task[] }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [modalAction, setModalAction] = useState<{ type: "complete" | "cancel"; taskId: number } | null>(null);
-  const [modalLoading, setModalLoading] = useState(false);
   const [logNotesTask, setLogNotesTask] = useState<{ taskId: number; notes: string } | null>(null);
-  const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<number>>(new Set());
-  const [collapsedInProgressDates, setCollapsedInProgressDates] = useState<Set<string>>(new Set());
-  const [expandedFinishedDates, setExpandedFinishedDates] = useState<Set<string>>(new Set());
+  const [logNotesError, setLogNotesError] = useState<string | null>(null);
+  // BG-04: board-level requests (create, hold/resume, notes) stay busy per task
+  // id so two parallel operations cannot lose each other's busy flag.
+  const { mutate: requestBoard, isBusy, error } = useKeyedApiMutation<string | number>();
+  // UX-01: the action modal keeps its own pending/error pair so a failure leaves
+  // it mounted with the draft intact instead of surfacing behind the backdrop.
+  const {
+    mutate: requestAction,
+    pending: modalLoading,
+    error: modalError,
+    setError: setModalError,
+  } = useApiMutation();
 
-  useEffect(() => {
-    try {
-      const collapsedTasksRaw = localStorage.getItem(TASK_COLLAPSE_STORAGE_KEY);
-      if (collapsedTasksRaw) {
-        const parsed = JSON.parse(collapsedTasksRaw) as number[];
-        setCollapsedTaskIds(new Set(parsed));
-      }
+  // BG-02: collapse state lives in Web Storage. The arrays (not Sets, which do
+  // not survive JSON) are the stored shape, and the first render always matches
+  // server markup because the value is seeded from the empty fallback.
+  const [collapsedTaskList, setCollapsedTaskList] = useStoredState<number[]>(
+    `task-board-collapsed-tasks:${projectId}`,
+    [],
+  );
+  const [collapsedProgressDateList, setCollapsedProgressDates] = useStoredState<string[]>(
+    `task-board-collapsed-progress-dates:${projectId}`,
+    [],
+  );
+  const [expandedFinishedDateList, setExpandedFinishedDates] = useStoredState<string[]>(
+    `task-board-expanded-finished-dates:${projectId}`,
+    [],
+  );
 
-      const collapsedProgressDatesRaw = localStorage.getItem(IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY);
-      if (collapsedProgressDatesRaw) {
-        const parsed = JSON.parse(collapsedProgressDatesRaw) as string[];
-        setCollapsedInProgressDates(new Set(parsed));
-      }
+  const collapsedTaskIds = useMemo(() => new Set(collapsedTaskList), [collapsedTaskList]);
+  const collapsedInProgressDates = useMemo(
+    () => new Set(collapsedProgressDateList),
+    [collapsedProgressDateList],
+  );
+  const expandedFinishedDates = useMemo(
+    () => new Set(expandedFinishedDateList),
+    [expandedFinishedDateList],
+  );
 
-      const expandedFinishedDatesRaw = localStorage.getItem(FINISHED_DATE_EXPANDED_STORAGE_KEY);
-      if (expandedFinishedDatesRaw) {
-        const parsed = JSON.parse(expandedFinishedDatesRaw) as string[];
-        setExpandedFinishedDates(new Set(parsed));
-      }
-    } catch {
-      // Ignore invalid persisted collapse state.
-    }
-  }, [
-    TASK_COLLAPSE_STORAGE_KEY,
-    IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY,
-    FINISHED_DATE_EXPANDED_STORAGE_KEY,
-  ]);
-
-  useEffect(() => {
-    localStorage.setItem(TASK_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsedTaskIds)));
-  }, [TASK_COLLAPSE_STORAGE_KEY, collapsedTaskIds]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY,
-      JSON.stringify(Array.from(collapsedInProgressDates)),
-    );
-  }, [IN_PROGRESS_DATE_COLLAPSED_STORAGE_KEY, collapsedInProgressDates]);
-
-  useEffect(() => {
-    localStorage.setItem(
-      FINISHED_DATE_EXPANDED_STORAGE_KEY,
-      JSON.stringify(Array.from(expandedFinishedDates)),
-    );
-  }, [FINISHED_DATE_EXPANDED_STORAGE_KEY, expandedFinishedDates]);
+  function toggleValue<T>(list: T[], value: T): T[] {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  }
 
   function toggleDateCollapse(date: string, isFinished: boolean) {
     if (isFinished) {
-      setExpandedFinishedDates((prev) => {
-        const newSet = new Set(prev);
-        if (newSet.has(date)) {
-          newSet.delete(date);
-        } else {
-          newSet.add(date);
-        }
-        return newSet;
-      });
+      setExpandedFinishedDates((prev) => toggleValue(prev, date));
     } else {
-      setCollapsedInProgressDates(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(date)) {
-          newSet.delete(date);
-        } else {
-          newSet.add(date);
-        }
-        return newSet;
-      });
+      setCollapsedProgressDates((prev) => toggleValue(prev, date));
     }
   }
 
   function toggleTaskCollapse(taskId: number) {
-    setCollapsedTaskIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) {
-        next.delete(taskId);
-      } else {
-        next.add(taskId);
-      }
-      return next;
-    });
+    setCollapsedTaskList((prev) => toggleValue(prev, taskId));
   }
 
   function taskGroupDate(task: Task, isFinished: boolean): string {
@@ -148,97 +116,162 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    const response = await fetch("/api/tasks", {
+    const ok = await requestBoard(CREATE_KEY, "/api/tasks", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, title, description }),
+      body: { projectId, title, description },
+      fallbackError: "Failed to create task.",
     });
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to create task.");
-      return;
-    }
+    if (!ok) return;
     setTitle("");
     setDescription("");
-    router.refresh();
+    void refreshActiveSearch();
   }
 
   async function runAction(taskId: number, action: "complete" | "cancel" | "resume" | "hold") {
     if (action === "resume" || action === "hold") {
-      setBusyTaskId(taskId);
-      setError(null);
-      const response = await fetch("/api/tasks", {
+      const ok = await requestBoard(taskId, "/api/tasks", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, action }),
+        body: { taskId, action },
+        fallbackError: "Failed to update task.",
       });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "Failed to update task.");
-      }
-      setBusyTaskId(null);
-      router.refresh();
-    } else {
-      setModalAction({ type: action, taskId });
+      if (ok) void refreshActiveSearch();
+      return;
     }
+
+    setModalError(null);
+    setModalAction({ type: action, taskId });
   }
 
   async function handleModalConfirm(details: string) {
     if (!modalAction) return;
 
-    setModalLoading(true);
-    setError(null);
-    
-    const response = await fetch("/api/tasks", {
+    const ok = await requestAction("/api/tasks", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        taskId: modalAction.taskId, 
+      body: {
+        taskId: modalAction.taskId,
         action: modalAction.type,
-        details: details 
-      }),
+        details: details,
+      },
+      fallbackError: "Failed to update task.",
     });
-    
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to update task.");
+
+    // UX-01: only a success unmounts the modal, so a failed attempt keeps the
+    // typed details available for retry.
+    if (ok) {
+      setModalAction(null);
+      void refreshActiveSearch();
     }
-    
-    setModalLoading(false);
-    setModalAction(null);
-    router.refresh();
   }
 
   async function handleLogNotes(notes: string) {
     if (!logNotesTask) return;
 
-    setBusyTaskId(logNotesTask.taskId);
-    setError(null);
-    
-    const response = await fetch("/api/tasks", {
+    const { taskId } = logNotesTask;
+    setLogNotesError(null);
+
+    const ok = await requestBoard(taskId, "/api/tasks", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        taskId: logNotesTask.taskId, 
-        action: "log-notes",
-        notes: notes 
-      }),
+      body: { taskId, action: "log-notes", notes: notes },
+      fallbackError: "Failed to save notes.",
+      onFail: setLogNotesError,
     });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Failed to save notes.");
+    if (ok) {
+      setLogNotesTask(null);
     }
-    
-    setBusyTaskId(null);
-    setLogNotesTask(null);
-    router.refresh();
   }
 
-  const inProgress = tasks.filter((task) => task.status === "in_progress");
-  const onHold = tasks.filter((task) => task.status === "on_hold");
-  const finished = tasks.filter((task) => task.status === "completed" || task.status === "cancelled");
+  /* ------------------------------------------------------------------ *
+   * MF-05 UI adoption (opt-in, client fetch path only).
+   *
+   * The default view deliberately stays exactly what the server renders: the
+   * full `tasks` prop, no pagination, no extra fetch — the Playwright board
+   * marker relies on server-rendered rows and the e2e seeds stay untouched.
+   * Only when the operator searches does the board switch to the paged
+   * /api/tasks contract (`q` + `limit` + keyset `cursor`), and "Load more"
+   * continues that cursor walk. Clearing the search returns to the
+   * server-rendered list.
+   * ------------------------------------------------------------------ */
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearch, setActiveSearch] = useState<string | null>(null);
+  const [browse, setBrowse] = useState<TaskBrowse | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+
+  async function fetchTaskPage(term: string, cursor: string | null): Promise<TaskBrowse> {
+    const params = new URLSearchParams();
+    params.set("projectId", String(projectId));
+    params.set("limit", String(TASK_PAGE_SIZE));
+    if (term) params.set("q", term);
+    if (cursor) params.set("cursor", cursor);
+    const response = await fetch(`/api/tasks?${params.toString()}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(await readApiError(response, "Failed to load tasks."));
+    }
+    const data = (await response.json()) as { tasks?: Task[]; nextCursor?: string | null };
+    return { tasks: data.tasks ?? [], nextCursor: data.nextCursor ?? null };
+  }
+
+  function clearSearch() {
+    setSearchInput("");
+    setActiveSearch(null);
+    setBrowse(null);
+    setBrowseError(null);
+  }
+
+  async function runSearch(term: string) {
+    const trimmed = term.trim();
+    if (!trimmed) {
+      clearSearch();
+      return;
+    }
+    setBrowsing(true);
+    setBrowseError(null);
+    try {
+      setBrowse(await fetchTaskPage(trimmed, null));
+      setActiveSearch(trimmed);
+    } catch (cause) {
+      setBrowseError(cause instanceof Error ? cause.message : "Failed to load tasks.");
+    } finally {
+      setBrowsing(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!browse?.nextCursor) return;
+    setBrowsing(true);
+    setBrowseError(null);
+    try {
+      const page = await fetchTaskPage(activeSearch ?? "", browse.nextCursor);
+      setBrowse({ tasks: [...browse.tasks, ...page.tasks], nextCursor: page.nextCursor });
+    } catch (cause) {
+      setBrowseError(cause instanceof Error ? cause.message : "Failed to load more tasks.");
+    } finally {
+      setBrowsing(false);
+    }
+  }
+
+  /**
+   * A successful mutation refreshed the server props; when a search is active
+   * the rendered rows come from the client browse snapshot instead, so the
+   * search is re-issued to keep that snapshot honest.
+   */
+  async function refreshActiveSearch() {
+    if (activeSearch !== null) {
+      await runSearch(activeSearch);
+    }
+  }
+
+  const visibleTasks = browse ? browse.tasks : tasks;
+
+  // MF-05: the three sections render the same slice the server sent when no
+  // search is active, and the paged client snapshot when one is — the grouping
+  // rules themselves are unchanged from the pre-search board.
+  const inProgress = visibleTasks.filter((task) => task.status === "in_progress");
+  const onHold = visibleTasks.filter((task) => task.status === "on_hold");
+  const finished = visibleTasks.filter(
+    (task) => task.status === "completed" || task.status === "cancelled",
+  );
 
   function renderTaskSection(title: string, tasks: Task[], isFinished: boolean) {
     if (tasks.length === 0) return null;
@@ -247,225 +280,226 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
     const sortedDates = Object.keys(groupedTasks).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
     return (
-      <section className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70">
-        <div className="absolute inset-0 bg-linear-to-br from-violet-500/5 to-purple-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-        
-        <div className="relative">
-          <div className="mb-4 flex items-center gap-3">
-            <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg ${
-              title.includes("Progress") 
-                ? "bg-linear-to-br from-blue-500 to-indigo-600"
-                : "bg-linear-to-br from-emerald-500 to-teal-600"
-            }`}>
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {title.includes("Progress") ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                )}
-              </svg>
-            </div>
-            <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">{title}</h2>
-            <span className="rounded-full bg-linear-to-r from-violet-100 to-purple-100 px-3 py-1 text-xs font-medium text-violet-700 dark:from-violet-900/30 dark:to-purple-900/30 dark:text-violet-300">
-              {tasks.length} tasks
-            </span>
+      <SectionCard>
+        <div className="mb-4 flex items-center gap-3">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-lg ${
+            title.includes("Progress") 
+              ? "bg-linear-to-br from-blue-500 to-indigo-600"
+              : "bg-linear-to-br from-emerald-500 to-teal-600"
+          }`}>
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {title.includes("Progress") ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              )}
+            </svg>
           </div>
-          
-          <div className="space-y-4">
-            {sortedDates.map((date) => {
-              const isCollapsed = isFinished
-                ? !expandedFinishedDates.has(date)
-                : collapsedInProgressDates.has(date);
-              const dateTasks = groupedTasks[date];
-              
-              return (
-                <div key={date} className="overflow-hidden rounded-xl border border-zinc-200/50 bg-white/50 backdrop-blur-sm dark:border-zinc-700/50 dark:bg-zinc-800/30">
-                  <button
-                    onClick={() => toggleDateCollapse(date, isFinished)}
-                    className="w-full px-4 py-3 flex items-center justify-between bg-linear-to-r from-zinc-50/80 to-zinc-100/80 hover:from-zinc-100/80 hover:to-zinc-200/80 dark:from-zinc-800/50 dark:to-zinc-900/50 dark:hover:from-zinc-800/80 dark:hover:to-zinc-900/80 transition-all"
-                  >
-                    <span className="font-medium text-sm text-zinc-800 dark:text-zinc-200">
-                      {new Date(date).toLocaleDateString('en-US', { 
-                        weekday: 'long', 
-                        year: 'numeric', 
-                        month: 'long', 
-                        day: 'numeric' 
-                      })}
+          <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">{title}</h2>
+          <span className="rounded-full bg-linear-to-r from-violet-100 to-purple-100 px-3 py-1 text-xs font-medium text-violet-700 dark:from-violet-900/30 dark:to-purple-900/30 dark:text-violet-300">
+            {tasks.length} tasks
+          </span>
+        </div>
+        
+        <div className="space-y-4">
+          {sortedDates.map((date) => {
+            const isCollapsed = isFinished
+              ? !expandedFinishedDates.has(date)
+              : collapsedInProgressDates.has(date);
+            const dateTasks = groupedTasks[date];
+            
+            return (
+              <div key={date} className="overflow-hidden rounded-xl border border-zinc-200/50 bg-white/50 backdrop-blur-sm dark:border-zinc-700/50 dark:bg-zinc-800/30">
+                <button
+                  onClick={() => toggleDateCollapse(date, isFinished)}
+                  className="w-full px-4 py-3 flex items-center justify-between bg-linear-to-r from-zinc-50/80 to-zinc-100/80 hover:from-zinc-100/80 hover:to-zinc-200/80 dark:from-zinc-800/50 dark:to-zinc-900/50 dark:hover:from-zinc-800/80 dark:hover:to-zinc-900/80 transition-all"
+                >
+                  <span className="font-medium text-sm text-zinc-800 dark:text-zinc-200">
+                    {new Date(date).toLocaleDateString('en-US', { 
+                      weekday: 'long', 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric' 
+                    })}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                      {dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {dateTasks.length} task{dateTasks.length !== 1 ? 's' : ''}
-                      </span>
-                      <svg 
-                        className={`w-4 h-4 text-zinc-500 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
-                        fill="currentColor" 
-                        viewBox="0 0 20 20"
-                      >
-                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                  </button>
-                  
-                  {!isCollapsed && (
-                    <div className="p-4 space-y-3">
-                      {dateTasks.map((task) => {
-                        const isTaskCollapsed = collapsedTaskIds.has(task.id);
-                        return (
-                        <article key={task.id} className="rounded-xl border border-zinc-200/50 bg-white/70 p-4 backdrop-blur-sm transition-all hover:border-blue-300/50 hover:bg-white/90 hover:shadow-md dark:border-zinc-700/50 dark:bg-zinc-800/40 dark:hover:border-blue-500/30 dark:hover:bg-zinc-800/60">
-                          <button
-                            type="button"
-                            onClick={() => toggleTaskCollapse(task.id)}
-                            className="flex w-full items-center justify-between gap-3 text-left"
+                    <svg 
+                      className={`w-4 h-4 text-zinc-600 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`}
+                      fill="currentColor" 
+                      viewBox="0 0 20 20"
+                    >
+                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                </button>
+                
+                {!isCollapsed && (
+                  <div className="p-4 space-y-3">
+                    {dateTasks.map((task) => {
+                      const isTaskCollapsed = collapsedTaskIds.has(task.id);
+                      return (
+                      <article key={task.id} className="rounded-xl border border-zinc-200/50 bg-white/70 p-4 backdrop-blur-sm transition-all hover:border-blue-300/50 hover:bg-white/90 hover:shadow-md dark:border-zinc-700/50 dark:bg-zinc-800/40 dark:hover:border-blue-500/30 dark:hover:bg-zinc-800/60">
+                        <button
+                          type="button"
+                          onClick={() => toggleTaskCollapse(task.id)}
+                          className="flex w-full items-center justify-between gap-3 text-left"
+                        >
+                          <p className="font-semibold text-zinc-800 dark:text-zinc-100">{task.title}</p>
+                          <svg
+                            className={`h-4 w-4 text-zinc-600 transition-transform ${isTaskCollapsed ? "" : "rotate-180"}`}
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
                           >
-                            <p className="font-semibold text-zinc-800 dark:text-zinc-100">{task.title}</p>
-                            <svg
-                              className={`h-4 w-4 text-zinc-500 transition-transform ${isTaskCollapsed ? "" : "rotate-180"}`}
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
-                            >
-                              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                            </svg>
-                          </button>
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
+                        </button>
 
-                          {!isTaskCollapsed ? (
-                            <>
-                          <RichTextDisplay content={task.description} className="mt-2 text-sm text-zinc-600 dark:text-zinc-300" />
-                          
-                          {/* Subtasks - only for in-progress tasks */}
-                          <SubTasks taskId={task.id} taskStatus={task.status} />
-                          
-                          {task.logNotes ? (
-                            <div className="mt-3 rounded-lg border border-blue-200/50 bg-blue-50/50 p-3 dark:border-blue-800/30 dark:bg-blue-900/20">
-                              <p className="mb-1 text-sm font-medium text-blue-700 dark:text-blue-400">Notes History:</p>
-                              <RichTextDisplay content={task.logNotes} className="text-sm text-zinc-600 dark:text-zinc-300" />
-                            </div>
-                          ) : null}
-                          
-                          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                            <span className="inline-flex items-center rounded-md bg-zinc-100/70 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-400">
-                              {task.status === "on_hold" ? "Queued" : "Started"}: {formatDateTime(task.startedAt)}
-                            </span>
-                            <span className="inline-flex items-center rounded-md bg-zinc-100/70 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-400">
-                              Elapsed: {formatElapsed(task.elapsedSeconds)}
-                            </span>
+                        {!isTaskCollapsed ? (
+                          <>
+                        <RichTextDisplay content={task.description} className="mt-2 text-sm text-zinc-600 dark:text-zinc-300" />
+                        
+                        {/* Subtasks - only for in-progress tasks. PF-06: the rows
+                            ride in on the task payload, so no per-task fetch. */}
+                        <SubTasks
+                          taskId={task.id}
+                          taskStatus={task.status}
+                          initialSubtasks={task.subtasks}
+                        />
+                        
+                        {task.logNotes ? (
+                          <div className="mt-3 rounded-lg border border-blue-200/50 bg-blue-50/50 p-3 dark:border-blue-800/30 dark:bg-blue-900/20">
+                            <p className="mb-1 text-sm font-medium text-blue-700 dark:text-blue-400">Notes History:</p>
+                            <RichTextDisplay content={task.logNotes} className="text-sm text-zinc-600 dark:text-zinc-300" />
                           </div>
-                          
-                          {task.status === "in_progress" ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <button
-                                onClick={() => runAction(task.id, "complete")}
-                                disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/40 disabled:opacity-50"
-                              >
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                                Complete
-                              </button>
-                              <button
-                                onClick={() => runAction(task.id, "hold")}
-                                disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-amber-500/30 transition-all hover:shadow-lg hover:shadow-amber-500/40 disabled:opacity-50"
-                              >
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Put on Hold
-                              </button>
-                              <button
-                                onClick={() => runAction(task.id, "cancel")}
-                                disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
-                              >
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => setLogNotesTask({ taskId: task.id, notes: "" })}
-                                disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
-                              >
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                Add Notes
-                              </button>
-                            </div>
-                          ) : null}
+                        ) : null}
+                        
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                          <span className="inline-flex items-center rounded-md bg-zinc-100/70 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-400">
+                            {task.status === "on_hold" ? "Queued" : "Started"}: {formatDateTime(task.startedAt)}
+                          </span>
+                          <span className="inline-flex items-center rounded-md bg-zinc-100/70 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-400">
+                            Elapsed: {formatElapsed(task.elapsedSeconds)}
+                          </span>
+                        </div>
+                        
+                        {task.status === "in_progress" ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => runAction(task.id, "complete")}
+                              disabled={isBusy(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-emerald-500 to-green-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-emerald-500/30 transition-all hover:shadow-lg hover:shadow-emerald-500/40 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              Complete
+                            </button>
+                            <button
+                              onClick={() => runAction(task.id, "hold")}
+                              disabled={isBusy(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-amber-500/30 transition-all hover:shadow-lg hover:shadow-amber-500/40 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              Put on Hold
+                            </button>
+                            <button
+                              onClick={() => runAction(task.id, "cancel")}
+                              disabled={isBusy(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-700 to-rose-700 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => setLogNotesTask({ taskId: task.id, notes: "" })}
+                              disabled={isBusy(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-blue-500 to-indigo-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Add Notes
+                            </button>
+                          </div>
+                        ) : null}
 
-                          {task.status === "on_hold" ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
+                        {task.status === "on_hold" ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => runAction(task.id, "resume")}
+                              disabled={isBusy(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-indigo-500/30 transition-all hover:shadow-lg hover:shadow-indigo-500/40 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.868v4.264a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" className="hidden" />
+                              </svg>
+                              Start / Resume
+                            </button>
+                            <button
+                              onClick={() => runAction(task.id, "cancel")}
+                              disabled={isBusy(task.id)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-700 to-rose-700 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                              Cancel
+                            </button>
+                          </div>
+                        ) : null}
+                        
+                        {task.status !== "in_progress" ? (
+                          <>
+                            {task.endedAt ? (
+                              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                                Ended: {formatDateTime(task.endedAt)}
+                              </p>
+                            ) : null}
+                            {task.completionOutput ? (
+                              <div className="mt-3 rounded-lg border border-emerald-200/50 bg-emerald-50/50 p-3 dark:border-emerald-800/30 dark:bg-emerald-900/20">
+                                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1">Work Output:</p>
+                                <RichTextDisplay content={task.completionOutput} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                              </div>
+                            ) : null}
+                            {task.cancellationReason ? (
+                              <div className="mt-3 rounded-lg border border-red-200/50 bg-red-50/50 p-3 dark:border-red-800/30 dark:bg-red-900/20">
+                                <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">Cancellation Reason:</p>
+                                <RichTextDisplay content={task.cancellationReason} className="text-sm text-zinc-600 dark:text-zinc-300" />
+                              </div>
+                            ) : null}
+                            {task.status === "cancelled" ? (
                               <button
                                 onClick={() => runAction(task.id, "resume")}
-                                disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-indigo-500/30 transition-all hover:shadow-lg hover:shadow-indigo-500/40 disabled:opacity-50"
+                                disabled={isBusy(task.id)}
+                                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/50 bg-white/50 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
                               >
                                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.868v4.264a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" className="hidden" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                 </svg>
-                                Start / Resume
+                                Resume
                               </button>
-                              <button
-                                onClick={() => runAction(task.id, "cancel")}
-                                disabled={busyTaskId === task.id}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-red-500 to-rose-500 px-3 py-1.5 text-sm font-medium text-white shadow-md shadow-red-500/30 transition-all hover:shadow-lg hover:shadow-red-500/40 disabled:opacity-50"
-                              >
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                                Cancel
-                              </button>
-                            </div>
-                          ) : null}
-                          
-                          {task.status !== "in_progress" ? (
-                            <>
-                              {task.endedAt ? (
-                                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                                  Ended: {formatDateTime(task.endedAt)}
-                                </p>
-                              ) : null}
-                              {task.completionOutput ? (
-                                <div className="mt-3 rounded-lg border border-emerald-200/50 bg-emerald-50/50 p-3 dark:border-emerald-800/30 dark:bg-emerald-900/20">
-                                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1">Work Output:</p>
-                                  <RichTextDisplay content={task.completionOutput} className="text-sm text-zinc-600 dark:text-zinc-300" />
-                                </div>
-                              ) : null}
-                              {task.cancellationReason ? (
-                                <div className="mt-3 rounded-lg border border-red-200/50 bg-red-50/50 p-3 dark:border-red-800/30 dark:bg-red-900/20">
-                                  <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">Cancellation Reason:</p>
-                                  <RichTextDisplay content={task.cancellationReason} className="text-sm text-zinc-600 dark:text-zinc-300" />
-                                </div>
-                              ) : null}
-                              {task.status === "cancelled" ? (
-                                <button
-                                  onClick={() => runAction(task.id, "resume")}
-                                  disabled={busyTaskId === task.id}
-                                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/50 bg-white/50 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
-                                >
-                                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                  </svg>
-                                  Resume
-                                </button>
-                              ) : null}
-                            </>
-                          ) : null}
-                            </>
-                          ) : null}
-                        </article>
-                      )})}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                          </>
+                        ) : null}
+                      </article>
+                    )})}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      </section>
+      </SectionCard>
     );
   }
 
@@ -474,7 +508,7 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
       {/* Create Task Form - Glassmorphism */}
       <form
         onSubmit={createTask}
-        className="group relative overflow-hidden rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl dark:border-white/10 dark:bg-slate-900/70"
+        className="group relative overflow-hidden rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl transition-all duration-300 hover:shadow-2xl"
       >
         <div className="absolute inset-0 bg-linear-to-br from-blue-500/10 to-indigo-500/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         
@@ -489,7 +523,11 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
           </div>
           
           <div className="space-y-3">
+            <label htmlFor={`task-title-${projectId}`} className="sr-only">
+              Task title
+            </label>
             <input
+              id={`task-title-${projectId}`}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder="Task title"
@@ -497,16 +535,15 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
             />
             <div className="rounded-xl border border-zinc-200/50 bg-white/50 p-1 dark:border-zinc-700/50 dark:bg-zinc-800/50">
               <RichTextEditor
-                key={`task-desc-${title}`}
-                value={description}
+                                value={description}
                 onChange={setDescription}
                 placeholder="Description (optional)"
               />
             </div>
             <button
               type="submit"
-              disabled={!title.trim()}
-              className="rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-6 py-2.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+              disabled={!title.trim() || isBusy(CREATE_KEY)}
+              className="rounded-xl bg-linear-to-r from-blue-700 to-indigo-700 px-6 py-2.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all hover:shadow-xl hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
             >
               Create Task
             </button>
@@ -514,39 +551,111 @@ export function TaskBoard({ projectId, tasks }: { projectId: number; tasks: Task
         </div>
       </form>
 
-      {error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-red-200/50 bg-red-50/70 px-4 py-3 text-sm text-red-600 backdrop-blur-sm dark:border-red-800/30 dark:bg-red-900/20 dark:text-red-400">
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          {error}
-        </div>
-      ) : null}
+      {/* MF-05 opt-in search: typing here switches the board from the full
+          server-rendered list to the paged /api/tasks contract; clearing it
+          returns to the default no-paging view. */}
+      <div className="rounded-2xl border border-surface-border bg-surface p-4 shadow-xl backdrop-blur-xl">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runSearch(searchInput);
+          }}
+        >
+          <label htmlFor={`task-search-${projectId}`} className="sr-only">
+            Search tasks by title
+          </label>
+          <input
+            id={`task-search-${projectId}`}
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search tasks by title…"
+            className="min-w-0 flex-1 rounded-xl border border-zinc-200/50 bg-white/50 px-3 py-2 text-sm text-zinc-900 outline-none transition-all placeholder:text-zinc-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-blue-500 dark:focus:bg-zinc-800 dark:focus:ring-blue-900/30"
+            disabled={browsing}
+          />
+          <button
+            type="submit"
+            disabled={browsing || !searchInput.trim()}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-blue-700 to-indigo-700 px-4 py-2 text-sm font-medium text-white shadow-md shadow-blue-500/30 transition-all hover:shadow-lg hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+          >
+            Search
+          </button>
+          {activeSearch !== null ? (
+            <button
+              type="button"
+              onClick={clearSearch}
+              disabled={browsing}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200/50 bg-white/50 px-4 py-2 text-sm font-medium text-zinc-700 transition-all hover:bg-white/80 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:bg-zinc-800/80 disabled:opacity-50"
+            >
+              Clear
+            </button>
+          ) : null}
+        </form>
+        {browse ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+            <span>
+              {browse.tasks.length} match{browse.tasks.length === 1 ? "" : "es"}
+              {activeSearch ? ` for “${activeSearch}”` : ""}
+            </span>
+            {browse.nextCursor ? (
+              <button
+                type="button"
+                onClick={() => void loadMore()}
+                disabled={browsing}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200/60 bg-blue-50/60 px-3 py-1.5 text-xs font-medium text-blue-700 transition-all hover:bg-blue-100/70 disabled:opacity-50 dark:border-blue-800/40 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/30"
+              >
+                {browsing ? "Loading…" : "Load more"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {browse && browse.tasks.length === 0 && !browsing ? (
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            No tasks in this project match the search.
+          </p>
+        ) : null}
+        {browseError ? (
+          <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-400">
+            {browseError}
+          </p>
+        ) : null}
+      </div>
+
+      {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
 
       {renderTaskSection("In Progress", inProgress, false)}
       {renderTaskSection("On Hold / In Review", onHold, false)}
       {renderTaskSection("Completed and Cancelled", finished, true)}
       
-      <TaskActionModal
-        isOpen={modalAction !== null}
-        onClose={() => setModalAction(null)}
-        onConfirm={handleModalConfirm}
-        title={modalAction?.type === "complete" ? "Complete Task" : "Cancel Task"}
-        placeholder={modalAction?.type === "complete" 
-          ? "Describe work performed and any outputs..." 
-          : "Reason for cancelling this task..."
-        }
-        confirmText={modalAction?.type === "complete" ? "Complete" : "Cancel"}
-        loading={modalLoading}
-      />
-      
-      <LogNotesModal
-        isOpen={logNotesTask !== null}
-        onClose={() => setLogNotesTask(null)}
-        onConfirm={handleLogNotes}
-        initialNotes={logNotesTask?.notes || ""}
-        loading={busyTaskId === logNotesTask?.taskId}
-      />
+      {/* Mount-only rendering resets each modal draft when it reopens (UX-01). */}
+      {modalAction ? (
+        <TaskActionModal
+          isOpen
+          onClose={() => setModalAction(null)}
+          onConfirm={handleModalConfirm}
+          title={modalAction.type === "complete" ? "Complete Task" : "Cancel Task"}
+          placeholder={
+            modalAction.type === "complete"
+              ? "Describe work performed and any outputs..."
+              : "Reason for cancelling this task..."
+          }
+          confirmText={modalAction.type === "complete" ? "Complete" : "Cancel"}
+          loading={modalLoading}
+          error={modalError}
+        />
+      ) : null}
+
+      {logNotesTask ? (
+        <LogNotesModal
+          isOpen
+          onClose={() => setLogNotesTask(null)}
+          onConfirm={handleLogNotes}
+          initialNotes={logNotesTask.notes}
+          loading={isBusy(logNotesTask.taskId)}
+          error={logNotesError}
+        />
+      ) : null}
     </div>
   );
 }

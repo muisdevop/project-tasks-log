@@ -53,10 +53,10 @@ export default async function JobDetailPage({
     <SidebarLayout username={username}>
       <div className="mx-auto w-full max-w-6xl space-y-8">
         {/* Header */}
-        <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600 dark:text-blue-400">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700 dark:text-blue-400">
                 Job Details
               </p>
               <h1 className="mt-3 text-3xl font-bold text-zinc-900 dark:text-zinc-100">
@@ -70,7 +70,7 @@ export default async function JobDetailPage({
             </div>
             <Link
               href={`/jobs/${job.id}/settings`}
-              className="rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:shadow-xl hover:shadow-blue-500/35"
+              className="rounded-xl bg-linear-to-r from-blue-700 to-indigo-700 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:shadow-xl hover:shadow-blue-500/35"
             >
               Configure Settings
             </Link>
@@ -79,8 +79,8 @@ export default async function JobDetailPage({
 
         {/* Job Info Cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
-            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <div className="rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
+            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-600 dark:text-zinc-400">
               Work Schedule
             </p>
             <p className="mt-2 text-lg font-bold text-zinc-900 dark:text-zinc-100">
@@ -88,8 +88,8 @@ export default async function JobDetailPage({
             </p>
           </div>
           
-          <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
-            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <div className="rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
+            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-600 dark:text-zinc-400">
               Active Projects
             </p>
             <p className="mt-2 text-lg font-bold text-zinc-900 dark:text-zinc-100">
@@ -97,8 +97,8 @@ export default async function JobDetailPage({
             </p>
           </div>
 
-          <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
-            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+          <div className="rounded-2xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
+            <p className="text-xs font-semibold uppercase tracking-widest text-zinc-600 dark:text-zinc-400">
               Created
             </p>
             <p className="mt-2 text-lg font-bold text-zinc-900 dark:text-zinc-100">
