@@ -4,11 +4,14 @@
  * Two-stage by design (preview, then apply): running the command without
  * `--force`/`--yes` prints exactly what would happen — which file is replaced,
  * how many rows are live today versus in the snapshot — and exits 0 without
- * touching anything. Applying a snapshot is deliberately destructive, so the
- * live database is snapshotted into the backup root first (an automatic
- * `*-pre-restore` safety copy) and the new file is validated with
- * `PRAGMA integrity_check` *and* a row-count comparison against the manifest
- * before the command reports success.
+ * touching anything. Applying a snapshot is deliberately destructive, so on
+ * *both* providers the live database is snapshotted into the backup root first
+ * (an automatic `*-pre-restore` safety copy, via the same `db:backup` path, so
+ * Postgres needs a working `pg_dump` before it will drop anything) and the new
+ * file is validated with `PRAGMA integrity_check` *and* a row-count comparison
+ * against the manifest before the command reports success. A restore also clears
+ * the entrypoint's "schema unchanged" marker, because a snapshot can be older
+ * than the migrations the next boot would otherwise skip.
  *
  * Provider paths:
  *   sqlite   atomic-ish file swap: the payload is copied to `<target>.restoring`,
@@ -18,8 +21,11 @@
  *            database. Because a plain `pg_dump` contains `CREATE TABLE`
  *            statements, restoring onto a non-empty schema would abort on the
  *            first existing table, so `--force` onto a non-empty database also
- *            recreates the `public` schema. If `psql` is not installed the
- *            command fails loudly (exit 3) with the exact manual command.
+ *            recreates the `public` schema. psql is addressed with discrete
+ *            `-h/-p/-U/-d` parameters and `PGPASSWORD`, never the DSN: libpq
+ *            rejects Prisma's `?schema=` URI parameter and argv would leak the
+ *            password. If `psql` is not installed the command fails loudly
+ *            (exit 3) with the exact manual command.
  *
  * Like backup.ts this module is import-safe: the CLI only runs when the file is
  * the entry point, so the unit tests can assert exit codes and output in-process.
@@ -47,6 +53,7 @@ import {
   runBackup,
   snapshotDirName,
   sqliteFilePathFromUrl,
+  toPgTarget,
   verifyPayload,
   verifySqliteIntegrity,
   parseArgs,
@@ -230,9 +237,10 @@ async function livePostgresCounts(connectionString: string): Promise<TableCounts
 function runPsql(
   binary: string,
   sqlArgs: string[],
+  childEnv: NodeJS.ProcessEnv,
   secrets: readonly string[],
 ): { ok: boolean; output: string } {
-  const result = spawnSync(binary, sqlArgs, { encoding: "utf8" });
+  const result = spawnSync(binary, sqlArgs, { encoding: "utf8", env: childEnv });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   const safe = redactSecrets(output, secrets);
   assertNoSecrets(safe, secrets, "psql output");
@@ -253,9 +261,22 @@ export function compareCounts(
       problems.push(`${table} has ${got} rows, snapshot says ${expected}`);
     }
   }
+  // A table the snapshot promised to leave out must actually come back empty —
+  // otherwise "excluded" was only a claim in the manifest.
+  for (const table of Object.keys(manifest.secretHandling.excludedTables)) {
+    const got = actual.counts[table];
+    if (got === undefined) {
+      problems.push(`${table} is missing, although the snapshot excluded only its rows`);
+    } else if (got !== 0) {
+      problems.push(`${table} has ${got} rows although the snapshot excluded it`);
+    }
+  }
   return {
     ok: problems.length === 0,
-    detail: problems.length === 0 ? `${Object.keys(manifest.rowCounts).length} tables verified` : problems.join("; "),
+    detail:
+      problems.length === 0
+        ? `${Object.keys(manifest.rowCounts).length} tables verified${Object.keys(manifest.secretHandling.excludedTables).length ? `, ${Object.keys(manifest.secretHandling.excludedTables).length} excluded table(s) confirmed empty` : ""}`
+        : problems.join("; "),
   };
 }
 
@@ -305,16 +326,65 @@ export async function runRestore(
     return { exitCode: EXIT.OK, lines, plan };
   }
 
+  // Cleared *before* anything is destroyed, not after the swap: if verification
+  // fails midway the database has still been replaced, and the next boot must not
+  // be allowed to skip `migrate deploy` on the strength of the old marker.
+  invalidateSchemaMarker(note);
+
   if (plan.provider === "sqlite") {
     await restoreSqlite(plan, env, cwd, note);
   } else {
-    await restorePostgres(plan, env, note, secrets);
+    await restorePostgres(plan, env, cwd, note, secrets);
   }
 
   note("");
   note("Restart the app afterwards so it reconnects to the restored database:");
   note("  docker compose restart app    (or: docker restart <container>)");
   return { exitCode: EXIT.OK, lines, plan };
+}
+
+/**
+ * The locations `docker-entrypoint.sh` may keep its "schema unchanged" marker
+ * (AR-07), in the same preference order.
+ */
+const SCHEMA_MARKER_FILES = ["/data/.prisma-schema-hash", "/app/.prisma-schema-hash", "/tmp/.prisma-schema-hash"];
+
+/**
+ * The entrypoint skips `prisma generate` + `migrate deploy` when the image's
+ * schema hash matches a marker stored in the volume. A restore moves the
+ * database backwards underneath that marker without changing the image, so the
+ * next boot would start the app against a schema older than its own migrations —
+ * the first query touching a newer column fails at runtime. Clearing the marker
+ * is what makes "restart the app" actually re-apply the migrations.
+ */
+export function invalidateSchemaMarker(
+  note: (line: string) => void,
+  files: readonly string[] = SCHEMA_MARKER_FILES,
+): string[] {
+  const cleared: string[] = [];
+  for (const file of files) {
+    let written: string;
+    try {
+      written = fs.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    // Only ever remove a file the entrypoint wrote — its whole content is the
+    // sha256 it compared. Anything else at that path is not ours to delete.
+    if (!/^[0-9a-f]{64}$/.test(written.trim())) continue;
+    try {
+      fs.rmSync(file);
+      cleared.push(file);
+    } catch {
+      note(`migrations       : could not remove ${file}; delete it before the next boot so migrate deploy is not skipped.`);
+    }
+  }
+  if (cleared.length > 0) {
+    note(`migrations       : cleared ${cleared.join(", ")} — the next boot re-runs prisma migrate deploy onto the restored database`);
+  } else {
+    note("migrations       : no schema marker to clear here; if the app runs in Docker, remove /data/.prisma-schema-hash so migrate deploy is not skipped.");
+  }
+  return cleared;
 }
 
 async function restoreSqlite(
@@ -363,9 +433,10 @@ async function restoreSqlite(
   note(`row check        : ${verdict.detail}`);
 }
 
-async function restorePostgres(
+export async function restorePostgres(
   plan: RestorePlan,
   env: EnvLike,
+  cwd: string,
   note: (line: string) => void,
   secrets: readonly string[],
 ): Promise<void> {
@@ -381,16 +452,32 @@ async function restorePostgres(
     );
   }
 
+  // Discrete parameters plus PGPASSWORD, never the DSN: libpq refuses a URI
+  // containing Prisma's `?schema=`, and a URL on argv would expose the password
+  // to every local process for as long as psql runs.
+  const target = toPgTarget(plan.connectionString);
+  const childEnv = { ...process.env, ...env, ...target.env } as unknown as NodeJS.ProcessEnv;
+
   if (plan.targetNonEmpty) {
+    // Same rule as the SQLite path, and for a harsher reason: the DROP below
+    // takes the live data with it, so it may only run once a copy exists.
+    const safety = await runBackup(env, cwd, { label: "pre-restore", now: new Date() });
+    note(`safety copy      : ${safety.plan.snapshotDir}`);
+
     note("dropping public   : non-empty target, recreating the public schema (per --force)");
-    const drop = runPsql(binary, [
-      "--no-password",
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-c",
-      "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO CURRENT_USER;",
-      plan.connectionString,
-    ], secrets);
+    const drop = runPsql(
+      binary,
+      [
+        "--no-password",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-c",
+        "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO CURRENT_USER;",
+        ...target.args,
+      ],
+      childEnv,
+      secrets,
+    );
     if (!drop.ok) {
       throw new BackupError(`Could not recreate the public schema: ${drop.output.trim()}`, EXIT.VERIFY_FAILED);
     }
@@ -398,7 +485,8 @@ async function restorePostgres(
 
   const apply = runPsql(
     binary,
-    ["--no-password", "-v", "ON_ERROR_STOP=1", "-q", "-f", plan.payloadFile, plan.connectionString],
+    ["--no-password", "-v", "ON_ERROR_STOP=1", "-q", "-f", plan.payloadFile, ...target.args],
+    childEnv,
     secrets,
   );
   if (!apply.ok) {

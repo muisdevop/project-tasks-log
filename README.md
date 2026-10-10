@@ -107,13 +107,14 @@ Every row is a real entry in `package.json` `scripts`.
 | `npm run test:e2e:install` | `playwright install --with-deps chromium webkit firefox` |
 | `npm run bundle:budget` | `node scripts/measure-bundle.mjs` — per-route First Load JS + budget gate |
 | `npm run db:migrate` / `db:migrate:sqlite` | `prisma migrate dev` on `prisma/schema.sqlite.prisma` |
-| `npm run db:migrate:postgres` | `prisma migrate deploy` on `prisma/postgres/schema.prisma` |
+| `npm run db:migrate:postgres` | `prisma migrate deploy --config prisma/postgres/migrate.config.mjs` — the `--config` is not decoration: the root `prisma.config.ts` pins `migrations.path` to the SQLite directory, and without it the command fails `P3019` on a real Postgres database (RA-20) |
 | `npm run db:migrate:dev:postgres` | `prisma migrate dev` on the Postgres schema (authoring) |
 | `npm run db:generate` / `db:generate:sqlite` | client generation, SQLite schema |
 | `npm run db:generate:postgres` | client generation, Postgres schema |
 | `npm run db:migrate:sqlite-to-postgres` | `tsx scripts/migrate-sqlite-to-postgres.ts` data move |
 | `npm run db:seed` | `tsx prisma/seed.ts` demo data |
 | `npm run db:parity` | `node scripts/check-schema-parity.mjs` — fails if the two Prisma schemas drift |
+| `npm run db:parity:migrations` | `node scripts/check-migration-parity.mjs` — fails if the two *migration sets* seed different tables, or if a constant default is written as an unquoted bracket token (PAR-02, PAR-03) |
 | `npm run smoke:container -- <baseUrl>` | `node scripts/container-smoke.mjs` — 28 functional checks against a *running* container (`APP_USERNAME`/`APP_PASSWORD`, `REQUIRE_PDF=1` to demand a real PDF) |
 | `npm run db:backup` | `tsx scripts/backup.ts` — labelled snapshot of the active provider (`docs/backup-restore.md`) |
 | `npm run db:restore` | `tsx scripts/restore.ts` — verifies and restores one of those snapshots |

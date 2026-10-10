@@ -28,7 +28,7 @@ The name is a UTC timestamp to the second, optionally with a label:
 ```
 backups/
 └── 2026-10-07T23-21-54Z/
-    ├── database.sqlite        # the payload (or backup.sql for Postgres)
+    ├── database.sqlite        # the payload (database.sql for Postgres)
     └── manifest.json          # provider, row counts, checksum, app version
 ```
 
@@ -53,16 +53,28 @@ committed.
 }
 ```
 
-The row counts are read **from the snapshot**, not from the live database, so
-the manifest is evidence about the copy you are holding. `_prisma_migrations`
-bookkeeping is deliberately excluded from the reported tables.
+The row counts are evidence about **the copy you are holding**, not about the
+live database. SQLite takes them from the snapshot file, which is exact. A
+Postgres payload is plain SQL that nothing can query, so its counts come from the
+live database a moment before the dump is written — with one correction: a table
+whose *data* the dump omits (`--exclude-tokens`) is removed from `rowCounts` and
+recorded under `secretHandling.excludedTables` instead, so the manifest never
+promises rows the payload cannot contain. `_prisma_migrations` bookkeeping is
+deliberately excluded from the reported tables.
 
 Payload kinds:
 
 | Provider | How it is taken | Payload |
 | --- | --- | --- |
 | SQLite | `better-sqlite3` online backup API; falls back to `VACUUM INTO`, then to checkpoint + copy | `database.sqlite` |
-| Postgres | `pg_dump --no-owner --no-privileges --format=plain` | `backup.sql` |
+| Postgres | `pg_dump --no-owner --no-privileges --format=plain` | `database.sql` |
+
+`pg_dump` and `psql` are addressed with discrete `-h/-p/-U/-d` parameters and
+`PGPASSWORD`, never with the `DATABASE_URL` itself. Two reasons, both measured:
+libpq rejects a connection URI containing a parameter it does not recognise —
+and every Prisma URL carries `?schema=public`, which `pg_dump` answers with
+`invalid URI query parameter: "schema"` — and a DSN placed in argv is readable by
+any local process (`/proc/<pid>/cmdline`) for as long as the tool runs.
 
 The SQLite chain matters: the backup API produces a consistent copy **while the
 app is writing**, which is the only safe way to snapshot a live file. Plain file
@@ -80,7 +92,10 @@ copying is not offered.
   an environment secret appears anywhere in it.
 - To hand a copy of the data to someone else without the credentials that can
   call the API, add `--exclude-tokens`: `ApiToken` rows are dropped and the
-  manifest records that, so the restore still verifies.
+  manifest records that under `secretHandling.excludedTables`, so the restore
+  still verifies — and verifies both directions, that the counted tables match
+  and that the excluded table came back with no rows in it. On Postgres the rows
+  are left out of the dump by `pg_dump --exclude-table-data`.
 
 Treat a snapshot with the same care as the production database.
 
@@ -132,15 +147,25 @@ or resource, `4` verification failed.
 3. For SQLite, `PRAGMA integrity_check` on the payload must answer `ok`.
 4. The current database is snapshotted first — the same `db:backup` path, with
    the label `pre-restore`, written into the backup root — so the state you are
-   overwriting is recoverable. A restore onto an empty target skips it.
-5. After the swap the live row counts are re-read and compared with the
-   manifest; a mismatch exits `4` and tells you where the safety snapshot is.
+   overwriting is recoverable. This happens on **both** providers, and it happens
+   *before* anything is destroyed. A restore onto an empty target skips it.
+5. Afterwards the live row counts are re-read and compared with the manifest; a
+   mismatch exits `4` and tells you where the safety snapshot is. A table the
+   snapshot claimed to exclude is checked in the other direction too: it must
+   come back with zero rows.
+6. The entrypoint's "schema unchanged" marker is cleared, so the next boot re-runs
+   `prisma migrate deploy`. Without that, restoring an older snapshot onto a newer
+   image would leave the database behind the schema the app was built against,
+   and the skip logic would never notice.
 
-For Postgres, step 4 is a schema-level operation: a non-empty target means the
-`public` schema is recreated and reloaded from the plain SQL dump, because the
-dump contains `CREATE TABLE` statements. That is destructive and it is the
-reason `--force` exists. If `psql` is missing the script says so and prints the
-exact `psql` command to run by hand instead of failing mysteriously.
+For Postgres, step 4 is the only thing standing between `--force` and an
+unrecoverable operation: a non-empty target means the `public` schema is dropped
+and recreated before the plain SQL dump is reloaded, because the dump contains
+`CREATE TABLE` statements. So on Postgres the safety copy is taken through
+`pg_dump` first, and if `pg_dump` is missing or fails, **nothing is dropped** —
+the restore stops with exit `3` before touching the live schema. If `psql` itself
+is missing the script says so and prints the exact `psql` command to run by hand
+instead of failing mysteriously.
 
 ## 7. Where the scripts run
 

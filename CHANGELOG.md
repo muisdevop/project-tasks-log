@@ -4,6 +4,44 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- Two commands that had never been run against a real database, and the gate that now
+  watches both of them (RA-20, PAR-02, PAR-03). (a) `npm run db:migrate:postgres` was
+  `prisma migrate deploy --schema prisma/postgres/schema.prisma`; the root
+  `prisma.config.ts` pins `migrations.path` to the SQLite directory, so against a live
+  Postgres server it loaded `13 migrations found in prisma/migrations` and died with
+  `P3019: The datasource provider postgresql specified in your schema does not match the
+  one specified in the migration_lock.toml, sqlite` — the documented way to migrate a
+  Postgres deployment had never worked, even though `docker-entrypoint.sh` writes its own
+  provider-specific config at boot and its comment admits the failure. It now points at a
+  committed `prisma/postgres/migrate.config.mjs` (`db:migrate:dev:postgres` had the same
+  defect and got the same fix), and running it against a freshly created database applies
+  all three Postgres migrations with exit 0. Writing that file measured one more thing:
+  Prisma resolves the paths inside a config relative to *the config file's directory*, not
+  the cwd — the first attempt looked for `/app/prisma/postgres/prisma/postgres/schema.prisma`.
+  (b) The two migration sets seeded different data: `20260327201323_add_job_hierarchy`
+  inserts a default `Job` and the Postgres set contained no `INSERT` at all, so a fresh
+  Postgres deployment started with an empty board while a fresh SQLite deployment started
+  with "Default Job" — identical schema files, different database. Fixed additively with
+  `20261010173500_seed_default_job` (`WHERE NOT EXISTS`, so it cannot collide with a job an
+  operator made), verified by the fresh deploy above, which now reports
+  `default-job | [1, 2, 3, 4, 5] | 09:00 | 17:00`. (c) `prisma/migrations/…add_job_hierarchy/migration.sql:21`
+  declares `"workDays" JSONB NOT NULL DEFAULT [1, 2, 3, 4, 5]`: in SQLite a bracketed token
+  is an *identifier* quote, so that is not a JSON array default. Measured against
+  `better-sqlite3`: the DDL loads, and an insert that omits the column stores the string
+  `1, 2, 3, 4, 5` — not valid JSON. The application is not exposed (`src/app/api/jobs/route.ts`
+  always supplies `workDays`), and repairing it means rebuilding `Job` — the table three
+  others reference — on data that is already shipped, so it is recorded as a tracked
+  exception rather than fixed blind here. What is new is `scripts/check-migration-parity.mjs`
+  (`npm run db:parity:migrations`, wired into CI next to `db:parity`): `db:parity` compares
+  the two *schema files* and could see none of this, so the new check compares the
+  *migration sets* — which tables each one seeds, and any constant default written as a
+  bracket token, with a shrink-only list for the one already applied. Both rules are proven
+  to fail: deleting the new Postgres seed migration produces
+  `Job is seeded by the sqlite migration set but not by postgres` (exit 1), and an injected
+  `DEFAULT [1, 2, 3]` produces the bracket-token message (exit 1), while the tree as
+  committed reports `Migration parity OK: both sets seed the same tables (Job)` (exit 0).
+  Prisma's table-rebuild copies (`INSERT INTO "new_Job" … RENAME TO "Job"`) are excluded,
+  because they move existing rows rather than seeding data.
 
 The 0.2.0 re-audit kept going until the report was clean, and that second pass
 found real defects in the layer nothing had tested yet. Entries below are tagged
@@ -50,6 +88,44 @@ with the re-audit ids (RA-xx) recorded in sheet 12 of the audit workbook.
   made RA-09 invisible locally.
 
 ### Fixed
+- The Postgres half of `db:backup`/`db:restore` had never been executed (RA-13..RA-19).
+  Both scripts stayed green through two audit passes because every test forced
+  `pg_dump`/`psql` to be *missing* — so nothing ever looked at the arguments the tools
+  actually receive. Running them in Linux against a real database that had rows found
+  seven defects: the documented Prisma URL (`…?schema=public`) was handed to libpq whole
+  and refused (`pg_dump: error: invalid URI query parameter: "schema"`, exit 3), the
+  connection string — password included — travelled on argv where any local process can
+  read it from `/proc/<pid>/cmdline` (measured `old-argv-password-hits=2`; the tools now
+  get discrete `-h/-p/-U/-d` plus `PGPASSWORD`, and the same probe reads 0), `--force`
+  restored onto a non-empty database by dropping and recreating the `public` schema
+  *without* the safety copy the SQLite path takes (the pre-fix run left no
+  `*-pre-restore` directory; the fixed run's copy contains the mutated live rows,
+  `mutated=1`), a `--exclude-tokens` manifest claimed rows the dump deliberately omitted
+  (`9 tables, 3 rows` against a payload holding zero of them) and then failed its own
+  post-restore check — `ApiToken has 0 rows, snapshot says 2`, exit 4, after the database
+  was already gone, the entrypoint's schema-hash marker survived a restore so the next
+  boot skipped `migrate deploy` onto the restored file (cleared before anything is
+  destroyed now: `MARKER_CLEARED`), the documentation named the Postgres payload
+  `backup.sql` while the code writes `database.sql`, and the `*_PATH` overrides were
+  collected as secret *values*, so the command redacted the very backup-root path it
+  exists to print. Eleven new tests cover the set, with the destructive-call ordering
+  pinned by which error surfaces first.
+- Three provider-parity defects that made the two shipped databases disagree (PAR-01,
+  PAR-05, PAR-07). `docker-entrypoint.sh` gated `prisma generate` behind the schema hash
+  even though generate writes into the image's own ephemeral `node_modules`, so a
+  container whose `/data` volume still held an old hash booted with a stale generated
+  client; it now runs on every boot and only `migrate deploy` is gated. `npm run db:seed`
+  built a `PrismaBetterSqlite3` adapter unconditionally, so seeding a Postgres deployment
+  died on the URL — the adapter now follows the resolved provider. And the report-title
+  PATCH (ST-01) read the settings row with a plain `SELECT` inside its transaction, which
+  under PostgreSQL's READ COMMITTED lets two concurrent writers each overwrite the other's
+  list: the read now carries `FOR UPDATE` where the provider understands it, and nothing
+  on SQLite. Five further parity differences — the default `Job` row only the SQLite
+  migrations insert, the unquoted `workDays` JSON default, the one-open-check-in race, the
+  NULL-`endedAt` ordering that changes which rows survive the export row cap, and
+  collation-dependent text tie-breaks — are recorded as findings PAR-02/03/04/06/08 in the
+  re-audit sheet instead of fixed blind: they need new migrations on *both* providers plus
+  a locking decision, and editing already-applied migrations is not a remedy.
 - SEC-01's accepted-risk rationale was wrong, and the fix it argued against was
   available. The workbook and `docs/security.md` stated that no advisory had a
   non-breaking remedy and that npm's Prisma fix was a downgrade to `prisma@6.19.3`;

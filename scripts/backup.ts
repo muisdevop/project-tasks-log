@@ -108,8 +108,12 @@ const SECRET_ENV_KEYS = [
   "DATABASE_URL_POSTGRES",
 ];
 
-/** Env keys that hold a path override, never the payload itself. */
-const PATH_ENV_KEYS = ["GID_BACKUP_DIR", "PG_DUMP_PATH", "PSQL_PATH", "PG_RESTORE_PATH"];
+/**
+ * The `*_PATH` overrides (`GID_BACKUP_DIR`, `PG_DUMP_PATH`, `PSQL_PATH`,
+ * `PG_RESTORE_PATH`) are deliberately absent from SECRET_ENV_KEYS: they hold a
+ * path, not a secret, and their values are exactly what `db:backup` has to print
+ * so an operator can see where a snapshot landed.
+ */
 
 export type Manifest = {
   format: typeof BACKUP_FORMAT;
@@ -277,7 +281,7 @@ export function redactConnectionUrl(url: string): string {
 /** Values that must never be echoed: env secrets + any connection password. */
 export function collectSecretValues(env: EnvLike): string[] {
   const values = new Set<string>();
-  for (const key of [...SECRET_ENV_KEYS, ...PATH_ENV_KEYS]) {
+  for (const key of SECRET_ENV_KEYS) {
     const raw = env[key];
     if (!raw) continue;
     if (key.startsWith("DATABASE_URL")) {
@@ -481,7 +485,7 @@ export function finalizeSnapshotFile(file: string): void {
 /** Postgres row counts via the already-installed `pg` driver (lazy import). */
 export async function countPostgresTables(connectionString: string): Promise<TableCounts> {
   const { Client } = (await import("pg")) as typeof import("pg");
-  const client = new Client({ connectionString });
+  const client = new Client({ connectionString: toLibpqConnectionString(connectionString) });
   try {
     await client.connect();
     const tables = await client.query(
@@ -520,6 +524,103 @@ export function requireTool(
     );
   }
   return { binary, versionLine: (probe.stdout || "").split("\n")[0].trim() };
+}
+
+/** Query parameters a Prisma URL carries that libpq has no meaning for. */
+const PRISMA_ONLY_PARAMS = new Set([
+  "schema",
+  "connection_limit",
+  "pool_timeout",
+  "socket_timeout",
+  "pgbouncer",
+  "max_idle_connections",
+]);
+
+export type PgTarget = { args: string[]; env: Record<string, string> };
+
+/**
+ * Turn a Prisma `DATABASE_URL` into the form `pg_dump` / `psql` can actually be
+ * given. Two measured reasons it cannot be handed over as-is:
+ *
+ *  - libpq rejects a connection URI whose query parameter it does not know, so
+ *    the `?schema=public` every Prisma URL carries is a hard failure
+ *    (`pg_dump: error: invalid URI query parameter: "schema"`, exit 1; the same
+ *    from `psql`, exit 2). The discrete `-h/-p/-U/-d` form never hits that
+ *    check, and any remaining parameter travels as `PG<NAME>`, which libpq
+ *    accepts for every connection parameter.
+ *  - argv is readable by any local process (`/proc/<pid>/cmdline` on Linux), so
+ *    a URL containing the password leaks it for the lifetime of the child.
+ *    `PGPASSWORD` is per-process instead.
+ *
+ * A value that is not a postgres URL (a space-separated libpq DSN, which the
+ * tools parse themselves) is passed through untouched as the positional target.
+ */
+export function toPgTarget(connectionString: string): PgTarget {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    return { args: [connectionString], env: {} };
+  }
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
+    return { args: [connectionString], env: {} };
+  }
+
+  const args: string[] = [];
+  const push = (flag: string, value: string) => {
+    if (value) args.push(flag, value);
+  };
+  push("-h", decodeURIComponent(url.hostname));
+  push("-p", url.port);
+  push("-U", decodeURIComponent(url.username));
+  push("-d", decodeURIComponent(url.pathname.replace(/^\/+/, "")));
+
+  const env: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(url.search)) {
+    if (key === "password" || PRISMA_ONLY_PARAMS.has(key)) continue;
+    env[`PG${key.toUpperCase().replace(/-/g, "_")}`] = value;
+  }
+  const password = url.password
+    ? decodeURIComponent(url.password)
+    : new URLSearchParams(url.search).get("password") ?? "";
+  if (password) env.PGPASSWORD = password;
+
+  return { args, env };
+}
+
+/**
+ * The same URL in the form a driver accepts: Prisma's `?schema=`/pooling keywords
+ * are ours, not libpq's, and a driver that forwards unknown URI parameters gets
+ * `unrecognized configuration parameter` back from the server.
+ */
+export function toLibpqConnectionString(connectionString: string): string {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    return connectionString;
+  }
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") return connectionString;
+  const search = new URLSearchParams(url.search);
+  for (const key of [...search.keys()]) {
+    if (PRISMA_ONLY_PARAMS.has(key)) search.delete(key);
+  }
+  url.search = search.toString();
+  return url.toString();
+}
+
+/** Drop one table from a count set, keeping the totals honest. */
+export function removeTableFromCounts(counts: TableCounts, table: string): TableCounts {
+  const nextCounts = { ...counts.counts };
+  const removed = nextCounts[table] ?? 0;
+  delete nextCounts[table];
+  return {
+    counts: nextCounts,
+    totals: {
+      tables: Object.keys(nextCounts).length,
+      rows: counts.totals.rows - removed,
+    },
+  };
 }
 
 export type BackupPlan = {
@@ -738,12 +839,13 @@ export async function runBackup(
     } else {
       const tool = requireTool(env, "pg_dump", "PG_DUMP_PATH");
       note(`dump tool       : ${tool.binary}${tool.versionLine ? ` (${tool.versionLine})` : ""}`);
+      const target = toPgTarget(plan.connectionString);
       const dumpArgs = [
         "--no-owner",
         "--no-privileges",
         "--no-password",
         "--format=plain",
-        `--dbname=${plan.connectionString}`,
+        ...target.args,
         `--file=${plan.payloadFile}`,
       ];
       if (plan.excludeTokens) dumpArgs.unshift("--exclude-table-data=public.\"ApiToken\"");
@@ -752,17 +854,27 @@ export async function runBackup(
       // required on NodeJS.ProcessEnv, which a resolved config map cannot promise.
       const result = spawnSync(tool.binary, dumpArgs, {
         encoding: "utf8",
-        env: { ...process.env, ...env } as unknown as NodeJS.ProcessEnv,
+        env: { ...process.env, ...env, ...target.env } as unknown as NodeJS.ProcessEnv,
       });
       if (result.status !== 0) {
         const detail = redactSecrets(`${result.stderr || result.stdout || ""}`.trim(), secrets);
         throw new BackupError(
-          `pg_dump failed (exit ${result.status}). Run it manually to see the server error:\n  pg_dump --no-owner --no-privileges --format=plain --dbname="<your DATABASE_URL>" --file=backup.sql${detail ? `\n  ${detail}` : ""}`,
+          `pg_dump failed (exit ${result.status}). Run it manually to see the server error:\n  pg_dump --no-owner --no-privileges --format=plain --dbname="<your DATABASE_URL>" --file=${POSTGRES_PAYLOAD_NAME}${detail ? `\n  ${detail}` : ""}`,
           EXIT.MISSING_TOOL,
         );
       }
       method = "pg_dump";
       counts = await countPostgresTables(plan.connectionString);
+      if (plan.excludeTokens) {
+        // The dump omits the ApiToken *data*, so the manifest has to describe the
+        // payload rather than the live database. Counting the live table here
+        // makes the post-restore comparison expect rows the snapshot can never
+        // contain, and the restore then exits 4 after having replaced everything.
+        const live = counts.counts["ApiToken"] ?? 0;
+        counts = removeTableFromCounts(counts, "ApiToken");
+        excludedTables = { ApiToken: live };
+        note(`ApiToken rows   : ${live} excluded from the dump (manifest records it)`);
+      }
     }
 
     const manifest = buildManifest({

@@ -37,16 +37,22 @@ import {
   runBackupCli,
   snapshotDirName,
   sqliteFilePathFromUrl,
+  removeTableFromCounts,
+  toLibpqConnectionString,
+  toPgTarget,
   timestampSlug,
   slugifyLabel,
   verifyPayload,
   verifySqliteIntegrity,
   type Manifest,
+  type TableCounts,
 } from "../../scripts/backup";
 import {
   resolveSnapshotDir,
   runRestoreCli,
   renderPreview,
+  restorePostgres,
+  invalidateSchemaMarker,
   planRestore,
   assertTargetOutsideBackups,
   compareCounts,
@@ -661,5 +667,212 @@ describe("db:restore CLI", () => {
       targetNonEmpty: false,
     };
     expect(renderPreview(empty, false).join("\n")).toMatch(/safety copy      : not needed/);
+  });
+});
+
+/**
+ * RA-13 / RA-15 / RA-19: how the Postgres paths address the client tools.
+ *
+ * The first two audit passes left these green on a claim, not on evidence: the
+ * suite forced `pg_dump`/`psql` to be *missing*, so no test ever looked at the
+ * arguments the tools were called with. That is exactly where the defects were —
+ * libpq rejects Prisma's `?schema=` URI parameter outright, the password was on
+ * argv, and the `--force` path dropped a live schema without the safety copy the
+ * preview promised.
+ */
+describe("postgres client invocation (RA-15, RA-19)", () => {
+  const PASSWORD = "s3cret-pg-pass";
+
+  it("addresses libpq with parameters instead of a DSN carrying the password", () => {
+    const target = toPgTarget(
+      `postgresql://admin:${PASSWORD}@db.example.com:5433/appdb?schema=public&sslmode=require`,
+    );
+    expect(target.args).toEqual(["-h", "db.example.com", "-p", "5433", "-U", "admin", "-d", "appdb"]);
+    // argv is world-readable for the lifetime of the child process.
+    expect(JSON.stringify(target.args)).not.toContain(PASSWORD);
+    expect(target.env.PGPASSWORD).toBe(PASSWORD);
+    expect(target.env.PGSSLMODE).toBe("require");
+    // `schema` is Prisma's own keyword: as a URI parameter it is a hard error
+    // (`pg_dump: error: invalid URI query parameter: "schema"`), so it must not
+    // be re-emitted as PGSCHEMA either.
+    expect(Object.keys(target.env)).not.toContain("PGSCHEMA");
+  });
+
+  it("leaves a non-URL libpq DSN for the tools to parse themselves", () => {
+    expect(toPgTarget("host=db dbname=app user=admin")).toEqual({
+      args: ["host=db dbname=app user=admin"],
+      env: {},
+    });
+  });
+
+  it("strips Prisma-only keywords before a driver sees the URL", () => {
+    const url = toLibpqConnectionString(`postgresql://admin:${PASSWORD}@db:5432/app?schema=public`);
+    expect(url).not.toContain("schema=");
+    expect(url).toContain(PASSWORD);
+    expect(toLibpqConnectionString("host=db dbname=app")).toBe("host=db dbname=app");
+  });
+
+  it("counts the payload rather than the live database for an excluded table", () => {
+    const live: TableCounts = { counts: { ApiToken: 7, Job: 3 }, totals: { tables: 2, rows: 10 } };
+    expect(removeTableFromCounts(live, "ApiToken")).toEqual({
+      counts: { Job: 3 },
+      totals: { tables: 1, rows: 3 },
+    });
+  });
+
+  it("still verifies that an excluded table came back empty", () => {
+    const manifest = fakePostgresManifest({ Job: 3 }, { ApiToken: 7 });
+    expect(
+      compareCounts(manifest, { counts: { Job: 3, ApiToken: 0 }, totals: { tables: 2, rows: 3 } }).ok,
+    ).toBe(true);
+    const drift = compareCounts(manifest, {
+      counts: { Job: 3, ApiToken: 4 },
+      totals: { tables: 2, rows: 7 },
+    });
+    expect(drift.ok).toBe(false);
+    expect(drift.detail).toMatch(/ApiToken has 4 rows although the snapshot excluded it/);
+  });
+});
+
+function fakePostgresManifest(
+  rowCounts: Record<string, number>,
+  excludedTables: Record<string, number>,
+): Manifest {
+  return {
+    format: BACKUP_FORMAT,
+    formatVersion: 1,
+    appVersion: "0.2.0",
+    createdAt: "2026-10-08T00:00:00.000Z",
+    dbProvider: "postgres",
+    label: null,
+    payload: { file: "database.sql", kind: "postgres-sql", bytes: 1, sha256: "0".repeat(64) },
+    rowCounts,
+    totals: {
+      tables: Object.keys(rowCounts).length,
+      rows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
+    },
+    secretHandling: { excludedTables, envSecretsWritten: false, note: "test" },
+  };
+}
+
+function postgresPlan(patch: Partial<RestorePlan>): RestorePlan {
+  const snapshotDir = path.join(backupRoot, "2026-10-08T00-00-00Z-plan");
+  return {
+    provider: "postgres",
+    connectionString: "postgresql://admin:s3cret-pg-pass@127.0.0.1:1/app",
+    backupRoot,
+    snapshotDir,
+    payloadFile: path.join(snapshotDir, "database.sql"),
+    manifest: fakePostgresManifest({ Job: 3 }, {}),
+    targetFile: null,
+    currentCounts: null,
+    targetNonEmpty: false,
+    safetyDir: path.join(backupRoot, "2026-10-08T00-00-00Z-pre-restore"),
+    ...patch,
+  };
+}
+
+/**
+ * RA-13: the `--force` Postgres path used to run `DROP SCHEMA public CASCADE`
+ * with nothing taken first, while the preview and the docs both promised a
+ * `*-pre-restore` copy. This pins the order.
+ */
+describe("postgres restore safety copy (RA-13)", () => {
+  beforeEach(() => {
+    env.DB_PROVIDER = "postgres";
+    env.PRISMA_SCHEMA_PATH = "prisma/postgres/schema.prisma";
+    env.DATABASE_URL = "postgresql://admin:s3cret-pg-pass@127.0.0.1:1/app";
+    // node answers `--version` the way a client tool does and then fails on any
+    // real flag, so both tool lookups pass and only the code's order decides
+    // which error surfaces. A drop attempted before the copy would report
+    // "Could not recreate the public schema" instead of a dump failure.
+    env.PSQL_PATH = process.execPath;
+    env.PG_DUMP_PATH = process.execPath;
+  });
+
+  it("takes the safety copy before it drops a non-empty public schema", async () => {
+    const lines: string[] = [];
+    let message = "";
+    try {
+      await restorePostgres(
+        postgresPlan({ targetNonEmpty: true }),
+        env,
+        tempDir,
+        (line) => lines.push(line),
+        [],
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toMatch(/pg_dump failed/);
+    expect(message).not.toMatch(/Could not recreate the public schema/);
+    expect(message).not.toContain("s3cret-pg-pass");
+    expect(lines.join("\n")).not.toMatch(/dropping public/);
+    // The aborted copy leaves no half-written snapshot that looks restorable.
+    expect(fs.existsSync(backupRoot) ? fs.readdirSync(backupRoot) : []).toEqual([]);
+  });
+
+  it("goes straight to the apply when the target is empty", async () => {
+    const lines: string[] = [];
+    // No schema is dropped, so no copy is required and pg_dump is never invoked:
+    // the failure comes from the apply itself, one step later.
+    await expect(
+      restorePostgres(postgresPlan({ targetNonEmpty: false }), env, tempDir, (line) => lines.push(line), []),
+    ).rejects.toThrow(/psql failed while applying/);
+    expect(lines.join("\n")).not.toMatch(/dropping public|safety copy/);
+    expect(fs.existsSync(backupRoot) ? fs.readdirSync(backupRoot) : []).toEqual([]);
+  });
+});
+
+/**
+ * RA-16: the entrypoint skips `migrate deploy` when the image's schema hash
+ * matches a marker stored in the volume. A restore moves the database behind
+ * that marker without changing the image, so the marker has to go with it.
+ */
+describe("migration marker invalidation (RA-16)", () => {
+  it("clears the entrypoint's own marker and nothing else", () => {
+    const ours = path.join(tempDir, ".prisma-schema-hash");
+    const notOurs = path.join(tempDir, "someone-elses-file");
+    fs.writeFileSync(ours, `${"b".repeat(64)}\n`);
+    fs.writeFileSync(notOurs, "a note about something else");
+    const lines: string[] = [];
+
+    const cleared = invalidateSchemaMarker(
+      (line) => lines.push(line),
+      [ours, notOurs, path.join(tempDir, "does-not-exist")],
+    );
+
+    expect(cleared).toEqual([ours]);
+    expect(fs.existsSync(ours)).toBe(false);
+    expect(fs.existsSync(notOurs)).toBe(true);
+    expect(lines.join("\n")).toMatch(/cleared .* the next boot re-runs prisma migrate deploy/);
+  });
+
+  it("tells the operator where the marker lives when this filesystem has none", () => {
+    const lines: string[] = [];
+    expect(invalidateSchemaMarker((line) => lines.push(line), [path.join(tempDir, "absent")])).toEqual([]);
+    expect(lines.join("\n")).toMatch(/remove \/data\/\.prisma-schema-hash/);
+  });
+});
+
+/**
+ * RA-18: the `*_PATH` overrides were collected as if they were secrets, so an
+ * operator who set GID_BACKUP_DIR got `[redacted]` printed where the tool's own
+ * output paths should be.
+ */
+describe("path overrides are not secrets (RA-18)", () => {
+  it("collects secret values only", () => {
+    const values = collectSecretValues(
+      overrides({ GID_BACKUP_DIR: backupRoot, PSQL_PATH: "/usr/bin/psql", SESSION_SECRET }),
+    );
+    expect(values).not.toContain(backupRoot);
+    expect(values).not.toContain("/usr/bin/psql");
+    expect(values).toContain(SESSION_SECRET);
+  });
+
+  it("prints the real backup root it just wrote into", async () => {
+    expect(await runBackupCli(["--label", "visible"], io())).toBe(EXIT.OK);
+    expect(printed.join("\n")).toContain(`backup root     : ${backupRoot}`);
   });
 });

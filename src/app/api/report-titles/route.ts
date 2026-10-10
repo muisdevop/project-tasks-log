@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import type { PrismaClient } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import { getDbProvider, prisma } from "@/lib/prisma";
 import { requireAuth, requireWriteAccess } from "@/lib/auth";
 import { HttpError, toErrorResponse } from "@/lib/api-error";
 
@@ -42,13 +42,26 @@ async function ensureSettingsRow() {
   });
 }
 
+/**
+ * ST-01 made this read-modify-write atomic *within* a transaction, which is not the
+ * same thing as serialised: PostgreSQL runs READ COMMITTED, so two concurrent PATCHes
+ * can both read the same `reportTitleOptions` and the later `UPDATE` quietly drops the
+ * other writer's change. A locking read closes that. SQLite has one writer and does not
+ * understand a locking clause, so the clause is emitted only where it is both needed and
+ * valid.
+ */
+export function titleStateQuery(provider: string) {
+  const lock = provider.startsWith("postgres") ? Prisma.raw(" FOR UPDATE") : Prisma.empty;
+  return Prisma.sql`SELECT "reportTitleOptions", "defaultReportTitle" FROM "UserSettings" WHERE "id" = 1 LIMIT 1${lock}`;
+}
+
 async function loadTitleState(tx: TxClient) {
   const [row] = await tx.$queryRaw<
     Array<{
       reportTitleOptions: unknown;
       defaultReportTitle: string | null;
     }>
-  >`SELECT "reportTitleOptions", "defaultReportTitle" FROM "UserSettings" WHERE "id" = 1 LIMIT 1`;
+  >(titleStateQuery(getDbProvider()));
 
   const options = parseTitleOptions(row?.reportTitleOptions);
   const preferredDefault = normalizeTitle(row?.defaultReportTitle ?? "");

@@ -17,6 +17,7 @@ no tags, no licence).
 | Integration only | `npm run test:integration` | exit 0 (spins a temp SQLite DB) |
 | Coverage ratchet | `npm run test:coverage` | over the thresholds in `vitest.config.ts` (60% lines/functions/statements, 50% branches, on `src/lib` + `src/app/api`) |
 | Schema parity | `npm run db:parity` | exit 0 |
+| Migration-set parity | `npm run db:parity:migrations` | exit 0 |
 | Contract freshness | `npm run docs:openapi:check` | exit 0 after `npm run docs:openapi` if routes changed |
 | Bundle budget | `npm run bundle:budget` | exit 0 |
 | Build | `npm run build` | exit 0 |
@@ -161,6 +162,6 @@ Findings from the PM-01/PM-02 pass, each verified with the command shown.
    mitigation (`docs/security.md` §2).
 4. New query/credential path: is it scoped by `requireWriteAccess`, rate limited
    by bucket, and does it emit a security event where relevant?
-5. Schema change: SQLite **and** Postgres migrations written, `npm run db:parity`
+5. Schema change: SQLite **and** Postgres migrations written, `npm run db:parity` **and** `npm run db:parity:migrations`
    green?
 6. `CHANGELOG.md` updated, and does it claim anything the tests do not prove?

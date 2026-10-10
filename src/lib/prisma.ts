@@ -114,6 +114,16 @@ function resolveDatabaseConfig(): { provider: DbProvider; url: string } {
   return { provider, url };
 }
 
+/**
+ * The provider the client would be built for, resolved from the same signals the
+ * client itself uses. Callers that must emit provider-specific SQL use this instead
+ * of reading `DB_PROVIDER` (which can be absent while `DATABASE_URL` carries the
+ * answer) — see `titleStateQuery` in the report-titles route.
+ */
+export function getDbProvider() {
+  return resolveDatabaseConfig().provider;
+}
+
 function createClient(): PrismaClient {
   const { provider, url } = resolveDatabaseConfig();
 

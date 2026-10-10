@@ -95,6 +95,8 @@ jobs:
         run: npx prisma generate --schema prisma/schema.sqlite.prisma
       - name: SQLite/Postgres schema parity
         run: npm run db:parity
+      - name: Migration-set parity (seeded tables + constant defaults)
+        run: npm run db:parity:migrations
       - name: OpenAPI document matches the routes
         run: npm run docs:openapi:check
       - name: Lint

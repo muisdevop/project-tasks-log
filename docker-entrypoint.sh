@@ -67,13 +67,20 @@ for CANDIDATE in /data/.prisma-schema-hash /app/.prisma-schema-hash /tmp/.prisma
 	fi
 done
 
+# PAR-01: `prisma generate` runs on EVERY boot. It writes into the image's own
+# (ephemeral) node_modules, while the marker below lives on the persisted volume -
+# so gating it means a container recreation can skip it and leave the client that
+# was baked into the image (generated from the SQLite schema) talking to a
+# Postgres database. Only `migrate deploy`, which touches the database, stays
+# gated by the schema hash.
+npx prisma generate --schema "$PRISMA_SCHEMA_PATH" --config "$PRISMA_CONFIG"
+
 if [ "$(cat "$MARKER" 2>/dev/null || true)" != "$SCHEMA_HASH" ]; then
-	echo "[entrypoint] Schema/migrations changed - running prisma generate + migrate deploy"
-	npx prisma generate --schema "$PRISMA_SCHEMA_PATH" --config "$PRISMA_CONFIG"
+	echo "[entrypoint] Schema/migrations changed - running prisma migrate deploy"
 	npx prisma migrate deploy --schema "$PRISMA_SCHEMA_PATH" --config "$PRISMA_CONFIG"
 	echo "$SCHEMA_HASH" >"$MARKER" 2>/dev/null || true
 else
-	echo "[entrypoint] Schema unchanged since last boot - skipping generate/migrate"
+	echo "[entrypoint] Schema unchanged since last boot - skipping migrate deploy"
 fi
 
 # AR-07: exec node directly so `node server.js` (the standalone server) is the
