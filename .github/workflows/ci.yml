@@ -134,7 +134,12 @@ jobs:
         run: npx prisma generate --schema prisma/schema.sqlite.prisma
       - name: Install browsers
         run: npm run test:e2e:install
-      - name: Matrix (128 scenarios, axe on the 3 desktop engines)
+      - name: Matrix (3 engines x 3 viewports, axe included)
+        # The label deliberately carries no scenario count: the run count comes from
+        # `playwright.config.ts` (projects x matrix combos x specs) and moves with the
+        # specs, so a hardcoded number here went stale the moment the matrix grew and
+        # then sat describing a run nobody was performing. `npm run test:e2e` is the
+        # contract; the report it uploads on failure is the measurement.
         run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

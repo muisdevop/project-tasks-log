@@ -316,6 +316,45 @@ describe("/api/breaks/log", () => {
     expect((await jsonOf(res)).error).toContain("no project");
   });
 
+  // FL-H's boundary, which the sanity test above never touched: it only tried one hour
+  // ahead, so the two-minute tolerance itself — the band whose rejection message used to
+  // say "too old to log" — was untested either way. A clock inside it logs, and the row it
+  // logs holds no negative seconds and no end before its start.
+  it("logs a break whose client clock is inside the two-minute future tolerance", async () => {
+    await authed();
+    for (const offsetMs of [-90_000, 90_000]) {
+      const startedAt = new Date(at(12, 0).getTime() + offsetMs);
+      const res = await logPost(
+        apiRequest("/api/breaks/log", {
+          method: "POST",
+          body: logBody({ name: `Skew ${offsetMs}`, startedAt: startedAt.toISOString() }),
+        }),
+      );
+      const body = await jsonOf(res);
+      expect(res.status, `offset ${offsetMs}ms`).toBe(201);
+      expect(body.error).toBeUndefined();
+      expect(body.task.elapsedSeconds).toBeGreaterThanOrEqual(0);
+      expect(new Date(body.task.endedAt).getTime()).toBeGreaterThanOrEqual(
+        new Date(body.task.startedAt).getTime(),
+      );
+      // A future start has worked no time at all, so the label floors rather than
+      // showing the negative the raw difference would have produced.
+      if (offsetMs > 0) expect(body.task.description).toBe("Break duration: 00:00:00");
+    }
+
+    const outside = await logPost(
+      apiRequest("/api/breaks/log", {
+        method: "POST",
+        body: logBody({
+          name: "Skew outside",
+          startedAt: new Date(at(12, 0).getTime() + 3 * 60_000).toISOString(),
+        }),
+      }),
+    );
+    expect(outside.status).toBe(400);
+    expect((await jsonOf(outside)).error).toBe("Break start time cannot be in the future.");
+  });
+
   it("logs one completed break task in the right project, banking the active task", async () => {
     await authed();
     const active = await prisma.task.create({

@@ -48,6 +48,9 @@ export default defineConfig({
   globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1,
+  // A CI-only retry, so a flake can be masked in the pipeline; the local counterpart is
+  // `npm run test:e2e:repeat` (--repeat-each=5 against one spec), which is how a suspected
+  // flake gets reproduced before it is blamed on the runner.
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
   timeout: 90_000,

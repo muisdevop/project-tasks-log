@@ -10,7 +10,7 @@ no tags, no licence).
 
 | Gate | Command | Must be |
 | --- | --- | --- |
-| Lint | `npm run lint` | exit 0 |
+| Lint | `npm run lint` | exit 0 — `--max-warnings=0`, so a warning is a failure (RA-37) |
 | Types | `npm run typecheck` | exit 0 |
 | Full local suite | `npm test` | exit 0 — it is `db:client:check && db:parity && db:parity:migrations && docs:openapi:check && lint && typecheck && vitest run` |
 | Unit only | `npm run test:unit` | exit 0 |
@@ -22,6 +22,7 @@ no tags, no licence).
 | Bundle budget | `npm run bundle:budget` | exit 0 |
 | Build | `npm run build` | exit 0 |
 | Browser matrix | `npm run test:e2e` | exit 0 (needs `npm run test:e2e:install` once) |
+| Suspected flake | `npm run test:e2e:repeat` | the same spec run five times (`--repeat-each=5`); CI retries once, so a flake can pass there and mislead you |
 | Container | `npm run docker:build -- gid-task-flow:local` (which is `docker build --load` plus a check that the tag landed), boot on SQLite **and** Postgres, then `APP_USERNAME=… APP_PASSWORD=… REQUIRE_PDF=1 npm run smoke:container -- http://127.0.0.1:PORT` | `TOTAL 28 checks, 0 failed` on **both** providers. Health and login alone proved nothing: the 2026-10-09 pass found a container-only PDF degradation (AR-06) that every other gate passed over, so the gate is the script, not a checklist in someone's head. `--load` is part of the gate, not a flag: on a buildx/docker-container driver a bare `docker build` exits 0 and puts the result only in the build cache, so the boot that follows runs the previous image and reports a green that belongs to old code (RA-21, measured when this host built successfully and `docker images` had never heard of the tag). The script fails with `IMAGE_STALE` if the tag it was given is older than the build it just ran. |
 | Compose files | `docker compose -f docker-compose.yml config -q` (with `SESSION_SECRET` + `APP_PASSWORD_HASH` set) and the same for `docker-compose.prod.yml` | exit 0 — both files must parse, and `docker-compose.yml` must still **refuse** an empty `APP_PASSWORD_HASH`. CI runs this as its own step, because nothing else ever did and a broken dev file went unnoticed for a whole wave. |
 

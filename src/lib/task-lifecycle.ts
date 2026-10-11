@@ -80,6 +80,12 @@ export function applyTaskTransition(
     ? workingTimeDiffSeconds(task.startedAt, observedAt, schedule)
     : 0;
   const computed = task.elapsedSeconds + extra;
+  // A segment that holds no business seconds is banked as wall-clock time instead of zero.
+  // Deliberate, and pinned by tests/task-lifecycle.test.ts ("uses wall-clock elapsed when
+  // business-time increment is zero"): work done outside the configured window is still
+  // work, and a night shift that records 0 reads to the owner as a lost session. It is also
+  // the reason the read side must not re-derive anything from the timestamps (FL-C) — the
+  // banked number is what already encodes this choice.
   const elapsedSeconds = Math.max(
     0,
     active && computed === 0

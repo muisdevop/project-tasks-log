@@ -10,7 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "npm run db:client:check && npm run db:parity && npm run db:parity:migrations && npm run docs:openapi:check && npm run lint && npm run typecheck && vitest run",
     "test:unit": "vitest run --exclude tests/integration/**",
@@ -37,6 +37,7 @@
     "docs:openapi": "tsx scripts/generate-openapi.ts",
     "docs:openapi:check": "tsx scripts/generate-openapi.ts --check",
     "test:e2e": "playwright test",
+    "test:e2e:repeat": "playwright test --repeat-each=5",
     "test:e2e:install": "playwright install --with-deps chromium webkit firefox",
     "engines:check": "node scripts/check-engines.mjs 22.23.3,24.18.0",
     "engines:probe": "sh scripts/engine-strict-probe.sh"

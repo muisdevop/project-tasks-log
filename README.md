@@ -1,7 +1,10 @@
 # GID Task Flow
 
 A **single-user** task and time tracker: jobs contain projects, projects contain
-tasks, and every task records real worked time against the job's business hours.
+tasks, and every task records real worked time, counted against the job's business
+hours. A segment that falls entirely outside those hours is banked as wall-clock time
+rather than zero — night-shift work is still work — and that rule lives in
+`src/lib/task-lifecycle.ts`, pinned by `tests/task-lifecycle.test.ts`.
 Subtasks, break scheduling, progress notes and printable activity reports round
 it out. Built with Next.js 16 (App Router), TypeScript, Prisma 7 and Tailwind CSS v4.
 
@@ -101,12 +104,13 @@ Every row is a real entry in `package.json` `scripts`.
 | `npm run build` | `next build` (production build) |
 | `npm start` | `next start` on the built server |
 | `npm test` | `db:client:check` + `db:parity` + `db:parity:migrations` + `docs:openapi:check` + `lint` + `typecheck` + `vitest run` — the full local gate |
-| `npm run lint` | `eslint` |
+| `npm run lint` | `eslint --max-warnings=0` — a warning fails the chain, so "0 warnings" is a measured claim rather than one read off an exit code (RA-37) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test:unit` | `vitest run --exclude tests/integration/**` |
 | `npm run test:integration` | `vitest run tests/integration` (route handlers + temp SQLite) |
 | `npm run test:coverage` | `vitest run --coverage` (v8, thresholds in `vitest.config.ts`) |
 | `npm run test:e2e` | `playwright test` — 3 engines x 3 viewports against a real `next dev` |
+| `npm run test:e2e:repeat` | `playwright test --repeat-each=5` — run a suspected flake five times locally (CI retries once, so a flake can hide there and nowhere else) |
 | `npm run test:e2e:install` | `playwright install --with-deps chromium webkit firefox` |
 | `npm run bundle:budget` | `node scripts/measure-bundle.mjs` — per-route First Load JS + budget gate |
 | `npm run db:migrate` / `db:migrate:sqlite` | `prisma migrate dev` on `prisma/schema.sqlite.prisma` |

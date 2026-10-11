@@ -207,10 +207,6 @@ test.describe("accessibility (axe-core in a real browser)", () => {
     const width = viewport?.width ?? 0;
     await page.goto("/dashboard");
     await expect(page.locator("main")).not.toHaveText("");
-    // The trigger's accessible name is state-dependent ("Open…" / "Close…"), so a
-    // locator that pins the *current* name stops matching the moment the drawer
-    // opens - which is exactly when the rest of this test needs it.
-    const toggle = page.getByRole("button", { name: /main navigation$/i });
     const nav = page.getByRole("navigation", { name: "Main navigation" });
 
     if (width < MD_AND_UP) {

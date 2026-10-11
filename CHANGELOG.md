@@ -4,6 +4,94 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The seventh re-audit pass turned six recorded gaps into measured ones.** It started by
+  re-reading rows already marked `Fixed` whose own `gap` field still described an open defect,
+  and it ends with none of them in that state.
+  - **RA-30 — a CI step label that quietly stopped matching the step.** `ci.yml` announced
+    "Matrix (128 scenarios, axe on the 3 desktop engines)" while the run selected 155 and axe
+    had been scanning all three viewports since RA-27. A label nobody re-derives is a claim
+    that decays: it had already been wrong for two pushes. The step is now named for what it
+    asserts (`3 engines x 3 viewports, axe included`) with a comment saying why no scenario
+    count belongs there — `playwright.config.ts` owns the number, and the uploaded report is
+    the measurement.
+  - **RA-31 — an evidence sentence describing a failure the transcript does not show.** The
+    RA-27 control was recorded as "makes the mobile walk report the leaked stops". Re-running
+    the control (`invisible` → `opacity-0`) fails one assertion earlier: at 375px the drawer is
+    reported *visible*, so `expect(nav).toBeHidden()` at `tests/e2e/accessibility.spec.ts:217`
+    stops the test before the tab-count line at 220. The control still does its job — the guard
+    catches the deleted class — but a report that names the wrong line is the beginning of an
+    untrustworthy audit, so the changelog and both registers now quote what was observed.
+  - **RA-32 — legacy negative seconds were clamped on read, and read wrong.** FL-D fixed the
+    reads and FL-08 stopped new negatives, but `GET /api/stats` sums `elapsedSeconds` with a
+    Prisma `_sum` the *database* computes, so no JS clamp is in that path: a stored `-12` kept
+    subtracting from a project total. Measured in `tests/integration/negative-seconds-repair.test.ts`
+    before the repair — a project holding 600 + 300 of work reported **888**. Migration
+    `20261011150000_clamp_negative_seconds` repairs the rows (`Task.elapsedSeconds`,
+    `JobAttendance.totalWorkSeconds`) with one statement that is valid on both engines, and the
+    test applies the shipped file to prove the aggregate then reads **900**, that no negative
+    row survives, and that a second application changes nothing. Because the harness builds its
+    schema with `db push`, no other test exercises a data migration, so the same file is also
+    checked for byte-identity across the two provider sets. One subtlety the test had to learn:
+    a migration does not move `updatedAt`, so the stats watermark is unchanged and `/api/stats`
+    serves the pre-repair total for the whole TTL — invalidation, not the clamp, is what makes
+    the repair visible.
+  - **RA-33 — the projection FL-C changed had no test at all.** `tests/integration/task-list-elapsed-projection.test.ts`
+    now pins it through the real route handler: a completed row banked `0` lists `0` even though
+    its timestamps span three hours, a held-then-cancelled row lists the 45 seconds the engine
+    banked and not the fifteen hours between its stamps, and a legacy `-12` lists `0`. A running
+    row is left to the engine's own rule, which the test documents rather than duplicates.
+  - **RA-34 — README stated a rule the engine deliberately breaks.** "Every task records real
+    worked time against the job's business hours" reads as an absolute, while
+    `applyTaskTransition` banks wall-clock time for a segment that holds zero business seconds —
+    intentional, and pinned since the first pass by `tests/task-lifecycle.test.ts` ("uses
+    wall-clock elapsed when business-time increment is zero", 21:00→23:00 = 7200 under a
+    09:00–17:00 day). Nothing in the engine said so, which is exactly how a deliberate rule gets
+    "fixed" into a regression. The branch now carries its reason and its test name, and README
+    states the exception beside the rule.
+  - **RA-35 — FL-H was fixed and untested at the boundary it exists for.** `validateBreakWindow`
+    is module-private, and `breaks.test.ts` only ever probed one hour ahead — far outside the
+    two-minute tolerance where the defect lived. The new case logs breaks whose clock is 90
+    seconds *behind* and 90 seconds *ahead*, requires both to be written (201), and requires the
+    stored row to hold non-negative seconds with no `endedAt` before its `startedAt`; the
+    forward-skew row must read `Break duration: 00:00:00`. The control was measured, and it had
+    to be the faithful one: removing only the `Math.max(0, …)` floor left the test green, because
+    the current bound no longer tests for negatives — restoring the pre-fix
+    `wallClockSeconds < 0 ||` rejection is what makes it fail, at **`offset 90000ms: expected 400
+    to be 201`**. That is FL-H's original symptom (a just-started break answered "too old to
+    log") seen from the other side, and it is why a control that passes is information, not a
+    nuisance.
+  - **RA-36 — eleven findings were marked `Fixed` while their own `gap` sentence still described
+    the defect.** The register carries a residual column, and closing a finding in code does not
+    close it in that column: after `998e60d` repaired PAR-03/04/06/08 and later passes moved CI to
+    Node 22, put axe on every viewport and moved stale-image protection into
+    `scripts/check-image-loaded.mjs`, eleven rows still asserted the pre-fix world ("the axe spec
+    scans desktop viewports only", "the shipped column default is still wrong", "CI on Node 20
+    remains the layer that catches behaviour", "this needs two new migrations"). A reader of the
+    workbook — the deliverable — would have found a `Fixed` status arguing with its own evidence
+    line. Every non-empty gap was re-checked against the current tree this pass, the stale ones
+    were re-derived with the file:line that closes them (partial unique index in both migration
+    sets, `export-data.ts:340` null placement, `breaks/route.ts:51` id tie-break, `ci.yml`
+    `node-version: "22"`), and the ones that are genuinely accepted trade-offs were kept and
+    stated as decisions rather than as unfinished work: `prisma generate` on every boot (PAR-01),
+    unlocked `UserSettings` reads outside the route (PAR-05), `PGPASSWORD` visible in the child's
+    environment (RA-15), the conservative clock floor that can drop worked seconds (FL-08), and the
+    safety copy that cannot be taken from an unreachable target (RA-13).
+  - **RA-37 — the lint row in the previous report claimed a clean tree, and its own transcript
+    said otherwise.** The pass-6 gate entry read "Zero errors and zero warnings across src/, tests/
+    and scripts/ at dc8fd49"; the transcript it was written from
+    (`C:/tmp/gate-pass10-test.txt:35`) contains `tests/e2e/accessibility.spec.ts:213:11 warning
+    'toggle' is assigned a value but never used` and `✖ 1 problem (0 errors, 1 warning)` — an
+    unused locator this campaign's own RA-27 edit introduced. The chain stayed green because
+    `eslint` exits 0 on warnings, so the number in the report was neither measured nor
+    measurable. Two changes: the dead locator is gone, and `npm run lint` is now
+    `eslint --max-warnings=0`, so a warning fails the gate locally and in CI instead of becoming a
+    sentence someone has to re-check by hand. Same class as RA-31 and RA-24 — an evidence claim
+    the artefact does not support.
+  - **RA-11 stopped being a one-sided guard.** CI retries a failed spec once and local runs do not
+    retry at all, which is correct for signal but leaves no way to reproduce a suspected flake
+    where it was seen. `npm run test:e2e:repeat` now runs the matrix five times over
+    (`--repeat-each=5`, proven against `tests/e2e/accessibility.spec.ts`), `playwright.config.ts`
+    says so beside the `retries` line, and README and CONTRIBUTING list the command.
 - **RA-27 stopped being a recorded gap, and the scan it replaced found a real violation
   (RA-29).** The axe browser gate had skipped every viewport below 1440px on the argument
   that contrast belongs to the design tokens rather than the viewport. That is true of the
@@ -15,7 +103,8 @@ format. Versioning follows SemVer.
   scan, and two tests walk the tab sequence — a closed drawer must leak zero stops into
   `#app-sidebar`, a docked sidebar must be reachable, Enter opens and Escape returns focus to
   the trigger. The control ran: swapping `invisible` for `opacity-0` in the sidebar class
-  string makes the mobile walk fail with the leaked stops *and* makes
+  string makes the mobile walk fail — at 375px the drawer is then reported *visible*, so the
+  assertion before the tab-count stops the test — *and* makes
   `tests/unit/components/sidebar-shell-a11y.test.tsx` fail on the missing CSS terms, so the
   class is now guarded twice. Scanning the never-scanned row paid for itself on the first run:
   `scrollable-region-focusable` (serious) on the dashboard's project table at chromium-tablet —
