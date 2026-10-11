@@ -344,6 +344,74 @@ for (const name of REQUIRED_PARTIAL_INDEXES) {
   }
 }
 
+/**
+ * Rule F (RA-20, closed by RA-38): the operator's committed Postgres migrate config and the
+ * container's boot-time config have to resolve to the *same* schema and the *same* migrations
+ * directory. Prisma resolves the paths a config declares relative to that file's own
+ * directory, so the committed operator config uses bare names next to its schema while the
+ * entrypoint writes root-relative names at /app (absolute names in its /tmp fallback). Two
+ * differently-shaped files that must mean one thing, and until now nothing compared them:
+ * RA-20's "parallel by construction" was an assertion with no guard, so a renamed
+ * `prisma/postgres/migrations` or an edited config would leave the operator path and the
+ * deployment path migrating different directories, visible only at the next `migrate deploy`
+ * against a live database.
+ */
+const OPERATOR_CONFIG = path.join("prisma", "postgres", "migrate.config.mjs");
+const ENTRYPOINT = "docker-entrypoint.sh";
+const normalizePath = (value) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+const quotedAssignment = (text, key) => {
+  const match = text.match(new RegExp(`${key}\\s*(?:=|:)\\s*"([^"]+)"`));
+  return match ? normalizePath(match[1]) : null;
+};
+
+const entrypointSrc = fs.readFileSync(ENTRYPOINT, "utf8");
+const operatorSrc = fs.readFileSync(OPERATOR_CONFIG, "utf8");
+const postgresBranch = (entrypointSrc.match(/if \[ "\$DB_PROVIDER" = "postgres"[\s\S]*?\nelse/) || [])[0];
+
+if (!postgresBranch) {
+  problems.push(
+    `${ENTRYPOINT}: rule F could not find the postgres branch of the DB_PROVIDER switch, so it cannot compare the two migrate configs. Update this check to the new shape rather than deleting it.`,
+  );
+} else {
+  // The boot config must still be *built from* the branch's variables; a third hardcoded copy
+  // would let the branch and the config drift while both still looked plausible.
+  if (!/schema:\s*"\$SCHEMA_REL"/.test(entrypointSrc) || !/path:\s*"\$MIGRATIONS_REL"/.test(entrypointSrc)) {
+    problems.push(
+      `${ENTRYPOINT} no longer builds its generated config from "$SCHEMA_REL" / "$MIGRATIONS_REL", which is how rule F knows which files the container actually migrates.`,
+    );
+  }
+  const operatorDir = normalizePath(path.dirname(OPERATOR_CONFIG));
+  const comparisons = [
+    ["schema", quotedAssignment(postgresBranch, "PRISMA_SCHEMA_PATH"), quotedAssignment(operatorSrc, "schema")],
+    ["migrations directory", quotedAssignment(postgresBranch, "MIGRATIONS_DIR"), quotedAssignment(operatorSrc, "path")],
+  ];
+  for (const [label, containerValue, operatorRaw] of comparisons) {
+    if (!containerValue || !operatorRaw) {
+      problems.push(
+        `rule F could not read the ${label}: ${ENTRYPOINT} gave ${JSON.stringify(containerValue)} and ${OPERATOR_CONFIG} gave ${JSON.stringify(operatorRaw)}.`,
+      );
+      continue;
+    }
+    const operatorValue = normalizePath(path.posix.join(operatorDir, operatorRaw));
+    if (operatorValue !== containerValue) {
+      problems.push(
+        `${OPERATOR_CONFIG} resolves its ${label} to "${operatorValue}" but the container migrates "${containerValue}" — the operator path and the deployment path would be migrating different things (RA-20).`,
+      );
+      continue;
+    }
+    report.push(`rule F: operator ${label} "${operatorValue}" == container ${label}`);
+  }
+}
+
+// A guard over a file nothing uses is worse than no guard, because it reads like coverage.
+const pkgScripts = JSON.parse(fs.readFileSync("package.json", "utf8")).scripts || {};
+const operatorCommand = pkgScripts["db:migrate:postgres"] || "";
+if (!operatorCommand.includes(normalizePath(OPERATOR_CONFIG))) {
+  problems.push(
+    `package.json's db:migrate:postgres does not pass --config ${normalizePath(OPERATOR_CONFIG)}, so rule F would be guarding a file the operator path never loads: ${JSON.stringify(operatorCommand)}`,
+  );
+}
+
 for (const line of report) console.log(line);
 
 if (problems.length > 0) {
@@ -362,5 +430,7 @@ console.log(
     `both define the same partial unique index ` +
     `(${[...partials.sqlite.keys()].sort().join(", ") || "none"}) and backfills the indexed table ` +
     `through the predicate column before creating it, ` +
-    `and no unquoted JSON default outside the tracked list.`,
+    `no unquoted JSON default outside the tracked list, ` +
+    `and the operator's committed Postgres migrate config resolves to the schema and migrations ` +
+    `directory the container actually migrates.`,
 );

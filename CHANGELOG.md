@@ -4,6 +4,33 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **RA-38: the register was re-derived from commits, so re-reading it against the files found
+  five false citations and ten stale sentences.** A `Fixed` row is a claim about code, and
+  RA-36's prose-only re-derivation had not checked a single citation. The consequential one:
+  `RA-20` recorded that `scripts/check-migration-parity.mjs` is the guard keeping the operator's
+  committed Postgres migrate config and the container's boot-config equivalent — it is not, that
+  script compares the two migration *sets* and never reads either config, so what had been logged
+  as "accepted design, parallel by construction" was an unguarded divergence. Fixed with code
+  rather than wording: **rule F** of `npm run db:parity:migrations` resolves
+  `prisma/postgres/migrate.config.mjs` relative to its own directory, reads the postgres branch of
+  `docker-entrypoint.sh`, and fails when the two resolve to different schema or migrations paths,
+  when the generated config stops being built from `$SCHEMA_REL`/`$MIGRATIONS_REL`, or when
+  `db:migrate:postgres` stops passing `--config` — because a guard over a file nothing loads reads
+  like coverage. Control measured: retargeting the operator config at `other.prisma` exits 1
+  naming the mismatch; the shipped tree exits 0. The other four were mis-attributed mechanisms —
+  `PAR-09` credited `prisma migrate deploy` to the postgres service container's entrypoint when it
+  is the app container's (`docker-entrypoint.sh:80`), and described rule E as catching
+  provider-specific branches when it requires a backfill above the `CREATE UNIQUE INDEX`
+  (`check-migration-parity.mjs:121,329`); `RA-20` conflated the config's `/app`-vs-`/tmp`
+  writability fallback (lines 40-45) with the schema marker's `/data`-vs-`/tmp` (60-63); `RA-10`
+  cited `Dockerfile:13-16` for a sentence on 17. The stale numbers were the predictable half:
+  `SEC-01`/`TC-01`/`RA-11` quoted 61 files / 843 tests and 128 selected, `PM-04` quoted 13/2
+  migrations and 27/27 checks, `TC-01` quoted coverage digits the fresh run does not produce
+  (measured 96.64 / 90.65 / 96.54 / 97.21), `TC-04` described `npm test` from before RA-28/RA-37
+  changed it, and `RA-32` asserted that no test had ever applied a data migration in the same
+  sentence citing the test that does. One thing deliberately not overwritten: `PM-04`'s 13 and 2
+  is true of the run it recorded, so it now reads "13 and 2 at that run; 16 and 5 at f5a19f5" — a
+  register that edits its own history cannot be audited.
 - **The seventh re-audit pass turned six recorded gaps into measured ones.** It started by
   re-reading rows already marked `Fixed` whose own `gap` field still described an open defect,
   and it ends with none of them in that state.
