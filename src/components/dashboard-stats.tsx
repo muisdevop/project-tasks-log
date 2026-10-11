@@ -171,8 +171,19 @@ export function DashboardStats() {
           />
         ) : (
           <>
-            {/* RS-03: a scrolling table from md up, stacked cards below it. */}
-            <div className="hidden overflow-x-auto md:block">
+            {/* RS-03: a scrolling table from md up, stacked cards below it.
+                RA-29: the wrapper scrolls, so it has to be reachable by keyboard -
+                axe's `scrollable-region-focusable` failed the tablet row of the
+                matrix here (a 680px table inside a 512px content column at 768px:
+                md has the sidebar docked, so this is the narrowest case the table
+                version ever renders). `role="region"` + a name is what makes the
+                focus stop announce itself instead of landing on a bare div. */}
+            <div
+              className="hidden overflow-x-auto md:block"
+              role="region"
+              aria-label="Jobs overview"
+              tabIndex={0}
+            >
               <table className="w-full min-w-[42.5rem]">
                 <thead className="bg-zinc-50/80 dark:bg-zinc-900/60">
                   <tr>
@@ -247,7 +258,15 @@ export function DashboardStats() {
             <EmptyState title="No projects found for this job" />
           ) : (
             <>
-              <div className="hidden overflow-x-auto md:block">
+              {/* RA-29: same scrolling-region keyboard access as the jobs table.
+                  This one had no focusable content at all (every cell is text), so
+                  it is the node axe named at 768px. */}
+              <div
+                className="hidden overflow-x-auto md:block"
+                role="region"
+                aria-label={`${job.jobName} projects`}
+                tabIndex={0}
+              >
                 <table className="w-full min-w-[38.75rem]">
                   <thead className="bg-zinc-50/80 dark:bg-zinc-900/60">
                     <tr>

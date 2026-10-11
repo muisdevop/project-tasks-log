@@ -12,7 +12,7 @@ no tags, no licence).
 | --- | --- | --- |
 | Lint | `npm run lint` | exit 0 |
 | Types | `npm run typecheck` | exit 0 |
-| Full local suite | `npm test` | exit 0 — it *is* `lint && typecheck && vitest run` |
+| Full local suite | `npm test` | exit 0 — it is `db:client:check && db:parity && db:parity:migrations && docs:openapi:check && lint && typecheck && vitest run` |
 | Unit only | `npm run test:unit` | exit 0 |
 | Integration only | `npm run test:integration` | exit 0 (spins a temp SQLite DB) |
 | Coverage ratchet | `npm run test:coverage` | over the thresholds in `vitest.config.ts` (60% lines/functions/statements, 50% branches, on `src/lib` + `src/app/api`) |
@@ -43,6 +43,15 @@ with `npm run db:client:check`, which reads the provider out of
 `Fix: npm run db:generate` when the client on disk targets anything but sqlite
 (RA-22). `npm run db:parity` checks the two schemas agree; it cannot check which
 client is on disk, which is exactly the gap the precheck closes.
+
+**Gate parity (RA-28).** CI runs four cheap checks that `npm test` did not: the
+two parity checks and `docs:openapi:check`. That asymmetry cost a green local run
+followed by a red pipeline — the puppeteer/Node upgrade moved `zod` from 4.3.6 to
+4.6.5, zod renders its `datetime()` and `email()` patterns differently, and
+`docs/openapi.yaml` therefore stopped matching the routes while every test still
+passed. `npm test` now runs those checks first, so a contract or schema drift
+stops being something only CI can see. `npm run docs:openapi` regenerates the
+document; the check is what makes forgetting to run it fail instead of rot.
 
 ## 2. Branch and PR workflow
 

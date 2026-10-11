@@ -52,8 +52,10 @@ Interface
 - Mobile and tablet: the sidebar becomes an off-canvas drawer with a hamburger,
   skip link, backdrop, Escape/route-change close and scroll lock; wide dashboard
   tables switch to stacked label/value cards below `md`.
-- Contrast is a manual review item, not an automated gate: action buttons and
-  accent text use 700-weight gradients/tints. There is no axe/pa11y CI job.
+- Contrast is checked, not assumed: axe-core runs in the browser matrix at every
+  engine and viewport (see *Testing* below), which is what found the tablet-only
+  scrollable-region defect. Action buttons and accent text still use 700-weight
+  gradients/tints, now with a gate behind them rather than a note.
 
 ---
 
@@ -98,7 +100,7 @@ Every row is a real entry in `package.json` `scripts`.
 | `npm run dev` | `next dev` |
 | `npm run build` | `next build` (production build) |
 | `npm start` | `next start` on the built server |
-| `npm test` | `lint` + `typecheck` + `vitest run` — the full local gate |
+| `npm test` | `db:client:check` + `db:parity` + `db:parity:migrations` + `docs:openapi:check` + `lint` + `typecheck` + `vitest run` — the full local gate |
 | `npm run lint` | `eslint` |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test:unit` | `vitest run --exclude tests/integration/**` |
@@ -297,8 +299,10 @@ missing from the OpenAPI document.
 
 ## Testing
 
-- `npm test` chains lint + typecheck + vitest, so "green" cannot mean
-  "tests pass while lint errors".
+- `npm test` chains the Prisma-client precheck, both parity checks, the OpenAPI
+  freshness check, lint, typecheck and vitest, so "green" cannot mean "the tests
+  pass while the generated client is stale, the two schemas have drifted, the
+  contract document no longer matches the routes, or lint errors".
 - Unit tests (`tests/unit/`) cover the pure domain layer: transitions,
   business-hours arithmetic, validators, redirect safety, rich-text extraction,
   startup checks, sessions, api tokens, idempotency, rate limiting, security
@@ -337,11 +341,14 @@ missing from the OpenAPI document.
   hard-delete guard, admin event paging, logout. CI runs it against both
   providers after the health check. It exists because unit, integration and
   browser tests all passed over a container-only PDF failure (audit AR-06).
+- `tests/e2e/accessibility.spec.ts` runs axe-core in each of those engines and
+  viewports: seven routes in their default state, plus the drawer open at 375px
+  and the tab-sequence behaviour of the disclosure itself. It is injected from
+  `node_modules/axe-core/axe.js`, so no extra dependency enters the tree.
 - Not covered today: pixel-level visual regression baselines (the matrix checks
-  geometry and console hygiene, not screenshot diffs) and automated WCAG axe
-  scans. Accessible *names* and the dialog contract are now asserted in the
-  component suite; colour contrast and landmark coverage are still a manual
-  review.
+  geometry and console hygiene, not screenshot diffs). The jsdom component scans
+  cannot judge colour contrast or landmarks — those need a real layout, which is
+  why the browser gate above exists.
 
 ## Docker and Coolify
 

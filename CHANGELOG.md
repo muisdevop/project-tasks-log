@@ -4,6 +4,37 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **RA-27 stopped being a recorded gap, and the scan it replaced found a real violation
+  (RA-29).** The axe browser gate had skipped every viewport below 1440px on the argument
+  that contrast belongs to the design tokens rather than the viewport. That is true of the
+  tokens and false of the page: below `md` the shell is different DOM — a fixed header with a
+  disclosure trigger, an off-canvas drawer, an overlay — and none of it had ever been audited,
+  which is also what made the closed drawer's tabbability an assumption rather than a test
+  (RA-08's fix rests entirely on `invisible` doing the work `aria-hidden` used to claim). The
+  skip is gone: seven routes are scanned at 375, 768 and 1440, the open drawer gets its own
+  scan, and two tests walk the tab sequence — a closed drawer must leak zero stops into
+  `#app-sidebar`, a docked sidebar must be reachable, Enter opens and Escape returns focus to
+  the trigger. The control ran: swapping `invisible` for `opacity-0` in the sidebar class
+  string makes the mobile walk fail with the leaked stops *and* makes
+  `tests/unit/components/sidebar-shell-a11y.test.tsx` fail on the missing CSS terms, so the
+  class is now guarded twice. Scanning the never-scanned row paid for itself on the first run:
+  `scrollable-region-focusable` (serious) on the dashboard's project table at chromium-tablet —
+  768px is the narrowest case the desktop-shaped tables ever render (`md` turns them on while
+  the docked sidebar takes 256px, so a 620px table sits in a 512px column) and every cell in
+  that wrapper is text, so it scrolled with no keyboard access at all. Both `overflow-x-auto
+  md:block` wrappers in `src/components/dashboard-stats.tsx` are now `role="region"`, named,
+  and focusable.
+- **RA-28: the local gate and CI's gate were not the same gate, and CI was right.** Push run
+  38157949879 and PR run 38157952716 failed `OpenAPI document matches the routes` at `fa7571f`
+  while the same tree passed 843 tests, lint, typecheck, build and the container smoke locally.
+  The cause was measured rather than guessed: that commit's advisory work moved `zod` 4.3.6 →
+  4.6.5, zod renders its `datetime()` and `email()` patterns differently, and `docs/openapi.yaml`
+  — generated from the zod schemas — went stale with no test touching it. CI ran the check; `npm
+  test` did not, so "green locally" had a hole in it. `npm test` now opens with the Prisma-client
+  precheck, `db:parity`, `db:parity:migrations` and `docs:openapi:check` (about two seconds), which
+  is the general rule this campaign keeps re-learning: a check that only CI runs is a check that
+  reports the damage after the push. README's "There is no axe/pa11y CI job" and its `npm test`
+  descriptions were stale in the same way and now describe the chain that exists.
 - **The fifth re-audit pass found four more defects in this pass's own work, and disproved two
   of the things it had been told.** Reviewing the newest code rather than the newest commit
   produced FL-C, FL-D, RA-23, RA-25 and RA-26 — plus two claims that did not survive checking,

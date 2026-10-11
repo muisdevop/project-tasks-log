@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "npm run db:client:check && npm run lint && npm run typecheck && vitest run",
+    "test": "npm run db:client:check && npm run db:parity && npm run db:parity:migrations && npm run docs:openapi:check && npm run lint && npm run typecheck && vitest run",
     "test:unit": "vitest run --exclude tests/integration/**",
     "test:integration": "npm run db:client:check && vitest run tests/integration",
     "test:coverage": "vitest run --coverage",
