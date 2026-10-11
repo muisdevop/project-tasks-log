@@ -359,10 +359,24 @@ for (const name of REQUIRED_PARTIAL_INDEXES) {
 const OPERATOR_CONFIG = path.join("prisma", "postgres", "migrate.config.mjs");
 const ENTRYPOINT = "docker-entrypoint.sh";
 const normalizePath = (value) => value.replace(/\\/g, "/").replace(/\/+$/, "");
-const quotedAssignment = (text, key) => {
-  const match = text.match(new RegExp(`${key}\\s*(?:=|:)\\s*"([^"]+)"`));
-  return match ? normalizePath(match[1]) : null;
-};
+const unquote = (text) => text.replace(/^["']|["']$/g, "");
+
+/**
+ * Every value assigned to `name` in `text`, in source order, for one of the two syntaxes rule F
+ * has to read: `NAME=value` in the shell entrypoint and `name: value` in a JS config. Both
+ * resolve a repeated assignment the same way — the *last* one wins — which is why reading the
+ * first is a false green with a name on it: appending `MIGRATIONS_DIR="prisma/migrations"`
+ * below the real assignment, or a second `path:` key below the real one, leaves the check
+ * passing while the container migrates the SQLite set against Postgres and dies with the exact
+ * P3019 provider mismatch RA-20 was filed for.
+ */
+function valuesIn(text, name, syntax) {
+  const pattern =
+    syntax === "shell"
+      ? new RegExp(`${name}=("[^"]*"|[^\\s;]+)`, "g")
+      : new RegExp(`(^|[\\s{,])${name}:\\s*("[^"]*"|'[^']*')`, "g");
+  return [...text.matchAll(pattern)].map((m) => normalizePath(unquote(m[m.length - 1])));
+}
 
 const entrypointSrc = fs.readFileSync(ENTRYPOINT, "utf8");
 const operatorSrc = fs.readFileSync(OPERATOR_CONFIG, "utf8");
@@ -382,10 +396,24 @@ if (!postgresBranch) {
   }
   const operatorDir = normalizePath(path.dirname(OPERATOR_CONFIG));
   const comparisons = [
-    ["schema", quotedAssignment(postgresBranch, "PRISMA_SCHEMA_PATH"), quotedAssignment(operatorSrc, "schema")],
-    ["migrations directory", quotedAssignment(postgresBranch, "MIGRATIONS_DIR"), quotedAssignment(operatorSrc, "path")],
+    ["schema", "PRISMA_SCHEMA_PATH", "schema"],
+    ["migrations directory", "MIGRATIONS_DIR", "path"],
   ];
-  for (const [label, containerValue, operatorRaw] of comparisons) {
+  for (const [label, shellName, configKey] of comparisons) {
+    const containerAll = valuesIn(postgresBranch, shellName, "shell");
+    const operatorAll = valuesIn(operatorSrc, configKey, "config");
+    for (const [where, all] of [
+      [`the postgres branch of ${ENTRYPOINT}`, containerAll],
+      [OPERATOR_CONFIG, operatorAll],
+    ]) {
+      if (new Set(all).size > 1) {
+        problems.push(
+          `${where} assigns ${label} more than once (${all.join(" / ")}). Rule F reads it the way the runtime does — the last value wins, the earlier ones are dead — but a dead assignment still reads like the truth to the next human and to the next version of this check. Delete the losers.`,
+        );
+      }
+    }
+    const containerValue = containerAll[containerAll.length - 1] ?? null;
+    const operatorRaw = operatorAll[operatorAll.length - 1] ?? null;
     if (!containerValue || !operatorRaw) {
       problems.push(
         `rule F could not read the ${label}: ${ENTRYPOINT} gave ${JSON.stringify(containerValue)} and ${OPERATOR_CONFIG} gave ${JSON.stringify(operatorRaw)}.`,
@@ -403,13 +431,24 @@ if (!postgresBranch) {
   }
 }
 
-// A guard over a file nothing uses is worse than no guard, because it reads like coverage.
+// A guard over a file nothing uses is worse than no guard, because it reads like coverage. And
+// a config that is *passed* but then overridden on the command line is the same lie in a
+// different shape: `--schema` wins over the config's own `schema`, so an operator command that
+// still names the config while adding a competing flag would make every comparison above true of
+// a file Prisma never consults.
 const pkgScripts = JSON.parse(fs.readFileSync("package.json", "utf8")).scripts || {};
 const operatorCommand = pkgScripts["db:migrate:postgres"] || "";
 if (!operatorCommand.includes(normalizePath(OPERATOR_CONFIG))) {
   problems.push(
     `package.json's db:migrate:postgres does not pass --config ${normalizePath(OPERATOR_CONFIG)}, so rule F would be guarding a file the operator path never loads: ${JSON.stringify(operatorCommand)}`,
   );
+}
+for (const flag of ["--schema", "--url"]) {
+  if (operatorCommand.includes(flag)) {
+    problems.push(
+      `package.json's db:migrate:postgres passes ${flag}, which overrides part of ${normalizePath(OPERATOR_CONFIG)} at the command line — rule F's comparison would then describe a file Prisma does not consult: ${JSON.stringify(operatorCommand)}`,
+    );
+  }
 }
 
 for (const line of report) console.log(line);

@@ -2,9 +2,12 @@
 
 A **single-user** task and time tracker: jobs contain projects, projects contain
 tasks, and every task records real worked time, counted against the job's business
-hours. A segment that falls entirely outside those hours is banked as wall-clock time
-rather than zero — night-shift work is still work — and that rule lives in
-`src/lib/task-lifecycle.ts`, pinned by `tests/task-lifecycle.test.ts`.
+hours. When a task would otherwise bank **nothing** — no business seconds since its
+current segment started — the engine banks the wall-clock span instead, so a night shift
+does not read as a lost session; once a task has banked business seconds, a later
+out-of-hours increment adds zero rather than falling back to the wall clock. That rule
+lives in `src/lib/task-lifecycle.ts` (the `active && computed === 0` branch), pinned by
+`tests/task-lifecycle.test.ts`.
 Subtasks, break scheduling, progress notes and printable activity reports round
 it out. Built with Next.js 16 (App Router), TypeScript, Prisma 7 and Tailwind CSS v4.
 

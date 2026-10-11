@@ -4,6 +4,50 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The eighth re-audit pass audited the fixes, and found the same defect class in them.** Every
+  row below came from re-running something rather than re-reading it.
+  - **RA-39 — rule F read the *first* assignment, and only one of the two syntaxes it claims to
+    read.** `RA-38`'s own text says the check "reads the postgres branch of
+    `docker-entrypoint.sh`"; the code took `matchAll(...)[0]` from that branch and looked for
+    `NAME="value"`, which is shell syntax. `prisma/postgres/migrate.config.mjs` declares its
+    paths as object keys (`schema: "schema.prisma"`), so the second read found nothing and rule F
+    reported the pair as guarded while comparing a shell variable to `null`. Two independent ways
+    to keep it green with the configs truly disagreeing — a repeated shell assignment below the
+    real one, a repeated object key above it — because the shell and an object literal both keep
+    the *last* value. It now enumerates every assignment in both syntaxes, resolves the last, and
+    fails when a branch assigns the same thing twice. Five controls measured, each expected red
+    and each red on the clause it targets: a duplicate quoted `MIGRATIONS_DIR` in the entrypoint
+    branch, the same duplicate unquoted (the other half of the regex), a duplicate `path:` key in
+    the operator config, and `db:migrate:postgres` gaining `--schema` or `--url` — a flag that
+    overrides the very config the command names, which would make every comparison above true of
+    a file Prisma never opens. Restored tree exits 0 with the three files byte-identical.
+  - **RA-40 — the README's restatement of the engine's wall-clock rule was wrong in the way that
+    matters.** After `RA-34` replaced the contradicting sentence, the replacement described the
+    substitution as firing when a *segment* holds no business seconds. It does not:
+    `src/lib/task-lifecycle.ts:82-96` branches on `computed === 0` against the cumulative banked
+    value, so a task that has already banked daytime seconds gets zero — not the wall clock — for
+    a later out-of-hours increment. The engine's own comment made the same error. Both now state
+    the cumulative condition and the mixed-day double-count it prevents. (The citation in this
+    bullet read `77-93` until the comment edit moved the lines below it — the RA-38 decay pattern
+    reproduced inside its own fix, which is why it is stated against the tree this commit ships.)
+  - **RA-41 — two of the four `RA-33` projection cases were green under the bug they were filed
+    against, and the running-row case accepted any plausible number.** The deleted line was
+    `elapsedSeconds === 0 && endedAt ? span : value`, so it fired only on an exact zero: the
+    banked-45 case was green before and after, and the running-row case asserted
+    `typeof number && >= 0`, which the raw span satisfies as happily as the business-seconds
+    answer. The header had claimed the suite "would fail if it came back" — true of two cases. It
+    now says which case pins which regression, and pins the running row on the fixture's own
+    arithmetic (8 business hours of every 24, so the answer sits near a third of the wall span and
+    strictly below it). Controls: reverting the removed expression fails exactly cases 1 and 3;
+    serving running rows their span fails the upper bound; flooring them to the stored 0 fails the
+    lower. All three failed where predicted, and only there.
+  - **RA-42 — the same fixture's `workDays` contained a value the API would reject, and the
+    engine silently ignored it.** `[1, 2, 3, 4, 5, 6, 0]` reads as a seven-day job. Days are
+    numbered Mon=1…Sun=7 (`business-time.ts:172` normalises JS Sunday to 7) and
+    `validators.ts:36` constrains the array to 1..7, so the `0` matched nothing and the job ran
+    six days — which is what made the first version of RA-41's bound wrong (`4838400`, i.e. 168
+    six-hour days, below the derived floor). Found by running the test rather than reading it, and
+    now fixed with the range the validator accepts plus a comment saying why `0` is the trap.
 - **RA-38: the register was re-derived from commits, so re-reading it against the files found
   five false citations and ten stale sentences.** A `Fixed` row is a claim about code, and
   RA-36's prose-only re-derivation had not checked a single citation. The consequential one:
