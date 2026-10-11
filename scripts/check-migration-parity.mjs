@@ -122,14 +122,58 @@ function partialUniqueIndexes(files) {
  * violate it (an `UPDATE` or a `DELETE`) somewhere above the `CREATE UNIQUE INDEX`. Without
  * that, `migrate deploy` on a database produced by the old race aborts and the app never
  * boots — the shape PAR-09 was filed for.
+ *
+ * "an UPDATE somewhere above" is not enough on its own. `UPDATE "JobAttendance" SET
+ * "totalWorkSeconds" = 0 WHERE "checkOutTime" IS NULL` reads as a backfill of the indexed
+ * table, mentions the predicate column, and leaves every duplicate open row open: the
+ * `CREATE` fails exactly as before. So the check is per statement and asks where the
+ * predicate column appears — assigned in the `SET` list, or matched in a `DELETE`'s `WHERE` —
+ * which is the difference between resolving a violation and reading about it.
  */
-function backfillPrecedesIndex(file, indexName) {
+const PREDICATE_KEYWORDS = new Set([
+  "WHERE", "IS", "NULL", "NOT", "AND", "OR", "IN", "SELECT", "FROM", "CASE", "WHEN", "THEN",
+  "ELSE", "END", "LIKE", "BETWEEN", "EXISTS", "TRUE", "FALSE",
+]);
+
+function predicateColumns(predicate) {
+  return [...predicate.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)]
+    .map((m) => m[0])
+    .filter((token) => !PREDICATE_KEYWORDS.has(token.toUpperCase()));
+}
+
+/** True if any of `columns` is named in `text`. */
+function mentions(columns, text) {
+  return columns.some((column) => new RegExp(`\\b${column}\\b`, "i").test(text));
+}
+
+/** The part of an UPDATE between `SET` and its `WHERE` — the assignments, not the filter. */
+function setClause(statement) {
+  const match = /\bSET\b([\s\S]*?)(?:\bWHERE\b|$)/i.exec(statement);
+  return match ? match[1] : "";
+}
+
+function statementResolvesIndex(statement, entry, columns) {
+  const update = new RegExp(`^\\s*UPDATE\\s+"?${entry.table}"?\\b`, "i");
+  const deleteFrom = new RegExp(`^\\s*DELETE\\s+FROM\\s+"?${entry.table}"?\\b`, "i");
+  if (update.test(statement)) return mentions(columns, setClause(statement));
+  // A DELETE removes the violating rows outright, so for it the predicate column has to
+  // appear in the statement at all — that is what limits it to the open rows.
+  if (deleteFrom.test(statement)) return mentions(columns, statement);
+  return false;
+}
+
+function backfillPrecedesIndex(file, indexName, entry) {
   const sql = codeLines(fs.readFileSync(file, "utf8")).join("\n");
   const at = sql.search(
     new RegExp(`CREATE\\s+UNIQUE\\s+INDEX\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?"?${indexName}"?`, "i"),
   );
   if (at < 0) return false;
-  return /\b(UPDATE|DELETE\s+FROM)\b/i.test(sql.slice(0, at));
+  const columns = predicateColumns(entry.predicate);
+  if (columns.length === 0) return false;
+  return sql
+    .slice(0, at)
+    .split(";")
+    .some((statement) => statementResolvesIndex(statement, entry, columns));
 }
 
 function unquotedDefaults(files) {
@@ -285,15 +329,16 @@ for (const name of REQUIRED_PARTIAL_INDEXES) {
   // Rule E: the index must not be the first thing the file does. A live database can
   // already contain the rows the race produced, and `CREATE UNIQUE INDEX` over those
   // aborts `migrate deploy` — the deployment never boots. So the same file has to
-  // resolve the existing violations (an UPDATE or DELETE) before creating the index.
+  // resolve the existing violations (an UPDATE or DELETE that writes the indexed table
+  // through the column the predicate tests) before creating the index.
   // PAR-09; the behaviour itself is proven by tests/unit/migration-attendance-backfill.test.ts.
   for (const [provider, entry] of [
     ["SQLite", sqlite],
     ["Postgres", postgres],
   ]) {
-    if (!backfillPrecedesIndex(entry.file, name)) {
+    if (!backfillPrecedesIndex(entry.file, name, entry)) {
       problems.push(
-        `${entry.file} (${provider}) creates the partial index ${name} without resolving existing violations first in the same file: a deployment that already holds duplicate rows fails \`migrate deploy\` and never boots. Put the backfill above the CREATE.`,
+        `${entry.file} (${provider}) creates the partial index ${name} without a statement above it that resolves existing violations of it: expected an UPDATE or DELETE whose target is "${entry.table}" and that touches ${predicateColumns(entry.predicate).join(" / ") || "the index predicate column"}. A deployment that already holds duplicate rows fails \`migrate deploy\` and never boots. Put the backfill above the CREATE.`,
       );
     }
   }
@@ -315,6 +360,7 @@ console.log(
   `Migration parity OK: both sets seed the same tables ` +
     `(${[...seeded.sqlite].sort().join(", ") || "nothing"}), ` +
     `both define the same partial unique index ` +
-    `(${[...partials.sqlite.keys()].sort().join(", ") || "none"}) and backfill it before creating it, ` +
+    `(${[...partials.sqlite.keys()].sort().join(", ") || "none"}) and backfills the indexed table ` +
+    `through the predicate column before creating it, ` +
     `and no unquoted JSON default outside the tracked list.`,
 );

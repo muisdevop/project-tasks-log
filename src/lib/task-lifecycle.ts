@@ -17,6 +17,23 @@ export type TaskSnapshot = Pick<
   endedAt?: Date | null;
 };
 
+/**
+ * FL-08: a transition can never be observed before the segment it closes began.
+ *
+ * `now` is a request clock, and clocks step — an NTP correction, a resumed laptop,
+ * a Docker VM time sync. When the container clock was corrected backwards on
+ * 2026-10-11 the engine believed it and banked `elapsedSeconds: -12`, then wrote an
+ * `endedAt` eleven seconds before the task's own `startedAt`; the SQLite provider
+ * failed the container smoke over it while Postgres passed, which is how a
+ * one-off clock got mistaken for a provider bug. Clamping the instant is what
+ * `/api/attendance` already does with `secondsBetween` (`Math.max(0, …)`); this is
+ * the task side, and it also keeps a hold checkpoint from moving backwards, which
+ * would otherwise re-count the segment that checkpoint already banked.
+ */
+function notBefore(instant: Date, floor: Date): Date {
+  return instant.getTime() < floor.getTime() ? new Date(floor.getTime()) : instant;
+}
+
 export function applyTaskTransition(
   task: TaskSnapshot,
   action: TransitionAction,
@@ -36,12 +53,13 @@ export function applyTaskTransition(
     workEnd: settings.workEnd,
     workDays,
   };
+  const observedAt = notBefore(now, task.startedAt);
 
   if (action === "resume") {
     return {
       status: "in_progress",
       elapsedSeconds: task.elapsedSeconds,
-      startedAt: now,
+      startedAt: observedAt,
       endedAt: null,
     };
   }
@@ -55,46 +73,37 @@ export function applyTaskTransition(
     };
   }
 
+  // hold, complete and cancel all close the open segment, so they share the math:
+  // bank what was worked since the checkpoint, then stop the clock there.
+  const active = task.status === "in_progress";
+  const extra = active
+    ? workingTimeDiffSeconds(task.startedAt, observedAt, schedule)
+    : 0;
+  const computed = task.elapsedSeconds + extra;
+  const elapsedSeconds = Math.max(
+    0,
+    active && computed === 0
+      ? totalElapsedSeconds(task.startedAt, observedAt)
+      : computed,
+  );
+
   if (action === "hold") {
     // FL-03: a hold must bank the business time worked since startedAt.
     // While the task is paused nothing accumulates, so completing or
     // cancelling directly from on_hold must not add further time.
-    const active = task.status === "in_progress";
-    const extra = active
-      ? workingTimeDiffSeconds(task.startedAt, now, schedule)
-      : 0;
-    const computed = task.elapsedSeconds + extra;
-    const elapsedSeconds =
-      active && computed === 0
-        ? totalElapsedSeconds(task.startedAt, now)
-        : computed;
-
-    // Checkpoint the clock at the hold moment: any later accumulation
-    // (resume -> complete, or a direct complete) starts from `now`, so the
-    // pre-hold segment can never be counted twice.
     return {
       status: "on_hold",
       elapsedSeconds,
-      startedAt: now,
+      startedAt: observedAt,
       endedAt: null,
     };
   }
 
   // complete / cancel
-  const active = task.status === "in_progress";
-  const extra = active
-    ? workingTimeDiffSeconds(task.startedAt, now, schedule)
-    : 0;
-  const computed = task.elapsedSeconds + extra;
-  const elapsedSeconds =
-    active && computed === 0
-      ? totalElapsedSeconds(task.startedAt, now)
-      : computed;
-
   return {
     status: action === "complete" ? "completed" : "cancelled",
     elapsedSeconds,
     startedAt: task.startedAt,
-    endedAt: now,
+    endedAt: observedAt,
   };
 }

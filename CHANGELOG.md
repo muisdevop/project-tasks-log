@@ -4,6 +4,190 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The fifth re-audit pass found four more defects in this pass's own work, and disproved two
+  of the things it had been told.** Reviewing the newest code rather than the newest commit
+  produced FL-C, FL-D, RA-23, RA-25 and RA-26 — plus two claims that did not survive checking,
+  recorded here because a clean audit is a measured thing, not an asserted one.
+  - **FL-C — the list projection invented work time for a held-then-cancelled task.** When a
+    terminal row banked `elapsedSeconds: 0`, `GET /api/tasks` fell back to measuring the wall
+    clock between `startedAt` and `endedAt`. That was written for rows predating server-side
+    banking, and it stayed plausible until FL-08's hold branch began moving `startedAt` to the
+    hold checkpoint: a task held for three hours and cancelled without ever working then
+    displayed three hours, and a row whose hold crossed the work-day boundary displayed
+    `totalElapsedSeconds` of 54000 (fifteen hours) for zero recorded work. `Math.max(0, …)`
+    cannot catch this because the number is positive. The fallback is gone — a terminal row
+    shows exactly what the engine banked, floored at zero — because every write path has gone
+    through `applyTaskTransition` since FL-02/03/05, so the banked column *is* the record, and
+    "no work was recorded" is the honest display for a zero. Pinned by
+    `tests/unit/terminal-elapsed-invention.test.ts`.
+  - **FL-D — the report could read a legacy negative and print it as time.** `formatDuration`
+    rendered `-12` as `-1:-1:-12` (measured), and `computeTaskTotals` summed raw values, so a
+    set of rows displaying 600 + 0 + 300 totalled 888 — a total smaller than its own rows.
+    Both now clamp at the read boundary; the control case is in the same new test file, which
+    fails against the previous implementations.
+  - **RA-23 — the RA-21 image gate failed a build that had actually succeeded.** It compared the
+    tag's `Created` timestamp against the script's start, but a fully-cached build reuses the
+    cached config, timestamp included. Measured: `npm run docker:build -- gid-task-flow:pass7-cache`
+    exported, loaded and unpacked the tag in 0.2s and then exited 1 with
+    `IMAGE_STALE … created at 2026-10-11T15:51:13Z`. A gate that produces false failures gets
+    bypassed, which is the very defect RA-21 was raised for. The check is now identity-based:
+    buildx writes a metadata file with the digests of the image it produced, and
+    `scripts/check-image-loaded.mjs` requires the tag in the local store to carry one of them —
+    true for a warm build and a cold one, false for a build that never landed. It accepts both
+    the config digest and the descriptor digest because with provenance/SBOM attestations
+    `docker image inspect .Id` reports the *manifest list*, not the config. Re-measured: the
+    same cached rebuild now prints `IMAGE_LOADED` and exits 0, and three controls fail exactly
+    as they must — mismatched digests `IMAGE_STALE` (1), unknown tag `IMAGE_MISSING` (2), absent
+    metadata `IMAGE_UNVERIFIABLE` (3). The BSD `date -j -f` branch the same review flagged as
+    broken is gone with the timestamp logic.
+  - **RA-25 / RA-26 — the Prisma precheck was checking less than it claimed.** It read only the
+    datasource provider, so a client generated from an older `prisma/schema.sqlite.prisma`
+    passed and failed later at query time (a 500 from an API route, not a test failure); and
+    `npm run db:generate:postgres` still clobbered the SQLite client with no notice. The check
+    now also compares the generated schema text with the source it should have come from —
+    normalising Prisma's reformatting and dropped comments, measured identical on the current
+    tree — and `db:generate:postgres` prints `CLIENT_CLOBBER_NOTICE` first (`--expect=` makes
+    the check usable in the other direction for the Postgres dev server). Controls run: an
+    injected extra model in the generated schema → exit 1, restored → 0, notice → 0, postgres
+    client on disk → 1, regenerate → 0.
+  - **Checked and disproved:** *the auto-hold path crashes because its projection has no
+    `startedAt`* — all four engine call sites (`tasks/route.ts:318/456/477`,
+    `breaks/log/route.ts:192/210`) select or construct `startedAt`, the column is a non-nullable
+    `DateTime` in both schemas, and `typecheck` is clean. *A shipped migration had been edited
+    in place* — that migration was **added** by `998e60d` and is absent from the `v0.2.0` tree,
+    so no database has ever recorded its checksum; reverting it would have restored the
+    copy-and-swap form the previous pass measured deleting four tables under
+    `foreign_keys=ON` inside a transaction. The file's own immutability note is corrected to
+    state that provenance instead. *`.env.local` leaks credentials into the test run* — no
+    `.env.local` exists in this repo, `.dockerignore` excludes `.env` and `.env.*`, the
+    Dockerfile has no `COPY . .`, and the harness sets its own `DATABASE_URL` rather than
+    inheriting one.
+- **RA-21 and RA-22: two process defects that cost this pass real time are now gates, not
+  reminders.** Both were things the docs already told you to be careful about, which is the
+  proof that a warning is not a control.
+  - **RA-21 (`scripts/docker-build.sh`, `npm run docker:build`).** This host builds with the
+    docker-container/buildx driver, where `docker build -t …` exits 0 and writes only to the
+    build cache: measured on 2026-10-11, the build reported success and `docker images` had
+    never heard of the tag, so the container the gate then booted was an image from before the
+    fix and its green belonged to old code. The script passes `--load` and then requires the tag
+    to exist *and* to have been created after the script started — an existing-but-old tag is
+    the same false green, so both halves are needed. Its controls were run, not assumed: with
+    the build line skipped, an existing `pass7` tag fails with
+    `IMAGE_STALE: … created at 2026-10-11T15:51:13Z, before this build started` (exit 1) and an
+    unknown tag fails with `IMAGE_MISSING` (exit 1); the unparseable-timestamp case exits 1 as
+    `IMAGE_UNVERIFIABLE` rather than comparing as zero. The real build on the final tree printed
+    `IMAGE_OK gid-task-flow:pass7` and exited 0.
+  - **RA-22 (`scripts/check-prisma-client.mjs`, `npm run db:client:check`).** Both Prisma
+    schemas emit into the same `node_modules/.prisma/client`, so generating the Postgres client
+    silently replaces the SQLite one the integration harness needs — and the suite then fails
+    with an adapter/provider error that reads like a broken test. `npm test` and
+    `npm test:integration` now open with a check that reads the `provider` out of the generated
+    `schema.prisma`. Measured: clean state → `PRISMA_CLIENT_OK … targets sqlite` (0); after
+    `npm run db:generate:postgres` → `PRISMA_CLIENT_CHECK_FAILED … Fix: npm run db:generate` (1);
+    after `npm run db:generate` → back to 0. A missing client is exit 2 with the same remedy, so
+    the check cannot pass on an absent artefact. CI is unaffected by construction: its quality
+    job runs `npx vitest run` with its own pinned generate step, not `npm test`.
+- **RA-08 stopped being an accepted risk and was fixed.** It had been recorded as the one
+  re-audit finding carried as Risk accepted: the SSR shell ships the sidebar with
+  `aria-hidden="true"` because `useMediaQuery` cannot know the viewport on the server, so the
+  axe gate had to wait for hydration before scanning. The fix was already in the file and
+  nobody had noticed — the class string carries the breakpoint in pure CSS
+  (`invisible … md:visible … md:translate-x-0`), and `visibility: hidden` already removes a
+  subtree from both the accessibility tree and the tab sequence. A media query is the one
+  thing a server render can get right without JavaScript, so the viewport-derived attribute
+  was redundant *and* the only part that could be wrong: a screen reader parsing the markup
+  before hydration was told the navigation does not exist. `aria-hidden` and the now-unused
+  `isDesktop` prop are gone from `Sidebar`; `tests/unit/components/sidebar-shell-a11y.test.tsx`
+  renders the layout with `useMediaQuery` mocked to the server's answer (it fails against the
+  old markup, which is how it was written first) and asserts both that the shell makes no such
+  claim and that the CSS terms which replace it are present.
+- **FL-08 (found by this pass's own docker gate): the task engine believed a clock that ran
+  backwards.** The dual-provider boot on the new base failed one smoke check on SQLite and
+  passed it on Postgres — `PATCH complete` banked `elapsedSeconds: -12`. It was not a provider
+  defect: the Docker VM corrected its clock between two requests, and `now` in
+  `src/app/api/tasks/route.ts:451` is that request clock, so `applyTaskTransition` happily
+  computed `workingTimeDiffSeconds(startedAt, now)` (0, because its own `endedAt <= startedAt`
+  guard fired), hit the `computed === 0` wall-clock fallback, and stored the negative — with an
+  `endedAt` earlier than the row's `startedAt`. A reproduced probe against the live container
+  showed `startedAt 14:36:20.577Z / endedAt 14:36:11.921Z`, and `date -u` in the same container
+  was in step with the host minutes later: transient, and therefore exactly the kind of input a
+  time-keeping product must not trust. `/api/attendance` already clamps (`secondsBetween` is
+  `Math.max(0, …)`); the task side now does too — a transition instant is floored at the
+  segment's own `startedAt`, which also stops a hold checkpoint from sliding backwards and
+  re-counting the segment it had already banked, and banked seconds are never negative. The
+  list projection in `GET /api/tasks` clamps what it displays, so a row written before this fix
+  cannot show negative work time. Four tests in `tests/task-lifecycle.test.ts` pin it,
+  including the resume-after-step-back case whose absence would report 9000s instead of 7200s,
+  and the smoke check now asserts `endedAt >= startedAt` as well as `elapsed >= 0` — the ordering
+  is what a task already holding banked time would otherwise hide.
+- **SEC-01's runtime tree is now empty.** The previous pass reported 20 advisories against
+  `--omit=dev` and recorded the rest as needing semver-majors that were "scheduled upgrade
+  work". The majors were taken. Four `overrides` were needed because the flagged leaves are
+  each pinned to an **exact** version by their parent — `chevrotain`→`lodash@4.17.21`,
+  `@prisma/config`→`deepmerge-ts@7.1.5`, `prisma`→`mysql2@3.15.3`,
+  `@tailwindcss/typography`→`postcss-selector-parser@6.0.10` — so `npm audit fix` could not
+  move any of them, and the top-level `lodash@4.18.1` the earlier pass had installed was a
+  *second* copy rather than a fix (measured: after overriding, no nested copies remain).
+  Then `puppeteer` went 24.43.1 → **25.13.0**, which is the change the advisory chain
+  actually required: `@puppeteer/browsers@3.2.4` depends on neither `extract-zip` nor
+  `proxy-agent` any more (`node_modules/extract-zip` is now absent, not newer), clearing the
+  last 8 runtime Highs. Puppeteer is a runtime dependency — `src/lib/pdf-render.ts` exports
+  the PDFs — so it could not be reclassified as dev and counted as solved. Counts, in order:
+  runtime 20 → 8 → **0**, full tree 26 → 14 → **6**. The 6 that remain are dev-only lint and
+  build tooling with no upstream remedy: `eslint-config-next` is already at the version that
+  matches `next@16.4.0` and npm proposes a two-major *downgrade* to 14.2.35, `braces`,
+  `fast-glob` and `micromatch` are flagged across every published version, and the `esbuild`
+  Low is pinned by `tsx` and `vite`.
+- **The Node floor moved to `>=22.12.0`, and the base image with it, because puppeteer 25
+  demands it** (`puppeteer/package.json` `engines.node`). This is the change an earlier pass
+  of the same finding considered and explicitly declined "for a release cut"; once the
+  advisory work required it, it was made properly: `node:20-alpine3.20@sha256:3bc9a4…` →
+  `node:22-alpine3.23@sha256:baf676f7…` (the image reports `v22.23.3`), `node-version: "20"` →
+  `"22"` in all three CI jobs, `engines`, `scripts/check-engines.mjs` and `engines:check`
+  re-armed, and every apk pin re-**read** from the new base with `apk policy` rather than
+  guessed: `python3=3.12.15-r0 make=4.4.1-r3 g++=15.2.0-r2`, `curl=8.22.0-r0`,
+  `chromium=149.0.7827.53-r0`. `npm run engines:check` over 1261 installed manifests (426 of
+  which declare `engines.node`) reports 0 excluding either 22.23.3 or 24.18.0.
+  `scripts/engine-strict-probe.sh` now installs in the shipping image — `PROBE_EXIT=0 … accepts
+  the manifest set on 22-alpine3.23` — and its falsification control was run too: the same
+  probe with `ENGINES_PROBE_IMAGE=node:20-alpine3.20` exits 1 with `npm error code EBADENGINE …
+  Not compatible with your version of node/npm: project-tasks-log@0.2.0`, which is now the
+  intended outcome. Verified end to end on the final tree of this pass, on the new base:
+  `npm run db:generate`, `npm test` (the client precheck, lint, typecheck, 61 files / 843
+  tests), `npm run build`, `npm run test:e2e` (86 passed / 42 skipped on the 3×3 engine ×
+  viewport matrix), `npm run docker:build -- gid-task-flow:pass7` (`--load` plus the landed-tag
+  check), and both provider boots behind Coolify-style container names with `npm run
+  smoke:container REQUIRE_PDF=1` — 28 checks, 0 failed on SQLite and the same on Postgres 16,
+  each returning a real `application/pdf` from the image's Chromium (35316 and 34985 bytes).
+  That gate is what surfaced FL-08 above.
+- **PAR-03's repair was rewritten, because the guard the fourth pass added was too weak to
+  catch what the repair itself could do.** Rule E only asked for *an* `UPDATE`/`DELETE` above
+  the `CREATE UNIQUE INDEX`; a statement that writes a different table, or writes the right
+  table without touching the predicate column, passed it while leaving the duplicates in
+  place. Rule E is now per statement and requires the target to be the index's own table *and*
+  the predicate column to appear where it changes rows — in the `SET` list of an `UPDATE`, in
+  the `WHERE` of a `DELETE`. Six controls, all behaving as predicted: shipped file green; no
+  backfill red; `UPDATE "Project" …` red; `UPDATE "JobAttendance" SET "totalWorkSeconds" = 0
+  WHERE "checkOutTime" IS NULL` red (the shape the weak rule accepted); backfill below the
+  `CREATE` red; a `DELETE`-form repair green, so a different valid fix is not failed for style.
+- **The same pass found a data-loss condition in its own PAR-03 fix.** The repair used
+  Prisma's copy-and-swap rebuild for a default change — `CREATE TABLE new_Job`, copy,
+  `DROP TABLE "Job"`, rename. `PRAGMA foreign_keys` is a no-op inside a transaction, so on a
+  connection that enabled the pragma *before* opening it the `DROP` does not fail: the
+  `ON DELETE CASCADE` arms on Project, Task, JobAttendance and BreakType fire and those four
+  tables are emptied while the migration still exits 0. Measured on a populated database
+  through all three (pragma, transaction) conditions: `OFF/OFF lost=nothing`,
+  `ON/OFF lost=nothing`, `ON/ON lost=Project,Task,JobAttendance,BreakType`. The repair is now
+  additive — `ADD COLUMN` with a constant default, `UPDATE`, `DROP COLUMN`, `RENAME COLUMN` —
+  which never destroys the table identity the children point at, and measures
+  `lost=nothing` in all three conditions with the same resulting default, index, empty
+  `PRAGMA foreign_key_check` and no orphans. `tests/unit/migration-job-workdays-repair.test.ts`
+  (11 tests) pins that matrix and carries its own controls: the copy-and-swap form empties the
+  same fixture, and an unrepaired database stores `1, 2, 3, 4, 5` where `JSON.parse` throws.
+  Prisma's own `migrate deploy` was re-measured on a populated database both before and after
+  the repair (rows preserved, default becomes `'[1, 2, 3, 4, 5]'`), and `migrate diff` reports
+  no drift in either direction — the additive form reorders the column list, and SQLite, unlike
+  Prisma, cares.
 - The fourth re-audit pass looked at the code the third pass had just written and found a
   defect class nobody had tested: **PAR-09**. `20261010180500` can only create its unique
   index because the statement above it closes the rows the old race produced — but on a

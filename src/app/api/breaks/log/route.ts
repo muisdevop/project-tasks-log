@@ -94,8 +94,13 @@ function validateBreakWindow(input: BreakLogInput): NextResponse | null {
       { status: 400 },
     );
   }
-  const wallClockSeconds = Math.floor((now.getTime() - startedAt.getTime()) / 1000);
-  if (wallClockSeconds < 0 || wallClockSeconds > MAX_BREAK_DURATION_SECONDS) {
+  // FL-H: a browser clock running a few seconds fast used to make a break unloggable. The
+  // `FUTURE_SKEW_MS` tolerance above accepted `startedAt` up to two minutes ahead, and this
+  // line then rejected exactly those values as "too old to log" — a dead tolerance and a
+  // message describing the opposite problem. What is being recorded is a break that has just
+  // started, so the honest value is zero, not a rejection.
+  const wallClockSeconds = Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / 1000));
+  if (wallClockSeconds > MAX_BREAK_DURATION_SECONDS) {
     return NextResponse.json(
       { error: "Break start time is too old to log." },
       { status: 400 },
@@ -218,7 +223,11 @@ async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
         isBreak: true,
         status: "completed",
         startedAt,
-        endedAt: now,
+        // FL-H: this was the only `endedAt` write in the app that discarded the engine's
+        // clamped instant and stored the raw request clock, so a browser clock running fast
+        // could still persist endedAt < startedAt after FL-08. `change.endedAt` is already
+        // floored at `startedAt` by applyTaskTransition.
+        endedAt: change.endedAt ?? now,
         elapsedSeconds: change.elapsedSeconds,
         completionOutput: `Break completed. Duration: ${durationLabel}`,
         events: {

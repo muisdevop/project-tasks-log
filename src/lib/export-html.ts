@@ -53,11 +53,20 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** `HH:MM:SS` elapsed-time rendering used in the summary and task cards. */
+/**
+ * `HH:MM:SS` elapsed-time rendering used in the summary and task cards.
+ *
+ * FL-08 / FL-D: floored at zero. A row written before the engine clamped the request clock
+ * can hold a negative `elapsedSeconds`, and this function is the report's last chance to say
+ * something true about it — unguarded, `-12` printed as `-1:-1:-12`, and the same value
+ * subtracted from the totals the PDF's headline numbers. Not work time, so not shown as work
+ * time.
+ */
 export function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
+  const total = Math.max(0, seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
 

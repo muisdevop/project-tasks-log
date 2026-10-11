@@ -176,10 +176,21 @@ await (async () => {
 
   const complete = await req("PATCH", "/api/tasks", { taskId, action: "complete" });
   const elapsed = complete.json?.task?.elapsedSeconds;
+  const started = complete.json?.task?.startedAt;
+  const ended = complete.json?.task?.endedAt;
+  // FL-08: a backwards clock step (NTP / Docker VM time sync) used to reach the
+  // database as negative banked time and an `endedAt` before `startedAt`. The
+  // engine clamps the transition instant now, and this check is what keeps it
+  // clamped: `elapsed >= 0` alone can be masked by time banked at an earlier hold.
   check(
     "PATCH complete banks elapsedSeconds server-side",
-    complete.status === 200 && typeof elapsed === "number" && elapsed >= 0,
-    { s: complete.status, elapsed },
+    complete.status === 200 &&
+      typeof elapsed === "number" &&
+      elapsed >= 0 &&
+      !!started &&
+      !!ended &&
+      Date.parse(ended) >= Date.parse(started),
+    { s: complete.status, elapsed, span: started && ended ? `${started} -> ${ended}` : undefined },
   );
 
   // /api/breaks/log takes the *start* of a finished break and banks the active

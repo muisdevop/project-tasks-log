@@ -22,7 +22,7 @@ no tags, no licence).
 | Bundle budget | `npm run bundle:budget` | exit 0 |
 | Build | `npm run build` | exit 0 |
 | Browser matrix | `npm run test:e2e` | exit 0 (needs `npm run test:e2e:install` once) |
-| Container | `docker build -t gid-task-flow .`, boot on SQLite **and** Postgres, then `APP_USERNAME=… APP_PASSWORD=… REQUIRE_PDF=1 npm run smoke:container -- http://127.0.0.1:PORT` | `TOTAL 28 checks, 0 failed` on **both** providers. Health and login alone proved nothing: the 2026-10-09 pass found a container-only PDF degradation (AR-06) that every other gate passed over, so the gate is the script, not a checklist in someone's head. |
+| Container | `npm run docker:build -- gid-task-flow:local` (which is `docker build --load` plus a check that the tag landed), boot on SQLite **and** Postgres, then `APP_USERNAME=… APP_PASSWORD=… REQUIRE_PDF=1 npm run smoke:container -- http://127.0.0.1:PORT` | `TOTAL 28 checks, 0 failed` on **both** providers. Health and login alone proved nothing: the 2026-10-09 pass found a container-only PDF degradation (AR-06) that every other gate passed over, so the gate is the script, not a checklist in someone's head. `--load` is part of the gate, not a flag: on a buildx/docker-container driver a bare `docker build` exits 0 and puts the result only in the build cache, so the boot that follows runs the previous image and reports a green that belongs to old code (RA-21, measured when this host built successfully and `docker images` had never heard of the tag). The script fails with `IMAGE_STALE` if the tag it was given is older than the build it just ran. |
 | Compose files | `docker compose -f docker-compose.yml config -q` (with `SESSION_SECRET` + `APP_PASSWORD_HASH` set) and the same for `docker-compose.prod.yml` | exit 0 — both files must parse, and `docker-compose.yml` must still **refuse** an empty `APP_PASSWORD_HASH`. CI runs this as its own step, because nothing else ever did and a broken dev file went unnoticed for a whole wave. |
 
 `AGENTS.md` is the canonical definition of done; `.github/workflows/ci.yml`
@@ -33,13 +33,16 @@ through any of it.
 **Prisma generate order (AR-02).** `prisma/schema.sqlite.prisma` and
 `prisma/postgres/schema.prisma` both emit into the same default
 `node_modules/.prisma/client`, so only the last-generated client exists. If you
-ran `npm run db:generate:postgres` for Postgres work, run
-`npm run db:generate:sqlite` again **before** `npm run test:integration` or
-`npm test`: the harness boots a SQLite database and a Postgres-built client
-against it fails with an adapter/provider error that looks like a broken test
-rather than a stale generate. The same ordering applies after
-`npm run db:generate:postgres` in CI. `npm run db:parity` checks the two schemas
-agree; it cannot check which client is on disk.
+ran `npm run db:generate:postgres` for Postgres work, the SQLite-built client is
+gone until you run `npm run db:generate` again: the harness boots a SQLite
+database and a Postgres-built client against it fails with an adapter/provider
+error that looks like a broken test rather than a stale generate. You no longer
+have to remember that ordering — `npm test` and `npm test:integration` both open
+with `npm run db:client:check`, which reads the provider out of
+`node_modules/.prisma/client/schema.prisma` and refuses to continue with
+`Fix: npm run db:generate` when the client on disk targets anything but sqlite
+(RA-22). `npm run db:parity` checks the two schemas agree; it cannot check which
+client is on disk, which is exactly the gap the precheck closes.
 
 ## 2. Branch and PR workflow
 

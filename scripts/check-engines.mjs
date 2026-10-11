@@ -12,14 +12,14 @@
 // whole installed tree, that one proves npm's own engine-strict refusal in the base
 // image. Neither replaces the other.
 //
-// Usage: node scripts/check-engines.mjs [20.19.2,24.18.0]
+// Usage: node scripts/check-engines.mjs [22.23.3,24.18.0]
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
 const semver = createRequire(import.meta.url)("semver");
 
-const runtimes = (process.argv[2] ?? "20.19.2,24.18.0").split(",").map((v) => v.trim()).filter(Boolean);
+const runtimes = (process.argv[2] ?? "22.23.3,24.18.0").split(",").map((v) => v.trim()).filter(Boolean);
 const root = process.cwd();
 
 const offenders = [];

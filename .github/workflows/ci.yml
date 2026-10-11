@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
       - name: Install
         # This job pins NODE_ENV=production for the build/test steps, and npm then
@@ -68,7 +68,7 @@ jobs:
         # not enough. The control case is in the script's header.
         run: npm run engines:check
       - name: engine-strict install probe in the base image (RA-09)
-        # Runs the real `npm ci --include=dev` inside `node:20-alpine3.20`, where
+        # Runs the real `npm ci --include=dev` inside `node:22-alpine3.23`, where
         # `.npmrc`'s `engine-strict=true` turns the same violation into a refusal at
         # install time. Reading ranges and enforcing them are different checks: this is
         # the one that reproduces what a deploy actually does.
@@ -120,7 +120,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
       # TC-04 follow-up found by the 2026-10-10 re-audit: this pipeline installed
       # @playwright/test but never ran it, so every "the 3x3 matrix is green" claim
@@ -176,7 +176,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - uses: actions/download-artifact@v4
         with:
           name: stl-ci-image

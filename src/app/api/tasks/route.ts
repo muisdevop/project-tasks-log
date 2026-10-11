@@ -196,14 +196,18 @@ async function listTasks(request: Request, log: RequestLogContext) {
       // The cursor column is internal to the page (see `dropField`).
       const task = dropField(row, "updatedAt");
       if (task.status !== "in_progress") {
-        const fallbackElapsed =
-          task.elapsedSeconds === 0 && task.endedAt
-            ? totalElapsedSeconds(task.startedAt, task.endedAt)
-            : task.elapsedSeconds;
-
         return {
           ...task,
-          elapsedSeconds: fallbackElapsed,
+          // FL-08 / FL-C: a terminal row shows exactly what the engine banked, floored at
+          // zero. There used to be a fallback here that, when the banked value was 0,
+          // measured the wall clock between `startedAt` and `endedAt` instead — written for
+          // rows predating server-side banking, and correct until the hold branch started
+          // moving `startedAt` to its checkpoint. A task held for fifteen hours and then
+          // cancelled without ever banking would then display fifteen hours of work: a
+          // positive, plausible, invented number that `Math.max` cannot catch. Every write
+          // path goes through `applyTaskTransition` (FL-02/03/05), so the banked column is
+          // the record; when it says zero, the honest display is zero.
+          elapsedSeconds: Math.max(0, task.elapsedSeconds),
           startedAt: task.startedAt.toISOString(),
           endedAt: task.endedAt?.toISOString() || null,
         };
@@ -225,7 +229,7 @@ async function listTasks(request: Request, log: RequestLogContext) {
 
       return {
         ...task,
-        elapsedSeconds: displayElapsed,
+        elapsedSeconds: Math.max(0, displayElapsed),
         startedAt: task.startedAt.toISOString(),
         endedAt: task.endedAt?.toISOString() || null,
       };

@@ -59,13 +59,14 @@ Interface
 
 ## Requirements
 
-- Node.js `^20.19.0 || ^22.12.0 || >=24.0.0` — declared in `package.json`'s `engines`
-  and enforced at install time by `.npmrc` (`engine-strict=true`). The floor is not
-  a preference: `prisma@7` requires `^20.19` on the 20 line, and the Dockerfile pins
-  `node:20-alpine3.20` (with digest; the build transcript reports `v20.19.2`), which
-  clears that floor by one patch version. CI runs `node-version: "20"`. Before this
-  field existed, a devDependency whose own `engines` excluded Node 20 installed with a
-  warning and then died inside CI's test worker — see RA-09 in the CHANGELOG.
+- Node.js `>=22.12.0` — declared in `package.json`'s `engines` and enforced at install
+  time by `.npmrc` (`engine-strict=true`). The floor is not a preference: the PDF export
+  in `src/lib/pdf-render.ts` needs `puppeteer`, and `puppeteer@25.13.0` — the only line
+  whose dependency tree carries no advisory — declares `engines.node >=22.12.0`. The
+  Dockerfile pins `node:22-alpine3.23` (with digest; the build transcript reports
+  `v22.23.3`) and CI runs `node-version: "22"`. Before this field existed, a
+  devDependency whose own `engines` excluded the shipped runtime installed with a warning
+  and then died inside CI's test worker — see RA-09 in the CHANGELOG.
 - SQLite 3 (default, zero setup) **or** PostgreSQL — `docker-compose.yml` and
   `docker-compose.prod.yml` both pin `postgres:16-alpine`.
 - A Chromium/Chrome binary only if you want PDF instead of HTML export.
@@ -350,7 +351,7 @@ missing from the OpenAPI document.
 SESSION_SECRET="$(openssl rand -hex 32)"
 APP_PASSWORD_HASH="$(npm run password:hash -- 'your-password')"
 
-docker build -t gid-task-flow .
+npm run docker:build -- gid-task-flow    # docker build --load + verifies the tag landed
 docker run --rm -p 3000:3000 -v stl-data:/data \
   -e SESSION_SECRET -e APP_PASSWORD_HASH gid-task-flow        # SQLite volume at /data
 
@@ -371,6 +372,13 @@ DB_PROVIDER=postgres docker compose -f docker-compose.prod.yml --profile postgre
   installs Chromium from the Alpine package for PDF export, and runs
   `prisma generate` + `migrate deploy` only when the schema/migration hash
   changes (`docker-entrypoint.sh`).
+- Use `npm run docker:build` instead of a bare `docker build`. On a
+  buildx/docker-container driver (Docker Desktop's default) `docker build -t …`
+  exits 0 and writes only to the build cache — the tag never reaches the local
+  image store, so the `docker run` that follows boots an older image and reports
+  a green that belongs to old code. The script passes `--load` and then fails
+  with `IMAGE_STALE` if the tag it was given predates the build it just ran
+  (RA-21).
 - Coolify renames containers (`<name>-<random suffix>`), so nothing may hardcode
   a service DNS name: the database host always comes from `DATABASE_URL` /
   `DATABASE_URL_POSTGRES`, never from a fixed container name.

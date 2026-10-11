@@ -239,15 +239,18 @@ ranges did not move; only the lockfile did.
 
 Two consequences had to be handled in code or config, not prose:
 
-- **`prisma@7.10.0` cannot simply be taken.** Its newer `@prisma/dev` depends on
-  `@prisma/streams-local`, and *every* published version of that package declares
-  `engines.node >=22.0.0` — including the one before it. On the Node 20.19.2 that the
-  digest-pinned image and CI run, `.npmrc`'s `engine-strict=true` turns that into a
-  refusal at install time (RA-09's whole point). The fix is an `overrides` entry
-  pinning `@prisma/dev` back to `0.20.0` — the version this project already shipped
-  with, which does not pull that package. `@prisma/dev` backs the `prisma dev`
-  command, which this product never invokes; the sweep over every installed
-  `package.json` reports 0 ranges excluding the shipped runtime again.
+- **`prisma@7.10.0` could not simply be taken — at the Node 20 floor this project ran
+  then.** Its newer `@prisma/dev` depends on `@prisma/streams-local`, and *every*
+  published version of that package declares `engines.node >=22.0.0` — including the one
+  before it. On the Node 20.19.2 that the digest-pinned image and CI ran,
+  `.npmrc`'s `engine-strict=true` turned that into a refusal at install time (RA-09's
+  whole point). The fix was an `overrides` entry pinning `@prisma/dev` back to `0.20.0` —
+  the version this project already shipped with, which does not pull that package.
+  `@prisma/dev` backs the `prisma dev` command, which this product never invokes; the
+  sweep over every installed `package.json` reported 0 ranges excluding the shipped
+  runtime. The floor has since moved to `>=22.12.0` (SEC-01 fix round 2, below), which
+  removes the *reason* for that pin; the pin stays because it is the version the product
+  was verified against, and dropping it is an upgrade in its own right, not a cleanup.
 - **`puppeteer@24.43.1` removed `networkidle0`** from `setContent`'s `waitUntil`
   union, which `npm run typecheck` caught in `src/lib/pdf-render.ts`. It now waits for
   `load`: for a document handed over whole by `setContent()`, `load` already means
@@ -257,39 +260,81 @@ Two consequences had to be handled in code or config, not prose:
 What genuinely remains needs a semver-major and is accepted with rationale — npm's own
 `fixAvailable` data now says so per package rather than being inferred:
 
-- **The Prisma 7 chain** (`prisma`, `@prisma/config`, `@prisma/dev`,
-  `@mrleebo/prisma-ast`, `chevrotain`/`@chevrotain/*`, `deepmerge-ts`,
-  `lodash`, `mysql2`) reports its only remedy as a **downgrade to
-  `prisma@6.19.3`**, which removes driver-adapter support and breaks the dual
-  SQLite/Postgres schema setup and `npm run db:parity` — a worse security posture, not
-  a better one. Chevrotain's own patched line is 10 → 13, a major `@mrleebo/prisma-ast`
-  cannot take; that parser is what `prisma migrate deploy` uses at container start.
-- **The Puppeteer chain** (`puppeteer`, `puppeteer-core`, `@puppeteer/browsers`,
-  `extract-zip`, `basic-ftp`, `get-uri`, `pac-proxy-agent`, `proxy-agent`) reports
-  `puppeteer@25.13.0`, a major. Mitigating context: the browser loads only locally
-  generated report HTML through `page.setContent`, navigates to no remote origin, runs
-  `headless: true` with a 60-second protocol timeout, and it runs inside a
-  digest-pinned Alpine image whose Chromium package comes from that pinned base. The
-  launch uses `--no-sandbox`/`--disable-setuid-sandbox`, which is the honest trade-off
-  for running Chromium as the non-root `node` user in a container and is why an
-  upstream Chromium advisory here is treated as materially exploitable rather than
-  academic.
-- **`@tailwindcss/typography`** (with `postcss-selector-parser` behind it) reports
-  `0.5.4`, a downgrade. The plugin only restyles the rendered note HTML, which
-  `isomorphic-dompurify` has already sanitised at write time and again at render, so
-  the input the advisory's XSS assumes is not what reaches it.
+### SEC-01 fix round 2: the runtime tree is empty
+
+The pass above left 20 advisories in the runtime tree and argued the rest needed a
+semver-major. It did — so the major was taken. Two changes, measured in order:
+
+1. **`overrides` for four exactly-pinned leaves.** `chevrotain` pins `lodash@4.17.21`,
+   `@prisma/config` pins `deepmerge-ts@7.1.5`, `prisma` pins `mysql2@3.15.3` and
+   `@tailwindcss/typography` pins `postcss-selector-parser@6.0.10` — all exact, so
+   `npm audit fix` could not move them and the top-level `lodash@4.18.1` was a *second*
+   copy, not a fix. Pinning the four clears 12 advisories, including the whole Prisma
+   chain (`prisma`, `@prisma/config`, `@prisma/dev`, `@mrleebo/prisma-ast`,
+   `chevrotain`/`@chevrotain/*`). `deepmerge-ts` 7 → 8 and `postcss-selector-parser`
+   6 → 7 are major bumps against an exact pin, so they are held by evidence rather than
+   by trust: `prisma generate` on both schemas, the Tailwind build, and the full suite.
+2. **`puppeteer` 24.43.1 → 25.13.0, and the Node floor with it.** The remaining 8 runtime
+   advisories were all the Puppeteer chain (`@puppeteer/browsers`, `extract-zip`,
+   `proxy-agent`, `pac-proxy-agent`, `get-uri`, `basic-ftp`), and the only remedy npm
+   reports is the 25 line. `@puppeteer/browsers@3.2.4` no longer depends on `extract-zip`
+   or `proxy-agent` at all — measured by resolving the installed tree, where
+   `node_modules/extract-zip` is now absent rather than newer. Puppeteer is a *runtime*
+   dependency (the PDF export, `src/lib/pdf-render.ts`), so it cannot be moved to dev and
+   counted as solved; and `puppeteer@25.13.0` declares `engines.node >= 22.12.0`, which
+   the product's own floor had to follow.
+
+| | runtime tree (`--omit=dev`) | full tree (`--include=dev`) |
+| --- | --- | --- |
+| before this round | 20 (7 moderate, 13 high) | 26 (1 low, 7 moderate, 18 high) |
+| after the four overrides | 8 (8 high) | 14 (1 low, 13 high) |
+| after `puppeteer@25.13.0` | **0** | **6 (1 low, 5 high)** |
+
+The Node floor is `>=22.12.0` in `package.json`, `node:22-alpine3.23`
+(`@sha256:baf676f7…`, reports `v22.23.3`) in the Dockerfile, `node-version: "22"` in all
+three CI jobs, and the apk pins moved with the base as SEC-14 requires:
+`python3=3.12.15-r0 make=4.4.1-r3 g++=15.2.0-r2`, `curl=8.22.0-r0`,
+`chromium=149.0.7827.53-r0` — each read from `apk policy` inside the pinned image rather
+than guessed. `npm run engines:check` sweeps 1261 installed manifests, 426 of which
+declare `engines.node`, and reports 0 that exclude either 22.23.3 or 24.18.0.
+
+What is left is dev-only and has no upstream fix to take:
+
+- **The ESLint/Next lint chain** (`eslint-config-next`, `@next/eslint-plugin-next`,
+  `fast-glob`, `micromatch`, `braces`) — 5 High. `eslint-config-next` is already at
+  `16.4.0`, matching `next@16.4.0`; the version npm's `fixAvailable` proposes is
+  **14.2.35**, a two-major downgrade that would lint against a different Next than the
+  one that builds. `braces`/`fast-glob`/`micromatch` are flagged with `*` / `>=0.2.0`,
+  i.e. every published version: an unbounded-recursion DoS in a glob matcher that, here,
+  only ever sees patterns from `src/**` in a CI container. The remediation is upstream.
+- **`esbuild`** (1 Low, dev-only): flagged across `0.27.3 - 0.28.0` for the *dev server*
+  arbitrary-file-read issue, and the installed `0.27.4` is pinned by `tsx@4.21.0` and by
+  `vitest → vite@8.3.4`, not by this project. `npm audit fix` was run and moved nothing
+  (measured: version and count identical before and after), so the only route is a major
+  in one of those two dev tools. The advisory's precondition — an esbuild dev server
+  listening — is a code path neither `tsx` nor Vitest starts here.
+
+Mitigating context that still applies to the browser itself: it loads only locally
+generated report HTML through `page.setContent`, navigates to no remote origin, runs
+`headless: true` with a 60-second protocol timeout, and runs inside a digest-pinned
+Alpine image whose Chromium comes from that pinned base. The launch uses
+`--no-sandbox`/`--disable-setuid-sandbox`, which is the honest trade-off for running
+Chromium as the non-root `node` user in a container and is why an upstream Chromium
+advisory here is treated as materially exploitable rather than academic.
 
 One consequence of SEC-14's pinning is worth stating plainly: the base image is
-digest-pinned (`node:20-alpine3.20@sha256:3bc9a4…`) and Chromium is apk-pinned to
-`131.0.6778.108-r0`, so the browser in the shipped image does **not** receive
+digest-pinned (`node:22-alpine3.23@sha256:baf676f7…`) and Chromium is apk-pinned to
+`149.0.7827.53-r0`, so the browser in the shipped image does **not** receive
 security updates until the pins are deliberately moved. Reproducibility was
 chosen over auto-updating; the price is that Chromium CVEs land here as a
 reviewed maintenance task rather than as an automatic patch, and the `--disable-gpu`
 PDF regression test plus a container smoke run are what make that review safe.
-The alternative — moving the image to Node 22, which every remaining `engines` range
-would accept — was considered during this remediation and rejected for a release cut:
-it re-pins the base digest and the apk Chromium version together, and both are what the
-PDF path is verified against.
+An earlier pass of this remediation considered moving the image to Node 22 and rejected
+it *for a release cut*, because it re-pins the base digest and the apk Chromium version
+together and both are what the PDF path is verified against. That objection was about
+timing, not about the change: once the advisory work actually required the 25 line of
+puppeteer, the move was made, both pins were re-read from the new image, and the PDF path
+was re-verified on it rather than assumed (SEC-01 fix round 2, above).
 
 What is being done instead of a fake green: CI reports both counts on every run
 (`Dependency advisory posture (SEC-01)`, non-blocking by design so a new upstream
@@ -305,13 +350,17 @@ filesystem with the manifests mounted read-only rather than onto a bind mount: w
 `node_modules` back as the container's root leaves the CI runner unable to delete the
 temp directory its own cleanup trap points at, and a host `/tmp` is not the daemon's
 `/tmp`, so the source path has to be normalised before Git Bash can see the input at
-all. Both were found by running the gate on two platforms instead of trusting one, and
-the probe carries its own control case — a `jsdom@30` fixture is refused with
-`EBADENGINE` on `node v20.19.2 / npm 10.8.2` — so it is demonstrably a gate, not a
-formality. The remaining majors — `prisma` 7.x → the
-puppeteer 25 line, then `@tiptap` — are scheduled upgrade work, each requiring
-`npm run db:parity`, the export integration tests and `npm run smoke:container` (which
-asserts the real PDF) to pass before it lands.
+all. Both were found by running the gate on two platforms instead of trusting one. The probe also
+carries its own control case, re-run on this base: the same script with
+`ENGINES_PROBE_IMAGE=node:20-alpine3.20` exits 1 with `npm error code EBADENGINE … Not
+compatible with your version of node/npm: project-tasks-log@0.2.0`, while on `22-alpine3.23`
+it prints `PROBE_EXIT=0`. The refusal moved from a single transitive fixture to the project
+manifest itself now that `>=22.12.0` is the declared floor — which is the gate doing its job
+on the thing it actually protects. So it is demonstrably a gate, not a formality.
+Nothing in the runtime tree is left waiting on a major; what remains is the dev-only pair
+named above, and its remedy is upstream. Any future major that does land — in `next`,
+`@tiptap` or the Prisma chain — has to pass `npm run db:parity`, the export integration tests
+and `npm run smoke:container` (which asserts the real PDF, on both providers) first.
 The critical Next.js DoS advisory that the original audit found is genuinely gone:
 `next@16.4.0` is above the fixed version.
 

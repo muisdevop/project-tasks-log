@@ -437,7 +437,9 @@ export function computeTaskTotals(tasks: readonly ExportTask[]): ReportTotals {
 
   for (const task of tasks) {
     totals.totalTasks += 1;
-    totals.totalElapsedSeconds += task.elapsedSeconds;
+    // FL-08 / FL-D: a pre-clamp row can carry a negative `elapsedSeconds`; summing it would
+    // make the report's own total less than the sum of the work actually shown on the page.
+    totals.totalElapsedSeconds += Math.max(0, task.elapsedSeconds);
     if (task.status === "completed") totals.totalCompleted += 1;
     else if (task.status === "cancelled") totals.totalCancelled += 1;
   }

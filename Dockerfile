@@ -3,14 +3,20 @@
 # ---------------------------------------------------------------------------
 # SEC-14: reproducibility. Base image pinned to an exact tag AND digest
 # (multi-arch index digest from `docker buildx imagetools inspect
-# node:20-alpine3.20`). If you cannot reach the registry to verify a digest,
-# keep at minimum the exact version tag (`node:20-alpine3.20`).
-# apk packages are pinned to versions current for Alpine 3.20 at the time of
+# node:22-alpine3.23`). If you cannot reach the registry to verify a digest,
+# keep at minimum the exact version tag (`node:22-alpine3.23`).
+# apk packages are pinned to versions current for Alpine 3.23 at the time of
 # writing (verified with `apk policy` inside the pinned base). Alpine only
 # bumps these inside a branch, so pins may need refreshing when you move the
 # base tag; the ARG defaults below are the single place to edit.
+#
+# SEC-01 (fix round 2): the base moved 20 -> 22 because `puppeteer@25.13.0`, the
+# only release whose dependency tree holds no advisory, requires `node >= 22.12.0`
+# (measured: `puppeteer/package.json` `engines`). 8 High runtime advisories in the
+# PDF-export chain — @puppeteer/browsers, extract-zip, proxy-agent, pac-proxy-agent,
+# get-uri, basic-ftp — cleared with it, and `npm audit --omit=dev` reports 0.
 # ---------------------------------------------------------------------------
-ARG NODE_BASE=node:20-alpine3.20@sha256:3bc9a4c4cc25cfde1e8f946341c85f333c36517aafda829b4bb7e785e9b5995c
+ARG NODE_BASE=node:22-alpine3.23@sha256:baf676f7d0e552f3231945c2f979055ca121bce128c152f7a34e6bd1728b1c5a
 
 FROM ${NODE_BASE} AS builder
 WORKDIR /app
@@ -23,7 +29,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 # fallback when no musl prebuilt matches. Builder stage ONLY - the runner
 # stays lean. (AR-06: python3/make/g++ must NOT appear in the runtime image.)
 # SEC-14: pinned apk versions.
-ARG TOOLCHAIN="python3=3.12.13-r0 make=4.4.1-r2 g++=13.2.1_git20240309-r1"
+ARG TOOLCHAIN="python3=3.12.15-r0 make=4.4.1-r3 g++=15.2.0-r2"
 RUN apk add --no-cache ${TOOLCHAIN}
 
 # Ensure Prisma can run during build even when orchestration injects empty build args.
@@ -81,8 +87,8 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # curl for HEALTHCHECK, chromium for server-side PDF export.
 # SEC-14: pinned apk versions.
-ARG CURL=curl=8.14.1-r2
-ARG CHROMIUM=chromium=131.0.6778.108-r0
+ARG CURL=curl=8.22.0-r0
+ARG CHROMIUM=chromium=149.0.7827.53-r0
 RUN apk add --no-cache ${CURL} ${CHROMIUM}
 
 # AR-06: standalone output + static assets + public + prisma artifacts, with

@@ -20,7 +20,6 @@ interface SidebarProps {
   username?: string | null;
   /** Drawer visibility below md; ignored at md+ where the sidebar is docked. */
   open?: boolean;
-  isDesktop?: boolean;
 }
 
 interface Job {
@@ -83,7 +82,7 @@ function CloseIcon({ className }: { className?: string }) {
   );
 }
 
-export function Sidebar({ username, open = true, isDesktop = true }: SidebarProps) {
+export function Sidebar({ username, open = true }: SidebarProps) {
   const SIDEBAR_JOBS_CACHE_KEY = "sidebar-jobs-cache";
   const SIDEBAR_PROJECTS_CACHE_KEY = "sidebar-projects-cache";
   const pathname = usePathname();
@@ -225,15 +224,15 @@ export function Sidebar({ username, open = true, isDesktop = true }: SidebarProp
   }));
   const displayName = profileName || username || null;
 
-  // Closed drawer below md: `invisible` removes its tab stops from the DOM the
-  // instant it slides out, so nothing has to be unmounted (BG-02 safe).
-  const drawerHidden = !isDesktop && !open;
-
   return (
     <aside
       id={SIDEBAR_ID}
       aria-label="Sidebar"
-      aria-hidden={drawerHidden || undefined}
+      // RA-08: the closed drawer below `md` is hidden by CSS only — `invisible`
+      // takes the subtree out of the accessibility tree and the tab sequence, and
+      // `md:visible` puts it back for docked viewports. No `aria-hidden`: the
+      // breakpoint cannot be known during SSR, so a viewport-derived attribute was
+      // wrong in exactly the markup a screen reader would parse before hydration.
       className={`fixed left-0 top-14 z-55 flex h-[calc(100dvh-3.5rem)] w-64 flex-col border-r border-white/10 bg-slate-900/95 backdrop-blur-xl transition-transform duration-200 ease-out dark:bg-slate-950/95 md:top-0 md:h-screen md:z-40 ${
         open ? "visible translate-x-0" : "invisible -translate-x-full md:visible md:translate-x-0"
       }`}
@@ -610,7 +609,7 @@ export function SidebarLayout({
         />
       )}
 
-      <Sidebar username={username} open={navOpen} isDesktop={isDesktop} />
+      <Sidebar username={username} open={navOpen} />
       <GlobalBreakWidget />
       {/* RS-01/RS-02: `flex-1` alone keeps the CSS default `min-width: auto`, so the
           shell refused to shrink below the min-content width of whatever the route

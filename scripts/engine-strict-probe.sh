@@ -1,16 +1,23 @@
 #!/bin/sh
 # RA-09, measured in the runtime the product actually ships on.
 #
-# `.npmrc` sets `engine-strict=true`, so on Node 20 an `engines` violation is a hard
-# refusal at install time, while a newer developer machine only prints a warning and
-# the defect surfaces later as a dead test worker. `scripts/check-engines.mjs` reads
+# `.npmrc` sets `engine-strict=true`, so an `engines` violation is a hard refusal at
+# install time in the base image, while a newer developer machine only prints a warning
+# and the defect surfaces later as a dead test worker. `scripts/check-engines.mjs` reads
 # the ranges; this proves npm's own behaviour by running the real install inside the
 # digest-pinned base image. `--ignore-scripts` keeps it toolchain-free — engine-strict
 # is enforced during install, not by a lifecycle script.
 #
+# The floor is `>=22.12.0` because that is what `puppeteer@25.13.0` requires, and
+# puppeteer is a runtime dependency (the PDF export in `src/lib/pdf-render.ts`). So the
+# refusal this probe used to demonstrate against Node 20 is now the *intended* outcome:
+# running it with `ENGINES_PROBE_IMAGE=node:20-alpine3.20` must fail with EBADENGINE, and
+# running it in the image the product ships on must succeed. Both were measured when the
+# floor moved.
+#
 # Only the manifests are copied, so nothing here can touch the working tree.
 set -eu
-IMAGE="${ENGINES_PROBE_IMAGE:-node:20-alpine3.20}"
+IMAGE="${ENGINES_PROBE_IMAGE:-node:22-alpine3.23}"
 PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/engine-strict-probe.XXXXXX")"
 trap 'rm -rf "$PROBE_DIR"' EXIT
 

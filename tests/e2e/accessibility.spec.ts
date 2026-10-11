@@ -95,12 +95,15 @@ test.describe("accessibility (axe-core in a real browser)", () => {
       await expect
         .poll(async () => (await page.locator("main").innerText()).length)
         .toBeGreaterThan(20);
-      // Then scan the *hydrated* page, not the server markup. `useMediaQuery`
-      // cannot know the viewport on the server, so the SSR shell ships the
-      // sidebar with `aria-hidden="true"` and the client's first commit clears it
-      // (src/hooks/use-media-query.ts). Auditing before that commit hands axe a
-      // focusable subtree inside an aria-hidden element — a pre-hydration
-      // snapshot, not something a screen-reader user ever navigates.
+      // Then scan the *hydrated* page, not the loading skeleton above it.
+      // RA-08 used to make this a race: the SSR shell shipped the sidebar with
+      // `aria-hidden="true"` because `useMediaQuery` cannot know the viewport on
+      // the server, so auditing early handed axe a focusable subtree inside an
+      // aria-hidden element. The shell no longer needs the attribute (the drawer's
+      // breakpoint lives in `invisible`/`md:visible` CSS, which an SSR render can
+      // get right), and this assertion is what keeps it that way: if a
+      // viewport-derived attribute comes back, the gate times out here instead of
+      // quietly auditing a snapshot no screen-reader user navigates.
       await expect(page.locator("#app-sidebar")).not.toHaveAttribute("aria-hidden", "true", {
         timeout: 20_000,
       });

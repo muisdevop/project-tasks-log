@@ -168,4 +168,93 @@ describe("applyTaskTransition", () => {
     expect(result.status).toBe("on_hold");
     expect(result.elapsedSeconds).toBe(2 * 3600);
   });
+
+  // --- FL-08: a request clock that steps *backwards* must not be believed ---
+  //
+  // Measured, not imagined: on 2026-10-11 the containerised smoke got
+  // `elapsedSeconds: -12` from PATCH complete on the SQLite provider, because the
+  // Docker VM clock was corrected backwards between two requests. `now` is a
+  // request clock and clocks step (NTP corrections, resumed laptops), so the
+  // engine has to treat "the transition happened before the segment started" as
+  // impossible rather than as data. /api/attendance already clamps (`secondsBetween`
+  // is `Math.max(0, …)`); these tests are the task side of the same invariant.
+
+  describe("a backwards clock step", () => {
+    const started = new Date("2026-03-30T10:00:00");
+
+    it("complete never banks negative time and never ends before it started", () => {
+      const result = applyTaskTransition(
+        { status: "in_progress" as const, startedAt: started, elapsedSeconds: 0 },
+        "complete",
+        new Date(started.getTime() - 12_000),
+        settings,
+      );
+
+      expect(result.status).toBe("completed");
+      expect(result.elapsedSeconds).toBeGreaterThanOrEqual(0);
+      expect(result.elapsedSeconds).toBe(0);
+      expect(result.endedAt!.getTime()).toBeGreaterThanOrEqual(result.startedAt.getTime());
+    });
+
+    it("hold does not move its checkpoint backwards", () => {
+      const result = applyTaskTransition(
+        { status: "in_progress" as const, startedAt: started, elapsedSeconds: 0 },
+        "hold",
+        new Date(started.getTime() - 12_000),
+        settings,
+      );
+
+      expect(result.status).toBe("on_hold");
+      expect(result.startedAt.getTime()).toBeGreaterThanOrEqual(started.getTime());
+      expect(result.elapsedSeconds).toBe(0);
+    });
+
+    it("resume after a step back cannot re-count the segment already banked", () => {
+      const held = applyTaskTransition(
+        { status: "in_progress" as const, startedAt: started, elapsedSeconds: 0 },
+        "hold",
+        new Date("2026-03-30T11:00:00"),
+        settings,
+      );
+      expect(held.elapsedSeconds).toBe(3600);
+
+      // Clock now reads 10:30 — inside the segment that was just banked.
+      const resumed = applyTaskTransition(
+        held,
+        "resume",
+        new Date("2026-03-30T10:30:00"),
+        settings,
+      );
+      expect(resumed.startedAt.getTime()).toBeGreaterThanOrEqual(
+        new Date("2026-03-30T11:00:00").getTime(),
+      );
+
+      const done = applyTaskTransition(
+        resumed,
+        "complete",
+        new Date("2026-03-30T12:00:00"),
+        settings,
+      );
+      // 1h banked + 1h worked after the checkpoint. Trusting the 10:30 resume would
+      // have reported 9000s by counting 10:30–11:00 a second time.
+      expect(done.elapsedSeconds).toBe(2 * 3600);
+    });
+
+    it("clamps a negative elapsedSeconds inherited from a pre-fix row", () => {
+      // The release that shipped without this clamp left such rows behind, so the
+      // engine must not propagate them through a later transition.
+      const result = applyTaskTransition(
+        {
+          status: "in_progress" as const,
+          startedAt: new Date("2026-03-30T21:00:00"),
+          elapsedSeconds: -12,
+        },
+        "hold",
+        new Date("2026-03-30T22:00:00"),
+        settings,
+      );
+
+      expect(result.elapsedSeconds).toBe(0);
+    });
+  });
 });
