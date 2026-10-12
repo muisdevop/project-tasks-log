@@ -4,6 +4,68 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The tenth re-audit pass audited the gate log's attributions — and the tooling that certifies
+  them.** Six rows, again none of them product defects: every one was found by running a command
+  the campaign had previously only described, and each repair is measured in both directions. The
+  register now carries 93 original findings plus 70 rows this campaign filed against itself
+  (`sheet 12`, 163 rows, all Fixed), and the verification log has 42 rows.
+  - **RA-52 — the gate log asserted trees it could not evidence.** Rows put a commit in their
+    verdict line, and the whole of `C:/tmp` held exactly one transcript that recorded a tree at all:
+    `gate-chg13-chain.txt`, which recorded `TREE=879735e…` with `DIRTY=1` — a dirty worktree. So the
+    documentation-tip row's "at ff86693" named a commit absent from all six transcripts it cites.
+    Repaired by measurement: the AGENTS.md gate re-ran on the committed tip with a clean worktree
+    (`gate-chg14-chain.txt` opens `TREE_BEFORE=ff86693c2af8e5b45584aeb2f3eff67f3a866dab
+    DIRTY_BEFORE=0` and closes on the same tree), a 24-step batch re-ran every locally reproducible
+    check with its own tree stamp before and after, GitHub's jobs supply the matrix, axe and both
+    container boots with the API's `headSha` in the capture, and every row now carries a
+    `Provenance (RA-52):` clause naming the tree a transcript it cites records — or declares itself
+    history-only. Two rows do: the one-off `pg_stat_activity` sampling and the pre-convention
+    image-identity controls. A sixth pipeline step, `verify-attributions`, fails any row whose
+    verdict names a commit its cited transcripts do not contain, cites a file that does not exist,
+    or carries no clause. Measured red first: `ctrl14-attribution-red.txt` — `ROWS=40`,
+    `ATTRIBUTION_PROBLEMS=3`, exit 1.
+  - **RA-53 — the attribution verifier invented missing evidence.** Its filename pattern listed
+    `gate-…|ctrl…|pass…` and, the third branch unanchored, cut the tail off
+    `ruleF-controls-pass13.txt` and reported a file called `pass13.txt` as `MISSING`. A checker that
+    fabricates missing evidence trains a campaign to wave its findings through. It now matches whole
+    filename tokens and takes the basename: the fabricated problem is gone and the three real ones
+    stood.
+  - **RA-54 — the provenance batch stopped on a green tree.** Its dependency-advisory step grepped
+    npm's JSON for `"total":0`, a byte sequence npm never emits (it writes `"total": 0`), so
+    `gate-tip14-batch.txt` ends `audit-runtime RC=1 WANT=0 MISMATCH` after twenty green steps. An
+    unsatisfiable needle is indistinguishable from a real regression: the same line would have
+    covered three actual advisories and zero. The verdict now comes from `audit-parse.cjs` reading
+    `metadata.vulnerabilities`, and `ctrl14-audit-needle.sh` proves both directions at the tip —
+    `OLD_NEEDLE_ON_GREEN_RC=1` with `PARSED_TOTAL=0`, `NEW_PARSER_ON_INJECTED_RC=1` against a
+    fabricated audit holding three runtime advisories, `NEW_PARSER_ON_REAL_GREEN_RC=0`.
+  - **RA-55 — the clause-builder's own needle could not be satisfied.** It demanded four numbers
+    each followed by a literal `%` from vitest's text reporter, which prints a pipe table with no
+    percent sign in it, so the script threw before writing a single provenance clause and blamed the
+    row for evidence that was on line 1076 of the transcript it had just read
+    (`ctrl15-needle-red.txt`). It now matches the reporter's actual output.
+  - **RA-56 — a citation to a transcript that does not exist.** Row 41 named
+    `gate-chg14-ci-boot-postgres.txt`; the capture writes `gate-chg14-ci-boot-pg.txt`. This is the
+    verifier's first true positive against the repaired log (`ctrl16-attribution-red.txt`), and the
+    pipeline stopped there, so no workbook shipped pointing a reader at a missing file.
+  - **RA-57 — the workbook's front page cited a sheet that does not exist.** Cell `C5` closed by
+    sending readers to the gate rows on a thirteenth sheet of a twelve-sheet workbook, where the gate
+    log is sheet 11 and the remediation backlog is sheet 9 — a misdirection away from the very
+    attributions RA-52 exists to make checkable. Nothing compared prose sheet numbers with the
+    sheets being written, so the builder now derives the sheet list from its own `workbook.xml`,
+    scans every inline string of every worksheet (27 mentions across 12 sheets) and throws before
+    zipping. `ctrl17-sheetref.sh` measures both directions: a throw-away copy with the sentence
+    reverted exits 1, names the sheet and the part, and writes no workbook; the shipped builder
+    exits 0. The guard's first run against the shipped builder caught the sentence describing it,
+    because quoting a bad reference is still a bad reference.
+  - Register sentences that quoted live counts were also removed, since a sentence that changes
+    between runs cannot be diffed: RA-50 no longer recites the registers' newest mtime, RA-52 takes
+    its pre-repair figures from the red control artefact, RA-56 defers the census to the verifier's
+    own output, and each of those rewrites is announced on stdout by the script that owns the log
+    rather than applied silently.
+  - Two new gate rows: row 41 is the clean-tip AGENTS.md gate plus the provenance batch, row 42 is
+    the sheet-reference guard's controls. `bash C:/tmp/pipeline-pass13.sh` is now six steps, and it
+    prints the tree it ran on at both ends.
+
 - **The ninth re-audit pass pointed the method at the report itself.** Nothing below is a product
   defect: every row was produced by re-running a command this campaign had previously only
   described, in the gate log, the workbook builder and the verifiers that certify them. Nine rows,
