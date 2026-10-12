@@ -4,6 +4,64 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The ninth re-audit pass pointed the method at the report itself.** Nothing below is a product
+  defect: every row was produced by re-running a command this campaign had previously only
+  described, in the gate log, the workbook builder and the verifiers that certify them. Nine rows,
+  and the register now carries 93 original findings plus 64 rows this campaign filed against
+  itself (`sheet 12`), all closed.
+  - **RA-43 — a gate row whose stated command exits 1 at the tip.** "Compose files parse" claimed
+    success for `docker compose -f docker-compose.yml config -q`, which SEC-14's required-variable
+    guards make abort with `APP_PASSWORD_HASH is missing a value`. The product was right and the
+    row was unreproducible; the row now states the command with the two secrets supplied, and the
+    empty-secret case keeps its own row asserting the abort.
+  - **RA-44 — a hygiene grep reporting "no match" while matching something.** The sweep returned
+    `.env.example`, which the same row describes as deliberately tracked. Harmless content, but a
+    verifier whose failure mode is invisible is one nobody re-runs, so the row now states the
+    expected hit count and the refresh throws unless the grep yields exactly that one path.
+  - **RA-45 — the shipped workbook contained its own template.** 35 authored note cells, 4 of them
+    rendering `${m.componentTests}` and friends as literal text, because the notes object mixes
+    template literals (which interpolate) with plain strings (which do not) — and the placeholder
+    scan could not see the shape, since its pattern matched undotted names only. Every note now
+    passes through one interpolation choke point that throws on an unresolvable or leftover
+    placeholder, and the verifier refuses any authored cell containing `${`.
+  - **RA-46 — the verifier printed its problems and returned 0.** The check that found RA-45 was
+    advisory. It now derives its exit code from the problem count, and the control proves both
+    halves: one deliberately-broken workbook through a copy with that line removed exits 0 while
+    printing the same problem count the real verifier exits 1 on.
+  - **RA-47 — tip-evidence needles no artefact could satisfy.** They demanded whole prose sentences
+    from a sheet rendered row by row. Each needle is now a fragment the gate log really prints
+    (tip SHA, image tag, 64-hex digest, `28 checks`, both migration counts, `155 selected`, the
+    tag's short SHA, the CI run id) and is first asserted against `gates.json`, so a workbook is
+    never blamed for a check that was impossible.
+  - **RA-48 — five register sentences the code had outgrown.** RA-41 grew the component project
+    from 44 to 46 tests, RA-27 un-skipped the mobile viewports and moved the chromium matrix row
+    from 28 to 47 passed / 4 skipped, and the counts checker quoted two repeat-run totals with no
+    run log behind them. The checker now requires provenance: a claim may cite a transcript, and it
+    opens that file and demands the number beside a test count, so a figure can be either measured
+    or explicitly anchored to a named commit — not waived.
+  - **RA-49 — a status checker certifying the previous build.** It read its default extraction
+    directory while the workbook was being unpacked elsewhere, reported a row-count mismatch as a
+    defect in the current artefact, and was wrong about both. `verify-workbook.cjs` now drops a
+    `.provenance.json` recording the xlsx it unpacked, that build's mtime, the unpack time and the
+    register mtimes, and the checker refuses a directory with no record or an out-of-date one.
+  - **RA-50 — the fix for RA-49 could not have worked.** It compared extracted-part mtimes against
+    the registers, but the zip writer stamps every entry with a fixed DOS date so repeated builds
+    stay byte-comparable: an unpacked part reports 1979-12-31 forever, so the guard would have
+    failed every run including green ones. A check that cannot pass is as dead as one that cannot
+    fail, and the register asserted it was in force. Replaced by the explicit record above, with
+    both red paths and the green path measured.
+  - **RA-51 — the self-check row of the gate log had itself drifted.** Its census still read "32 of
+    37 rows" after the log grew, and its commit pattern was a bare 7-hex-character regex over
+    prose, so decimal constants in evidence text (`4838400`, `5548099`, `5548828`) were counted as
+    trees. The census is now re-derived by the script that edits the log, the self-check row is
+    excluded from its own count, and a candidate only counts when `git` confirms a commit with that
+    prefix.
+  - Two new gate rows make the deliverable one owned command instead of five hand-run checks:
+    `bash C:/tmp/pipeline-pass13.sh` (build → verify → status census → quoted-count proof →
+    citation sweep, fail-fast, one transcript per step) and `bash C:/tmp/ctrl13-stale.sh` (the
+    provenance guard's red and green directions). Hand-run steps are how RA-49 stayed invisible for
+    a whole pass.
+
 - **The eighth re-audit pass audited the fixes, and found the same defect class in them.** Every
   row below came from re-running something rather than re-reading it.
   - **RA-39 — rule F read the *first* assignment, and only one of the two syntaxes it claims to
