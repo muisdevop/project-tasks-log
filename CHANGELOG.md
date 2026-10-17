@@ -4,6 +4,60 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The thirteenth re-audit pass went back to the instruments that measure the deliverable, and one of
+  them had been under-counting a gate the workbook reports.** Four findings, all in the campaign's own
+  tooling and none in the product — but the first changed a number a reviewer would read. The register
+  now carries 93 original findings plus 83 rows this campaign has filed against itself (`sheet 12`,
+  176 rows, all Fixed). Every count quoted in an earlier entry is the count at that entry's own pass;
+  the live figures are in the workbook and in the gate log, which re-derive them on each edit.
+  - **RA-67 — the axe scan census was pinned to one source line, and its guard froze the blind spot.**
+    The metrics generator counted axe assertions with a regex anchored to
+    `accessibility.spec.ts:162:9` and then refused any run whose route count was not the literal `7`.
+    Against the very CI matrix log the previous workbook was built from, that parse sees **63 scans
+    over 7 routes** while the log itself holds **72 over 8**: the route it cannot see is the drawer-only
+    axe assertion, which lives at [tests/e2e/accessibility.spec.ts:189](tests/e2e/accessibility.spec.ts)
+    and `:206` and `:229` (RA-27/RA-29's tests). So the guard was green on the incomplete parse and would
+    have refused the correct one — it certified the under-count and forbade the fix, and the shipped
+    accessibility rows understated the gate by nine scans and one route. The generator now derives the
+    census from the spec (route labels in the describe block plus every drawer test carrying the same
+    assertion) and asserts `scans == routes × projects` against the log: measured at the gated tip,
+    72 = 8 × 9, and deleting a single axe line from a copy breaks the identity at 71 over 8, which is
+    what makes the guard falsifiable (`ctrl23-axe.txt`).
+  - **RA-68 — the CI provenance header shipped blank in all five job captures.** The capture script put
+    `cut -d'\"'` inside a `$( )` inside a double-quoted echo, so the backslash survived into the
+    substitution, `cut` received a two-character delimiter, errored, and emitted
+    `CI_RUN_HEAD_SHA=` with no value — while a grep for the short sha still reported hits from the job
+    log body, which is why the capture looked populated. Reproduced on the real API record
+    (`ctrl23-pass14-tooling.txt`): the shipped hoisted form yields the full 40-hex tip. Two repairs,
+    because one repair was the original defect: the extraction is asserted non-empty where it happens,
+    and the metrics generator additionally requires the sha to appear on **at least two lines** of the
+    job log — a header written by the capturer proves only that the capturer ran (real matrix log
+    `hits=5` accepted, header-only fixture `hits=1` refused).
+  - **RA-69 — the campaign's own state file carried fields no sheet reads, and they contradicted the
+    fields the sheets do read.** The pass-14 regeneration rebuilt `metrics.json` from the census of its
+    consumers: the 47 kept keys are each re-parsed from a transcript measured at the gated tip or
+    deleted outright. The one dropped key is documented rather than assumed — `red` went after a grep
+    showed its only mention in the workbook builder is a comment, so that row reads its own transcript
+    instead of a remembered record. The generator was falsified in four directions at
+    `TREE=d36de9d DIRTY=0` (`ctrl22-metrics-falsify.txt`): a wrong tip argument, a provider smoke whose
+    two transcripts disagree, a stale tree stamp, and no CI run at the tip each throw; a green copy
+    reproduces the shipped file byte-for-byte.
+  - **RA-70 — an instrument the campaign must not repair was quietly becoming one.** The provenance
+    batch's dependency-advisory step greps npm's JSON for a byte sequence npm never emits, so it exits
+    1 on a clean tree and the batch stops there — and that stop is RA-54's evidence, asserted by exact
+    string by the deliverable writer. Fixing the needle would therefore invalidate the citation of the
+    defect it documents, with nothing in the script saying so. The coupling is now measured in three
+    states (live batch accepted, mismatch line deleted refused, needle repaired-to-green refused) and
+    written as a comment above the step, naming the file where the green verdict actually comes from.
+  - **Regeneration, and the discipline it rests on.** Because the gated tip moved to the commit that
+    carries the twelfth pass's product fixes, every figure the workbook quotes was re-measured there
+    rather than carried: 63 files / 860 tests, coverage 96.51 / 90.54 / 96.56 / 97.06 (the figures at
+    the twelfth pass's code, not the previous tip's), 46 component tests in 5 files, the
+    155-test browser matrix at 143 passed / 12 skipped, 16 SQLite and 5 PostgreSQL migrations, 28/28
+    container-smoke checks on each provider, `gid-task-flow:chg14` built from the clean tip and booted
+    behind Coolify-shaped names, and both CI runs for the tip green on 5/5 jobs. The AGENTS.md gate was
+    run twice against this content — once on the working tree that became this documentation commit,
+    once on the committed tip with a clean worktree — and both transcripts stamp their own tree.
 - **The twelfth re-audit pass went back to the product, and found four real defects — the first
   since the tenth pass.** None were in the deliverable machinery this time; they were in the
   accounting, the throttle, the idempotency store, and a one-active-task invariant that the test
