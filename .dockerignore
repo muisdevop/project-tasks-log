@@ -1,10 +1,22 @@
 node_modules
 .next
+out
+dist
 dev.db
+dev.db-journal
+*.db
 .env
 .env.*
 .git
+.gitignore
+.github
 .cursor
 agent-transcripts
 terminals
-
+# AR-06: keep build context lean - these never belong in the image.
+coverage
+tsconfig.tsbuildinfo
+audit-report
+docs
+project-tasks-log.zip
+*.md

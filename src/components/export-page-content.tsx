@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   calculateTimePeriodDates,
   calculateDurationPreset,
-  type TimePeriod,
+  localDateKey,
   type GroupByOption,
 } from "@/lib/export-helpers";
+
+// UI-level period option. "duration" is a UI concept (preset/custom ranges)
+// that maps to the wire value "range" when building the export query string.
+type TimePeriodOption = "day" | "week" | "month" | "duration";
 
 type Job = {
   id: number;
@@ -26,19 +30,25 @@ type ReportTitlesResponse = {
 
 export function ExportPageContent() {
   // Time period controls
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>("day");
+  const [timePeriod, setTimePeriod] = useState<TimePeriodOption>("day");
   const [durationMode, setDurationMode] = useState<"preset" | "custom">("preset");
   const [durationPreset, setDurationPreset] = useState<7 | 30 | 90>(7);
-  const [customRangeStart, setCustomRangeStart] = useState<string>("");
-  const [customRangeEnd, setCustomRangeEnd] = useState<string>("");
+  // Seeded lazily from the local calendar (see localDateKey) so the date inputs
+  // never render an empty value and never drift because of UTC trimming.
+  const [customRangeStart, setCustomRangeStart] = useState<string>(() => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    return localDateKey(sevenDaysAgo);
+  });
+  const [customRangeEnd, setCustomRangeEnd] = useState<string>(() =>
+    localDateKey(new Date()),
+  );
 
   // Job and project filters
   const [jobs, setJobs] = useState<Job[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedJobs, setSelectedJobs] = useState<number[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
-  const [allJobsSelected, setAllJobsSelected] = useState(false);
-  const [allProjectsSelected, setAllProjectsSelected] = useState(false);
 
   // Grouping option
   const [groupBy, setGroupBy] = useState<GroupByOption>("date");
@@ -54,123 +64,115 @@ export function ExportPageContent() {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Computed values for intelligent filtering
-  const filteredProjects = selectedJobs.length === 0 
-    ? [] 
-    : projects.filter((p) => selectedJobs.includes(p.jobId));
+  const filteredProjects = useMemo(
+    () =>
+      selectedJobs.length === 0
+        ? []
+        : projects.filter((p) => selectedJobs.includes(p.jobId)),
+    [projects, selectedJobs],
+  );
 
   // Group filtered projects by job
-  const projectsByJob = filteredProjects.reduce((acc, proj) => {
-    const job = jobs.find((j) => j.id === proj.jobId);
-    const jobName = job?.name || "Unknown Job";
-    if (!acc[jobName]) {
-      acc[jobName] = [];
-    }
-    acc[jobName].push(proj);
-    return acc;
-  }, {} as Record<string, Project[]>);
+  const projectsByJob = useMemo(
+    () =>
+      filteredProjects.reduce((acc, proj) => {
+        const job = jobs.find((j) => j.id === proj.jobId);
+        const jobName = job?.name || "Unknown Job";
+        if (!acc[jobName]) {
+          acc[jobName] = [];
+        }
+        acc[jobName].push(proj);
+        return acc;
+      }, {} as Record<string, Project[]>),
+    [filteredProjects, jobs],
+  );
+
+  // The "select all" checkboxes are derived from the current selection instead of
+  // being stored, so they can never drift out of sync with the filtered list.
+  const allJobsSelected =
+    jobs.length > 0 && jobs.every((job) => selectedJobs.includes(job.id));
+  const allProjectsSelected =
+    filteredProjects.length > 0 &&
+    filteredProjects.every((p) => selectedProjects.includes(p.id));
 
   useEffect(() => {
-    fetchData();
-    // Set default date range based on today
-    const today = new Date().toISOString().split("T")[0];
-    setCustomRangeEnd(today);
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split("T")[0];
-    setCustomRangeStart(sevenDaysAgo);
-  }, []);
+    // Declared inside the effect so state only changes once a response settles —
+    // the mount effect body performs no synchronous setState.
+    async function loadOptions() {
+      try {
+        const [jobRes, projRes, titleRes] = await Promise.all([
+          fetch("/api/jobs"),
+          fetch("/api/projects"),
+          fetch("/api/report-titles"),
+        ]);
 
-  // Sync "All Projects" checkbox state based on filtered projects
-  useEffect(() => {
-    if (filteredProjects.length === 0) {
-      setAllProjectsSelected(false);
-    } else {
-      const allFiltered = filteredProjects.every((p) => selectedProjects.includes(p.id));
-      setAllProjectsSelected(allFiltered);
-    }
-  }, [filteredProjects, selectedProjects]);
-
-  async function fetchData() {
-    try {
-      const [jobRes, projRes, titleRes] = await Promise.all([
-        fetch("/api/jobs"),
-        fetch("/api/projects"),
-        fetch("/api/report-titles"),
-      ]);
-
-      if (jobRes.ok) {
-        const data = await jobRes.json();
-        const jobList = data.jobs || [];
+        let jobList: Job[] = [];
+        if (jobRes.ok) {
+          const data = (await jobRes.json()) as { jobs?: Job[] };
+          jobList = data.jobs ?? [];
+        }
         setJobs(jobList);
         // Default: select all jobs
-        setSelectedJobs(jobList.map((j: Job) => j.id));
-        setAllJobsSelected(true);
-      }
+        setSelectedJobs(jobList.map((j) => j.id));
 
-      if (projRes.ok) {
-        const data = await projRes.json();
-        const projList = data.projects || [];
+        let projList: Project[] = [];
+        if (projRes.ok) {
+          const data = (await projRes.json()) as { projects?: Project[] };
+          projList = data.projects ?? [];
+        }
         setProjects(projList);
         // Default: select all projects
-        setSelectedProjects(projList.map((p: Project) => p.id));
-        setAllProjectsSelected(true);
-      }
+        setSelectedProjects(projList.map((p) => p.id));
 
-      if (titleRes.ok) {
-        const data = (await titleRes.json()) as ReportTitlesResponse;
-        const options = data.options && data.options.length > 0 ? data.options : ["Activity Report"];
-        const fallback = options[0];
-        setReportTitleOptions(options);
-        setSelectedReportTitle(
-          data.defaultTitle && options.includes(data.defaultTitle)
-            ? data.defaultTitle
-            : fallback,
-        );
-      } else {
-        setReportTitleOptions(["Activity Report"]);
-        setSelectedReportTitle("Activity Report");
+        if (titleRes.ok) {
+          const data = (await titleRes.json()) as ReportTitlesResponse;
+          const options =
+            data.options && data.options.length > 0
+              ? data.options
+              : ["Activity Report"];
+          setReportTitleOptions(options);
+          setSelectedReportTitle(
+            data.defaultTitle && options.includes(data.defaultTitle)
+              ? data.defaultTitle
+              : options[0],
+          );
+        } else {
+          setReportTitleOptions(["Activity Report"]);
+          setSelectedReportTitle("Activity Report");
+        }
+      } catch {
+        setError("Failed to load jobs, projects, or report title options");
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setError("Failed to load jobs, projects, or report title options");
-    } finally {
-      setLoading(false);
     }
-  }
 
+    void loadOptions();
+  }, []);
 
   function toggleJob(jobId: number) {
-    setSelectedJobs((prev) => {
-      const newSelected = prev.includes(jobId)
-        ? prev.filter((id) => id !== jobId)
-        : [...prev, jobId];
-      
-      // Auto-adjust project selection: deselect projects from deselected jobs
-      setSelectedProjects((projPrev) =>
-        projPrev.filter((projId) => {
-          const proj = projects.find((p) => p.id === projId);
-          return proj && newSelected.includes(proj.jobId);
-        })
-      );
-      
-      return newSelected;
-    });
-    setAllJobsSelected(false);
+    const nextJobs = selectedJobs.includes(jobId)
+      ? selectedJobs.filter((id) => id !== jobId)
+      : [...selectedJobs, jobId];
+
+    setSelectedJobs(nextJobs);
+    // Auto-adjust project selection: drop projects belonging to deselected jobs.
+    setSelectedProjects((prev) =>
+      prev.filter((projId) => {
+        const proj = projects.find((p) => p.id === projId);
+        return proj !== undefined && nextJobs.includes(proj.jobId);
+      }),
+    );
   }
 
   function toggleAllJobs() {
     if (allJobsSelected) {
       setSelectedJobs([]);
-      setAllJobsSelected(false);
       setSelectedProjects([]);
-      setAllProjectsSelected(false);
     } else {
-      const allIds = jobs.map((j) => j.id);
-      setSelectedJobs(allIds);
-      setAllJobsSelected(true);
+      setSelectedJobs(jobs.map((j) => j.id));
       // Automatically select all projects from these jobs
-      const allProjectIds = projects.map((p) => p.id);
-      setSelectedProjects(allProjectIds);
-      setAllProjectsSelected(true);
+      setSelectedProjects(projects.map((p) => p.id));
     }
   }
 
@@ -178,20 +180,16 @@ export function ExportPageContent() {
     setSelectedProjects((prev) =>
       prev.includes(projectId)
         ? prev.filter((id) => id !== projectId)
-        : [...prev, projectId]
+        : [...prev, projectId],
     );
-    setAllProjectsSelected(false);
   }
 
   function toggleAllProjects() {
     if (allProjectsSelected) {
       setSelectedProjects([]);
-      setAllProjectsSelected(false);
     } else {
       // Select only filtered projects (from selected jobs)
-      const allFilteredIds = filteredProjects.map((p) => p.id);
-      setSelectedProjects(allFilteredIds);
-      setAllProjectsSelected(true);
+      setSelectedProjects(filteredProjects.map((p) => p.id));
     }
   }
 
@@ -288,7 +286,7 @@ export function ExportPageContent() {
   }
 
   return (
-    <div className="rounded-3xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
+    <div className="rounded-3xl border border-surface-border bg-surface p-6 shadow-xl backdrop-blur-xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
           Export Activity Report
@@ -329,7 +327,7 @@ export function ExportPageContent() {
                   value="day"
                   checked={timePeriod === "day"}
                   onChange={() => setTimePeriod("day")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Day (Today)
@@ -343,7 +341,7 @@ export function ExportPageContent() {
                   value="week"
                   checked={timePeriod === "week"}
                   onChange={() => setTimePeriod("week")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Week (Current)
@@ -357,7 +355,7 @@ export function ExportPageContent() {
                   value="month"
                   checked={timePeriod === "month"}
                   onChange={() => setTimePeriod("month")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                   Month (Current)
@@ -372,7 +370,7 @@ export function ExportPageContent() {
                     value="duration"
                     checked={timePeriod === "duration"}
                     onChange={() => setTimePeriod("duration")}
-                    className="h-4 w-4 text-blue-600"
+                    className="h-4 w-4 text-blue-700"
                   />
                   <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                     Custom Duration
@@ -389,7 +387,7 @@ export function ExportPageContent() {
                           value="preset"
                           checked={durationMode === "preset"}
                           onChange={() => setDurationMode("preset")}
-                          className="h-4 w-4 text-blue-600"
+                          className="h-4 w-4 text-blue-700"
                         />
                         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
                           Presets
@@ -422,7 +420,7 @@ export function ExportPageContent() {
                           value="custom"
                           checked={durationMode === "custom"}
                           onChange={() => setDurationMode("custom")}
-                          className="h-4 w-4 text-blue-600"
+                          className="h-4 w-4 text-blue-700"
                         />
                         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
                           Custom Range
@@ -467,7 +465,7 @@ export function ExportPageContent() {
               Select Jobs
             </h2>
             {jobs.length === 0 ? (
-              <p className="text-sm text-zinc-500">No jobs available</p>
+              <p className="text-sm text-zinc-600">No jobs available</p>
             ) : (
               <div className="space-y-2">
                 <label className="flex items-center gap-2 rounded-lg border-2 border-blue-300/50 bg-blue-50/50 p-2 dark:border-blue-500/30 dark:bg-blue-900/20">
@@ -475,7 +473,7 @@ export function ExportPageContent() {
                     type="checkbox"
                     checked={allJobsSelected}
                     onChange={toggleAllJobs}
-                    className="h-4 w-4 text-blue-600"
+                    className="h-4 w-4 text-blue-700"
                   />
                   <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     All Jobs
@@ -487,7 +485,7 @@ export function ExportPageContent() {
                       type="checkbox"
                       checked={selectedJobs.includes(job.id)}
                       onChange={() => toggleJob(job.id)}
-                      className="h-4 w-4 text-blue-600"
+                      className="h-4 w-4 text-blue-700"
                     />
                     <span className="text-sm text-zinc-700 dark:text-zinc-300">
                       {job.name}
@@ -504,9 +502,9 @@ export function ExportPageContent() {
               Select Projects
             </h2>
             {selectedJobs.length === 0 ? (
-              <p className="text-sm text-zinc-500">Select a job first to see available projects</p>
+              <p className="text-sm text-zinc-600">Select a job first to see available projects</p>
             ) : filteredProjects.length === 0 ? (
-              <p className="text-sm text-zinc-500">No projects available for selected job{selectedJobs.length > 1 ? 's' : ''}</p>
+              <p className="text-sm text-zinc-600">No projects available for selected job{selectedJobs.length > 1 ? 's' : ''}</p>
             ) : (
               <div className="space-y-3 max-h-64 overflow-y-auto">
                 {filteredProjects.length > 0 && (
@@ -515,7 +513,7 @@ export function ExportPageContent() {
                       type="checkbox"
                       checked={allProjectsSelected}
                       onChange={toggleAllProjects}
-                      className="h-4 w-4 text-blue-600"
+                      className="h-4 w-4 text-blue-700"
                     />
                     <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
                       All Projects
@@ -537,7 +535,7 @@ export function ExportPageContent() {
                             type="checkbox"
                             checked={selectedProjects.includes(project.id)}
                             onChange={() => toggleProject(project.id)}
-                            className="h-4 w-4 text-blue-600"
+                            className="h-4 w-4 text-blue-700"
                           />
                           <span className="text-sm text-zinc-700 dark:text-zinc-300">
                             {project.name}
@@ -564,7 +562,7 @@ export function ExportPageContent() {
                   value="date"
                   checked={groupBy === "date"}
                   onChange={() => setGroupBy("date")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm text-zinc-700 dark:text-zinc-300">
                   By Date
@@ -577,7 +575,7 @@ export function ExportPageContent() {
                   value="job"
                   checked={groupBy === "job"}
                   onChange={() => setGroupBy("job")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm text-zinc-700 dark:text-zinc-300">
                   By Job
@@ -590,7 +588,7 @@ export function ExportPageContent() {
                   value="project"
                   checked={groupBy === "project"}
                   onChange={() => setGroupBy("project")}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-blue-700"
                 />
                 <span className="text-sm text-zinc-700 dark:text-zinc-300">
                   By Project
@@ -605,6 +603,7 @@ export function ExportPageContent() {
               Report PDF Title
             </h2>
             <select
+              aria-label="Report PDF title"
               value={selectedReportTitle}
               onChange={(e) => setSelectedReportTitle(e.target.value)}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200"
@@ -615,7 +614,7 @@ export function ExportPageContent() {
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
               Manage title options from Account Settings.
             </p>
           </div>

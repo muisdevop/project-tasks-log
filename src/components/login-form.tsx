@@ -2,8 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { safeRedirectTarget } from "@/lib/navigation";
 
-export function LoginForm() {
+interface LoginFormProps {
+  /** Where to go after a successful login, set by /login?next= (UX-05). */
+  next?: string | string[];
+  /** True when no login credential exists yet on this install (UX-06). */
+  setupRequired?: boolean;
+}
+
+export function LoginForm({ next, setupRequired = false }: LoginFormProps) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -15,35 +23,62 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
 
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Login failed.");
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "Login failed.");
+        return;
+      }
+
+      // The target is validated client-side too, so a hand-edited ?next= can
+      // never bounce the user off-site.
+      router.push(safeRedirectTarget(next));
+      router.refresh();
+    } catch {
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
     <div className="w-full max-w-md mx-auto">
       <div className="bg-white dark:bg-zinc-950 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-        <div className="bg-linear-to-r from-blue-600 to-purple-600 px-8 py-6">
+        <div className="bg-linear-to-r from-blue-700 to-purple-700 px-8 py-6">
           <h1 className="text-2xl font-bold text-white text-center">Welcome Back</h1>
           <p className="text-blue-100 text-center mt-2 text-sm">Sign in to your account</p>
         </div>
         
         <form onSubmit={onSubmit} className="px-8 py-6 space-y-6">
+          {setupRequired ? (
+            <div
+              role="status"
+              className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 space-y-1"
+            >
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                This instance has no login configured yet.
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Set <code>APP_PASSWORD_HASH</code> (run{" "}
+                <code>npm run password:hash -- &quot;password&quot;</code>) or,{" "}
+                for local development only, <code>APP_PASSWORD</code>, restart the
+                app, then sign in as <code>APP_USERNAME</code> (default: admin).
+              </p>
+            </div>
+          ) : null}
+
           {error ? (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            <div
+              role="alert"
+              className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3"
+            >
+              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
             </div>
           ) : null}
 
@@ -97,7 +132,7 @@ export function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-linear-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
+            className="w-full bg-linear-to-r from-blue-700 to-purple-700 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
           >
             {loading ? (
               <span className="flex items-center justify-center">

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Card, PageHeader } from "@/components/ui/card";
+import { StatusBanner } from "@/components/ui/status-banner";
 
 type ReportTitlesResponse = {
   options: string[];
@@ -19,27 +21,28 @@ export function ReportTitleOptionsManager() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchTitles();
-  }, []);
-
-  async function fetchTitles() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/report-titles", { cache: "no-store" });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error ?? "Failed to load title options.");
+    // Mount-only bootstrap declared inside the effect. `loading` starts true
+    // and `error` starts null, so no reset is needed before the request and
+    // every setState below runs after an await instead of in the effect body.
+    const loadTitles = async () => {
+      try {
+        const res = await fetch("/api/report-titles", { cache: "no-store" });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "Failed to load title options.");
+        }
+        const data = (await res.json()) as ReportTitlesResponse;
+        setOptions(data.options || []);
+        setDefaultTitle(data.defaultTitle || "");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load title options.");
+      } finally {
+        setLoading(false);
       }
-      const data = (await res.json()) as ReportTitlesResponse;
-      setOptions(data.options || []);
-      setDefaultTitle(data.defaultTitle || "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load title options.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    };
+
+    void loadTitles();
+  }, []);
 
   async function patch(payload: Record<string, string>) {
     setSaving(true);
@@ -100,37 +103,38 @@ export function ReportTitleOptionsManager() {
   }
 
   return (
-    <div className="rounded-2xl border border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
-      <div className="mb-5 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-cyan-500 to-blue-600 text-white shadow-lg">
+    <Card className="p-6">
+      <PageHeader
+        level={2}
+        title="PDF Report Title Options"
+        description="Manage dropdown options used as report titles in export."
+        iconClassName="bg-linear-to-br from-cyan-500 to-blue-600"
+        icon={
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M6 20h12a2 2 0 002-2V8l-6-6H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
           </svg>
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">PDF Report Title Options</h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">Manage dropdown options used as report titles in export.</p>
-        </div>
-      </div>
+        }
+      />
 
       {loading ? (
-        <div className="text-sm text-zinc-500 dark:text-zinc-400">Loading options...</div>
+        <div className="text-sm text-muted dark:text-zinc-400">Loading options...</div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
               type="text"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               maxLength={120}
               placeholder="Add new report title"
-              className="w-full rounded-xl border border-zinc-200/50 bg-white/60 px-4 py-2.5 text-zinc-900 outline-none transition-all focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-100 dark:border-zinc-700/50 dark:bg-zinc-800/50 dark:text-zinc-100 dark:focus:border-cyan-500 dark:focus:bg-zinc-800 dark:focus:ring-cyan-900/30"
+              aria-label="Add new report title"
+              className="field-input mt-0"
             />
             <button
               type="button"
               onClick={addTitle}
               disabled={saving || !newTitle.trim()}
-              className="rounded-xl bg-linear-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-primary shrink-0"
             >
               Add
             </button>
@@ -144,7 +148,8 @@ export function ReportTitleOptionsManager() {
                     type="radio"
                     checked={defaultTitle === title}
                     onChange={() => setAsDefault(title)}
-                    className="h-4 w-4 text-cyan-600"
+                    aria-label={`Use “${title}” as the default report title`}
+                    className="h-4 w-4 text-cyan-700"
                   />
 
                   {editingOriginal === title ? (
@@ -153,7 +158,8 @@ export function ReportTitleOptionsManager() {
                       value={editingValue}
                       onChange={(e) => setEditingValue(e.target.value)}
                       maxLength={120}
-                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 sm:w-80"
+                      aria-label={`Rename ${title}`}
+                      className="field-input mt-0 py-1.5 text-sm sm:w-80"
                     />
                   ) : (
                     <span className="text-sm text-zinc-800 dark:text-zinc-100">{title}</span>
@@ -173,7 +179,7 @@ export function ReportTitleOptionsManager() {
                         type="button"
                         onClick={saveEdit}
                         disabled={saving || !editingValue.trim()}
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                        className="btn-success px-3 py-1.5 text-xs"
                       >
                         Save
                       </button>
@@ -184,7 +190,7 @@ export function ReportTitleOptionsManager() {
                           setEditingValue("");
                         }}
                         disabled={saving}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        className="btn-secondary px-3 py-1.5 text-xs"
                       >
                         Cancel
                       </button>
@@ -198,7 +204,7 @@ export function ReportTitleOptionsManager() {
                           setEditingValue(title);
                         }}
                         disabled={saving}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        className="btn-secondary px-3 py-1.5 text-xs"
                       >
                         Edit
                       </button>
@@ -206,7 +212,7 @@ export function ReportTitleOptionsManager() {
                         type="button"
                         onClick={() => removeTitle(title)}
                         disabled={saving || options.length <= 1}
-                        className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        className="btn-danger px-3 py-1.5 text-xs"
                         title={options.length <= 1 ? "At least one option is required" : "Remove this title option"}
                       >
                         Remove
@@ -218,10 +224,10 @@ export function ReportTitleOptionsManager() {
             ))}
           </div>
 
-          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-          {message && <p className="text-sm text-emerald-600 dark:text-emerald-400">{message}</p>}
+          {error && <StatusBanner tone="error">{error}</StatusBanner>}
+          {message && <StatusBanner tone="success">{message}</StatusBanner>}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
