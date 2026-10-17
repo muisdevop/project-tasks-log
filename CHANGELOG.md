@@ -4,6 +4,129 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The twelfth re-audit pass went back to the product, and found four real defects — the first
+  since the tenth pass.** None were in the deliverable machinery this time; they were in the
+  accounting, the throttle, the idempotency store, and a one-active-task invariant that the test
+  suite could never fail because of the database it ran on. The register now carries 93 original
+  findings plus 79 rows this campaign filed against itself (sheet 12, 172 rows, all Fixed), and the
+  gated tip rebuilt, re-booted on both providers, and passed `container-smoke` 28/28 on each.
+  - **RA-63 — one `Idempotency-Key` could answer two different endpoints.** The store keyed a
+    replay on the client key plus a body fingerprint, with no method or path. A caller that reused a
+    key across `POST /api/jobs` and `POST /api/projects` got the stored *job* body back as a 200
+    instead of creating the project — a wrong payload, not an error. The store key is
+    `method:pathname:clientKey` now ([src/lib/idempotency.ts:141](src/lib/idempotency.ts)); the
+    echoed header keeps the caller's original key so the wire contract is unchanged.
+    [tests/unit/idempotency.test.ts:161](tests/unit/idempotency.test.ts) fires the same key and body
+    at two routes; `:186` keeps the same-endpoint replay correct.
+  - **RA-64 — the rejected-token throttle was a brake applied after the skid.** `authenticate` ran
+    the Prisma digest lookup *before* charging the per-IP `token-reject` budget, so a flood of bad
+    tokens each paid a database round-trip before the limiter refused, and a *valid* token was still
+    charged against the rejection budget — good callers got locked out for other callers' failures.
+    A non-consuming `peekRateLimit` ([src/lib/rate-limit.ts:20](src/lib/rate-limit.ts)) reads the
+    bucket before the lookup ([src/lib/auth.ts:207](src/lib/auth.ts)); only a genuinely rejected
+    token now consumes. [tests/unit/auth-tokens.test.ts:234](tests/unit/auth-tokens.test.ts) and
+    `:246` cover both halves.
+  - **RA-65 — after-midnight work was banked as zero.** `workingTimeDiffSeconds` walked calendar
+    days from `startOfLocalDay(startedAt)`, so a slice that belongs to an overnight shift begun the
+    previous day never saw that shift's window. A Tue-03:00→04:00 slice under a 22:00–06:00
+    Monday-only schedule banked 0 instead of 3600. The cursor opens one day earlier
+    ([src/lib/business-time.ts:166](src/lib/business-time.ts)) while attribution stays on the
+    shift's starting weekday. [tests/unit/business-time-edges.test.ts:131](tests/unit/business-time-edges.test.ts),
+    `:139`, and [tests/task-lifecycle.test.ts:118](tests/task-lifecycle.test.ts) pin the before/after.
+  - **RA-66 — the one-active-task-per-project invariant was untestable on the database it was
+    tested on.** The resume handler holds the project's other in-progress tasks, then applies the
+    change with a conditional `updateMany`. SQLite's single writer serialises two "concurrent"
+    resumes whether or not the code locks anything, so the suite passed for the wrong reason. On
+    PostgreSQL the pool runs both transactions at once, both read the same empty other-runners set,
+    and both commit a task to `in_progress` — two runners on one project. The repair takes a
+    provider-conditional `SELECT … FOR UPDATE` on the owning Project
+    ([src/app/api/tasks/route.ts:45](src/app/api/tasks/route.ts), mirrored in the break-log
+    transaction at [src/app/api/breaks/log/route.ts:168](src/app/api/breaks/log/route.ts)). The new
+    [scripts/resume-race-probe.mjs](scripts/resume-race-probe.mjs) drives a *running* container's
+    authenticated API, because that is the only place the failure is reachable: against the pre-lock
+    image it put two tasks in progress in **11 of 12** rounds; on the gated locked image it held
+    exactly one runner in **8 of 8** rounds on PostgreSQL and **8 of 8** on SQLite.
+  - A note on local reproducibility, kept honest: the campaign's own gate aborted at the e2e step
+    with `EACCES`, not because the product broke but because the hard-coded dev-server port 3177 and
+    the runtime ports 3011/3012 had fallen inside a Windows Hyper-V dynamic port reservation. The
+    e2e port is env-overridable and the repo default is fine on Linux CI, so the product and its
+    defaults were left untouched; only the throw-away gate scripts were pointed at free ports, and
+    the matrix then ran 143 passed / 12 skipped / 0 failed.
+- **The eleventh re-audit pass certified the deliverable where it is actually delivered.** Five
+  rows, none of them product defects again; the first four were found by running a command against the
+  artefact a reviewer opens rather than the scratch copy the pipeline had been checking. The
+  register now carries 93 original findings plus 75 rows this campaign filed against itself
+  (`sheet 12`, 168 rows, all Fixed) and the verification log has 46 rows.
+  - **RA-58 — the workbook's cover claimed a commit that was no longer where it was built.**
+    `build-workbook.cjs` interpolated `metrics.json`'s `head` into the summary sentence and never
+    asked git where HEAD was, so the sentence stayed true of the pass that wrote the metrics file
+    and false of the workbook generated from it. The builder now derives HEAD from git, diffs it
+    against the measurement tip and throws unless every differing path is documentation.
+    `ctrl18-doctip.sh` measures both halves: a throw-away copy pointed at a metrics file whose tip
+    is v0.2.0's own commit exits 1 after naming all 76 non-documentation files that differ and
+    writes no workbook, while the shipped builder exits 0 printing the one-file delta it accepted.
+    Neither the shipped builder nor its metrics file is edited by the control.
+  - **RA-59 — a provenance clause printed a worktree state its transcript never recorded.** The
+    clause-builder emitted `DIRTY=0` from a constant for every row it stamped, which certified a
+    clean tree for measurements taken by GitHub's runner, where no local worktree exists at all.
+    Four runs of the shipped verifier against copies of the log (`ctrl19-dirty.txt`): the
+    pre-repair log exits 1 with `DIRTY_CLAIMED_NOT_RECORDED` on 4 rows whose transcripts are CI
+    capture files, the one row whose transcript genuinely records `DIRTY=1` is rewritten to the
+    constant's value and exits 1 naming the clause against the transcript's own line, a frozen
+    copy whose clause still names an older cycle's tree exits 1 on that row, and the shipped log
+    exits 0. The clause now reads its dirtiness out of the cited transcript and throws
+    when they disagree; the CI-capture rows say instead that there is no local worktree to be clean.
+  - **RA-60 — the mechanism that rewrites those clauses had stopped reaching them.** The strip was
+    anchored on a single space before the clause's label; the replacement consumed that space and
+    wrote the clause back without it, so from the next run onward the pattern matched nothing and
+    every clause froze on the day it was written — which is why RA-59's repair landed only on rows
+    appended after it. `ctrl20-clausestrip.sh` reads the shipped `stripClause` out of the script
+    that writes the log and executes that: 35 of 42 rows in the pre-repair snapshot carried an
+    unreachable clause, 0 of 46 do now, and the same row run through both strips records
+    `OLD_STRIP_REACHED=0 NEW_STRIP_REACHED=1`. The obvious repair — dropping the space from the
+    anchor — would have cut the self-check row short, because its prose quotes the clause's shape,
+    so the shipped rule takes the last occurrence and the writer refuses to ship a clause it
+    cannot reach.
+  - **RA-61 — the check that ties the workbook's authored-cell manifest to the workbook was a check
+    on the filesystem.** It required the manifest's mtime to be no older than the artefact's minus a
+    five-second grace, but the builder writes its manifest *before* it zips, so the artefact is
+    always the newer of the two and only that grace kept the rule from failing every build — and the
+    deliverable is copied to its shipping path minutes later. The campaign found it by shipping:
+    verifying the copy a reviewer opens returned one problem while the identical bytes in the build
+    directory certified clean. Pointed at a genuine workbook from an earlier pass, the same rule
+    reports nothing at all. Content and verdict were uncorrelated in both directions, and RA-50's
+    own lesson — that mtimes cannot carry this proof because the zip writer fixes them — had never
+    been applied to this sibling rule. The binding is by content now: the builder hashes the workbook
+    it wrote and appends the digest, byte count and authored-cell count to
+    `C:/tmp/workbook-builds.json`, and the verifier requires the bytes under certification to match a
+    recorded build whose cell count equals the manifest's. `ctrl21-buildhash.sh` runs the
+    pre-repair verifier from a snapshot taken before the edit, so the historical behaviour stays
+    testable, and measures six outcomes: the old rule accepts a copy inside the window, refuses a
+    byte-identical copy past it, and raises nothing about the manifest for a previous pass's
+    workbook; the shipped rule certifies the identical copy, refuses the stale build (0 of 27
+    logged), and refuses a manifest with one declared cell deleted. The pipeline gained a seventh step for it: the workbook is
+    now copied to the `audit-report/` path and verified *there*, which is the step the old rule made
+    impossible.
+  - **RA-62 — a precondition that only the repair it gated could satisfy.** RA-59's control
+    required its fourth run, the verifier against the live log, to exit 0 before the script that
+    re-stamps the log's clauses was allowed to run — but the one stale clause it found (row 42,
+    still naming the previous cycle's tree) could only be re-stamped by that script. The first
+    way out tried was the wrong one: truncating the log to 41 rows turned the control green, and
+    the builder then refused the result (`ctrl14-selfcheck.txt counts 46 gate rows, gates.json
+    holds 41`, kept as `ctrl19-builder-refusal.txt`) — a green control over a different artefact
+    is not evidence about this one. In the same run the pipeline row read its step census from the
+    previous run's transcript, which carried no ship step yet. Three changes: the live run now
+    reports the log as it stood and no longer gates the control; a frozen copy of the stale-clause
+    log is the RED half that does gate it; and the writer certifies the log it is about to ship
+    with a dry run over those exact bytes (`ctrl19-dryrun.txt`: `DRY_LOG_RC=0`, 46 rows, no
+    problems, clean tree) and throws before writing if that run is red. The pipeline row now takes
+    its step count from `pipeline-pass13.sh` itself and its exit codes from the run made after
+    the log is written.
+  - The AGENTS.md gate is unchanged since `ff86693` (`gate-chg14-chain.txt`, clean tree, image,
+    both provider boots, both smoke runs, CI on both triggers); every commit since differs from it
+    only in `CHANGELOG.md`, which is exactly the rule RA-58's builder guard now enforces rather than
+    leaves to trust.
+
 - **The tenth re-audit pass audited the gate log's attributions — and the tooling that certifies
   them.** Six rows, again none of them product defects: every one was found by running a command
   the campaign had previously only described, and each repair is measured in both directions. The
