@@ -4,11 +4,11 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
-- **The thirteenth re-audit pass went back to the instruments that measure the deliverable, and one of
-  them had been under-counting a gate the workbook reports.** Four findings, all in the campaign's own
+- **The thirteenth re-audit pass went back to the instruments that measure the deliverable, and two of
+  them were reporting something other than what they measured.** Five findings, all in the campaign's own
   tooling and none in the product — but the first changed a number a reviewer would read. The register
-  now carries 93 original findings plus 83 rows this campaign has filed against itself (`sheet 12`,
-  176 rows, all Fixed). Every count quoted in an earlier entry is the count at that entry's own pass;
+  now carries 93 original findings plus 84 rows this campaign has filed against itself (`sheet 12`,
+  177 rows, all Fixed). Every count quoted in an earlier entry is the count at that entry's own pass;
   the live figures are in the workbook and in the gate log, which re-derive them on each edit.
   - **RA-67 — the axe scan census was pinned to one source line, and its guard froze the blind spot.**
     The metrics generator counted axe assertions with a regex anchored to
@@ -49,6 +49,25 @@ format. Versioning follows SemVer.
     defect it documents, with nothing in the script saying so. The coupling is now measured in three
     states (live batch accepted, mismatch line deleted refused, needle repaired-to-green refused) and
     written as a comment above the step, naming the file where the green verdict actually comes from.
+  - **RA-71 — the hygiene gate could not see a `.env`, and its transcript contradicted its own row.**
+    The step's pattern was written inside double quotes, so the `\|` that should have been ERE
+    alternation reached grep as an escaped pipe — a literal `|` — and the `.env` branch demanded the
+    characters `^/|` in front of every match, which no path has. The `.db$` and `.zip$` anchors did
+    survive, so the step still printed hits and looked alive. Replaying the shipped line with `eval`, so
+    the quoting bash applies at run time is the quoting measured, sees 3 of 6 danger paths and names
+    neither `.env` nor `.env.example`; replayed against the tracked tree it exits 1 with zero hits, which
+    is exactly the reading `gate-tip14-hygiene.txt` recorded — while the row's own sentence states
+    "exactly 1 hit: `.env.example`", a figure parsed from a second campaign instrument that does see it
+    (`ctrl24-hygiene.txt`). RA-44 had corrected that sentence and its census and left the gate itself
+    untouched, and the row's citation names the blind one. `ci.yml` has no hygiene step, so this gate is
+    the campaign's only runtime enforcement and a committed `.env` walks straight through it. The
+    predicate now lives in a single-quoted variable in a file, and the step prints the pattern, the
+    allowlist, every hit and a verdict rather than a bare exit status that cannot tell "nothing matched"
+    from "nothing was looked at". Five phases falsify it: the repaired step names and refuses `.env`,
+    calls the real tree clean while naming the one template it allows, refuses the real tracked list with
+    a `.env` appended, and its census equals the sweep's where the shipped predicate read 0. Its
+    transcript was restamped through the batch's own transcript writer, extracted from `gate-tip14.sh`
+    rather than reimplemented, at a documentation-only descendant of the gated tip with a clean worktree.
   - **Regeneration, and the discipline it rests on.** Because the gated tip moved to the commit that
     carries the twelfth pass's product fixes, every figure the workbook quotes was re-measured there
     rather than carried: 63 files / 860 tests, coverage 96.51 / 90.54 / 96.56 / 97.06 (the figures at
