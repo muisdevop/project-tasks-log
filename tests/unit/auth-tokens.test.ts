@@ -222,10 +222,44 @@ describe("agent rate limits reached through authenticate", () => {
     for (let i = 0; i < 30; i += 1) {
       await expect(auth.authenticate(request)).resolves.toBeNull();
     }
-    await expect(auth.authenticate(request)).rejects.toBeInstanceOf(rate.RateLimitedError);
+    for (let i = 0; i < 5; i += 1) {
+      await expect(auth.authenticate(request)).rejects.toBeInstanceOf(rate.RateLimitedError);
+    }
+    expect(prismaStub.apiToken.findUnique).toHaveBeenCalledTimes(30);
     const evt = JSON.parse(lastLoggedLine());
     expect(evt.evt).toBe("token.rate_limited");
     expect(JSON.stringify(evt)).not.toContain(`gid_${"7".repeat(40)}`);
+  });
+
+  it("does not charge valid credentials against the rejection budget", async () => {
+    const { auth } = await loadAuth();
+    prismaStub.apiToken.findUnique.mockResolvedValue(row());
+    for (let i = 0; i < 40; i += 1) {
+      await expect(auth.authenticate(tokenRequest("1", "10.3.3.4"))).resolves.toMatchObject({ via: "token" });
+    }
+    prismaStub.apiToken.findUnique.mockResolvedValue(null);
+    for (let i = 0; i < 30; i += 1) {
+      await expect(auth.authenticate(tokenRequest("7", "10.3.3.4"))).resolves.toBeNull();
+    }
+  });
+
+  it("leaves cookies usable while the IP's bearer budget is exhausted and expires that budget", async () => {
+    const { auth, rate } = await loadAuth();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+    for (let i = 0; i < 30; i += 1) {
+      await auth.authenticate(tokenRequest("7", "10.3.3.5"));
+    }
+    prismaStub.apiToken.findUnique.mockResolvedValue(row());
+    await expect(auth.authenticate(tokenRequest("1", "10.3.3.5"))).rejects.toBeInstanceOf(rate.RateLimitedError);
+    expect(prismaStub.apiToken.findUnique).toHaveBeenCalledTimes(30);
+    sessionStub.getSessionUsername.mockResolvedValue("admin");
+    await expect(auth.authenticate(new Request("http://localhost/api/settings", {
+      headers: { "x-forwarded-for": "10.3.3.5" },
+    }))).resolves.toMatchObject({ via: "session" });
+    vi.setSystemTime(new Date("2026-10-15T12:05:00Z"));
+    await expect(auth.authenticate(tokenRequest("1", "10.3.3.5"))).resolves.toMatchObject({ via: "token" });
+    expect(prismaStub.apiToken.findUnique).toHaveBeenCalledTimes(31);
   });
 
   it("a rejected credential from one IP does not throttle a different IP", async () => {

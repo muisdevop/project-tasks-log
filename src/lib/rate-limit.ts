@@ -17,6 +17,15 @@ if (typeof setInterval !== "undefined") {
 
 export type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
 
+export function peekRateLimit(key: string, limit: number): RateLimitResult {
+  const now = Date.now();
+  const bucket = buckets.get(key);
+  if (!bucket || bucket.resetAt <= now || bucket.count < limit) {
+    return { ok: true };
+  }
+  return { ok: false, retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000) };
+}
+
 /**
  * Fixed-window in-memory rate limiter. Suitable for the single-instance
  * self-hosted deployment this app targets; scale out would need a shared store.

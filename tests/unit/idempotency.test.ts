@@ -157,6 +157,53 @@ describe("withIdempotency", () => {
     // ... while a key inside the cap is still remembered (its slot never completed).
     expect(beginIdempotency(post({ n: 619 }, keyFor(619)), { n: 619 }).kind).toBe("in-progress");
   });
+
+  it("does not replay a stored response from a different endpoint using the same key and body", async () => {
+    const { withIdempotency } = await loadIdempotency();
+    const body = { name: "agent", description: "" };
+    const work = vi.fn(async () => NextResponse.json({ id: 1 }, { status: 201 }));
+
+    const jobsReq = new Request("http://localhost/api/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": KEY },
+      body: JSON.stringify(body),
+    });
+    await withIdempotency(jobsReq, body, work);
+    expect(work).toHaveBeenCalledTimes(1);
+
+    const projectsReq = new Request("http://localhost/api/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": KEY },
+      body: JSON.stringify(body),
+    });
+    const work2 = vi.fn(async () => NextResponse.json({ id: 2 }, { status: 201 }));
+    const res = await withIdempotency(projectsReq, body, work2);
+    expect(work2).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ id: 2 });
+  });
+
+  it("replays a stored response from the same endpoint using the same key and body", async () => {
+    const { withIdempotency } = await loadIdempotency();
+    const body = { name: "agent" };
+    const work = vi.fn(async () => NextResponse.json({ ok: true }, { status: 201 }));
+
+    const req1 = new Request("http://localhost/api/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": KEY },
+      body: JSON.stringify(body),
+    });
+    await withIdempotency(req1, body, work);
+
+    const req2 = new Request("http://localhost/api/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": KEY },
+      body: JSON.stringify(body),
+    });
+    const replay = await withIdempotency(req2, body, work);
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(replay.headers.get("Idempotency-Replayed")).toBe("true");
+  });
 });
 
 describe("canonicalize / bodyFingerprint", () => {

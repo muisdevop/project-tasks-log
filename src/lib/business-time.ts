@@ -162,7 +162,8 @@ export function workingTimeDiffSeconds(
   }
 
   const allowedDays = new Set(settings.workDays);
-  const startDay = startOfLocalDay(startedAt);
+  // An after-midnight segment can overlap the preceding day's overnight shift.
+  const startDay = addDays(startOfLocalDay(startedAt), -1);
   const endDay = startOfLocalDay(endedAt);
   let cursor = startDay;
   let total = 0;

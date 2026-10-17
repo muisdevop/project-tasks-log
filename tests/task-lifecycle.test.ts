@@ -115,6 +115,20 @@ describe("applyTaskTransition", () => {
     expect(completed.elapsedSeconds).toBe(5 * 3600);
   });
 
+  it("banks an overnight resumed segment without counting the held gap", () => {
+    const overnight = { workStart: "22:00", workEnd: "06:00", workDays: [1] };
+    const held = applyTaskTransition(
+      { status: "in_progress" as const, startedAt: new Date("2026-03-30T23:00:00"), elapsedSeconds: 0 },
+      "hold",
+      new Date("2026-03-31T02:00:00"),
+      overnight,
+    );
+    expect(held.elapsedSeconds).toBe(3 * 3600);
+    const resumed = applyTaskTransition(held, "resume", new Date("2026-03-31T03:00:00"), overnight);
+    const completed = applyTaskTransition(resumed, "complete", new Date("2026-03-31T04:00:00"), overnight);
+    expect(completed.elapsedSeconds).toBe(4 * 3600);
+  });
+
   it("completing directly from on_hold does not count held time", () => {
     const task = {
       status: "on_hold" as const,

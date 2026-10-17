@@ -136,7 +136,12 @@ export type IdempotencyBegin =
   | { kind: "replay"; response: NextResponse }
   | { kind: "conflict"; response: NextResponse }
   | { kind: "in-progress"; response: NextResponse }
-  | { kind: "execute"; key: string; fingerprint: string };
+  | { kind: "execute"; key: string; fingerprint: string; clientKey: string };
+
+function scopeKey(request: Request, clientKey: string): string {
+  const url = new URL(request.url, "http://localhost");
+  return `${request.method}:${url.pathname}:${clientKey}`;
+}
 
 /**
  * Low-level half of the API, for routes that cannot express their work as one
@@ -164,12 +169,11 @@ export function beginIdempotency(
 
   const now = Date.now();
   const fingerprint = bodyFingerprint(payload);
-  const existing = store.get(read.key);
+  const key = scopeKey(request, read.key);
+  const existing = store.get(key);
 
   if (existing && existing.expiresAt > now) {
     if (existing.fingerprint !== fingerprint) {
-      // Same key, different body: one of the two callers is confused. Never
-      // guess — refuse and let the client mint a fresh key.
       logSecurityEvent({
         evt: "idempotency.conflict",
         actor: options.actor ?? null,
@@ -202,9 +206,9 @@ export function beginIdempotency(
     };
   }
 
-  store.set(read.key, { fingerprint, status: 0, body: null, expiresAt: now + DEFAULT_TTL_MS, inFlight: true });
+  store.set(key, { fingerprint, status: 0, body: null, expiresAt: now + DEFAULT_TTL_MS, inFlight: true });
   prune(now);
-  return { kind: "execute", key: read.key, fingerprint };
+  return { kind: "execute", key, fingerprint, clientKey: read.key };
 }
 
 /**
@@ -227,7 +231,7 @@ export function rememberResponse(
     entry.inFlight = false;
     entry.expiresAt = Date.now() + ttlMs;
   }
-  response.headers.set(IDEMPOTENCY_HEADER, begin.key);
+  response.headers.set(IDEMPOTENCY_HEADER, begin.clientKey);
   return response;
 }
 
@@ -302,7 +306,7 @@ async function captureIntoStore(
     entry.inFlight = false;
     entry.expiresAt = Date.now() + ttlMs;
   }
-  response.headers.set(IDEMPOTENCY_HEADER, begin.key);
+  response.headers.set(IDEMPOTENCY_HEADER, begin.clientKey);
   return response;
 }
 

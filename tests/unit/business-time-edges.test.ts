@@ -125,6 +125,25 @@ describe("workingTimeDiffSeconds — degenerate windows and intervals", () => {
     expect(seconds).toBe(8 * 3600);
   });
 
+  it.each([
+    { workDays: [1], expected: 3600 },
+    { workDays: [2], expected: 0 },
+  ])("attributes after-midnight time to the shift's starting weekday: $workDays", ({ workDays, expected }) => {
+    expect(workingTimeDiffSeconds(
+      new Date("2026-03-31T03:00:00"),
+      new Date("2026-03-31T04:00:00"),
+      { workStart: "22:00", workEnd: "06:00", workDays },
+    )).toBe(expected);
+  });
+
+  it("clips overnight carryover at the preceding shift's end", () => {
+    expect(workingTimeDiffSeconds(
+      new Date("2026-03-31T05:00:00"),
+      new Date("2026-03-31T08:00:00"),
+      { workStart: "22:00", workEnd: "06:00", workDays: [1] },
+    )).toBe(3600);
+  });
+
   it("returns 0 for an exactly-equal window (workStart === workEnd)", () => {
     const seconds = workingTimeDiffSeconds(
       new Date("2026-03-30T09:00:00"),

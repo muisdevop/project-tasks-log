@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import type { TaskStatus } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { type TaskStatus } from "@prisma/client";
+import { getDbProvider, prisma } from "@/lib/prisma";
 import { requireWriteAccess } from "@/lib/auth";
 import { HttpError, fieldErrors, toErrorResponse } from "@/lib/api-error";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
@@ -162,6 +162,10 @@ async function writeBreakTask(input: BreakLogInput): Promise<NextResponse> {
         404,
         "This job has no project to log the break against.",
       );
+    }
+
+    if (getDbProvider() === "postgres") {
+      await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${targetProject.id} FOR UPDATE`;
     }
 
     // FL-01 backstop: the `Idempotency-Key` replay above only protects callers

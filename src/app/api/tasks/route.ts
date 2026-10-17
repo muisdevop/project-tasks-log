@@ -1,6 +1,6 @@
 import { Prisma, type TaskStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getDbProvider, prisma } from "@/lib/prisma";
 import { requireAuthContext, requireWriteAccess } from "@/lib/auth";
 import { applyTaskTransition } from "@/lib/task-lifecycle";
 import { workingTimeDiffSeconds, totalElapsedSeconds } from "@/lib/business-time";
@@ -41,6 +41,12 @@ function appendLogNote(
 }
 
 const scheduleSelect = { workStart: true, workEnd: true, workDays: true } as const;
+
+async function lockProject(tx: Prisma.TransactionClient, projectId: number): Promise<void> {
+  if (getDbProvider() === "postgres") {
+    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
+  }
+}
 
 /**
  * GET /api/tasks
@@ -288,6 +294,7 @@ async function createTask(request: Request, log: RequestLogContext) {
             : now;
 
         const task = await prisma.$transaction(async (tx) => {
+          await lockProject(tx, parsed.data.projectId);
           const project = await tx.project.findUnique({
             where: { id: parsed.data.projectId },
             select: { jobId: true },
@@ -416,6 +423,10 @@ async function actOnTask(request: Request, log: RequestLogContext) {
       });
       if (!task) {
         throw new HttpError(404, "Task not found.");
+      }
+
+      if (action !== "log-notes") {
+        await lockProject(tx, task.projectId);
       }
 
       if (action === "log-notes") {

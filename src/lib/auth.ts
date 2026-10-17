@@ -5,6 +5,7 @@ import {
   assertBucketRateLimit,
   checkRateLimit,
   clientIp,
+  peekRateLimit,
   RateLimitedError,
 } from "@/lib/rate-limit";
 import { logSecurityEvent } from "@/lib/security-events";
@@ -202,12 +203,17 @@ export async function authenticate(request?: Request): Promise<AuthContext | nul
   const bearer = bearerTokenOf(request);
 
   if (bearer) {
+    const rejectKey = `token-reject:ip:${ip}`;
+    const already = peekRateLimit(rejectKey, TOKEN_REJECT_LIMIT);
+    if (!already.ok) {
+      logSecurityEvent({ evt: "token.rate_limited", ip, detail: "too_many_rejections" });
+      throw new RateLimitedError(already.retryAfterSeconds, "Too many rejected tokens.");
+    }
+
     const verified = await verifyApiToken(bearer, ip);
     if (!verified.ok) {
-      // Count the rejection; past the budget, stop burning database lookups on
-      // this IP and answer 429 instead of an endless stream of 401s (AI-03).
       const blocked = checkRateLimit(
-        `token-reject:ip:${ip}`,
+        rejectKey,
         TOKEN_REJECT_LIMIT,
         TOKEN_REJECT_WINDOW_MS,
       );
