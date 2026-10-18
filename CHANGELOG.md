@@ -4,6 +4,109 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
+- **The register now carries the 93 original findings plus 101 rows this campaign has filed against itself;
+  the shipped workbook's re-audit sheet holds all 194 of them, every one Fixed.**
+- **The sixteenth re-audit pass read the deliverable's own figures back against the artefacts and refused the
+  ones nothing prints.** Two findings, both inside the instruments filed at the previous pass to police the
+  register — and the second moved rows a reviewer would read, because eleven of them cited exit codes under
+  labels no script ever emits.
+  - **RA-87 — a control's own output became the evidence its subject lacked.** A register tally that reads
+    every figure the log recites back against the transcripts has to decide what its own transcript is, and
+    the instruments built for RA-79/RA-86 read every `.txt` in the scratch directory alike. Two shapes leaked:
+    the frozen red censuses print the very pair they refuse, so a merged print set let a refused figure certify
+    its own recital; and a shell redirect of a control's stdout into the corpus promoted its refusal lines to
+    prints, moving labels out of the refused bucket and inflating the census of known tokens. Repaired by
+    holding a report apart from a measurement — a report print supports a figure only for an entry that names
+    that report's filename, checked per recital — by refusing a whole output family rather than one filename,
+    by masking every refused pair in a report (`TOKEN at value`, which the figure grammar cannot read as a
+    print), and by assembling invented labels at run time so no script's bytes carry them. The counterfactual
+    that was supposed to prove the refusal was itself found broken in an unrelated way: it compared the sweep's
+    output without the space the sweep emits, so it could have failed forever while printing a green census
+    line. Neither half would have surfaced from a run whose subject was the deliverable; both surfaced because
+    the control was asked to prove it can say no (`ctrl29-unprinted-recitals.txt`).
+  - **RA-88 — a recital whose label no instrument prints.** The tally looked figures up under labels it had
+    been told to expect, so a row citing `VERIFY_RC=0` where the transcript says `wb-ctrl-placeholders_RC`, or
+    `CONTROLS_RC` where the batch echoes `ctrl3_noexit_RC`, was skipped as out of scope — the blind spot in a
+    check whose whole job is to detect. The campaign's own prose shorthand was the source, and it had shipped
+    in eleven places: a fresh-database migration exit, the workbook verifier's refusals, a coverage step, a
+    patch run, and a gate row's summary of its own controls. Repaired by measurement, not deletion. Where the
+    specimen still existed it was re-cited to lines the artefact really prints; where the transcript had been
+    overwritten the gate was re-run — `gate-ra20.sh` spins a throwaway Postgres and an application migration
+    from empty storage and prints the fresh-migrate census again (`gate-ra20-fresh-migrate.txt`). The tally
+    gained a bucket for labels no capture machine-prints, and that bucket is proved on a subject built for it:
+    an invented label recited through an entry of the log is refused, while the shipped column reads zero
+    (`ctrl28-register-tally.txt`). The deliverable now carries the eighth instrument in its own gate row, so
+    the row that lists the controls which read the log is read by the control that refuses unprinted figures.
+- **The fifteenth re-audit pass turned the previous pass's controls into evidence and found six of them
+  depending on their own surroundings.** RA-80..RA-86, all tooling, all caught by asking an instrument whether
+  it could have said no.
+  - **RA-80 — an exemption list justified only by comments.** The writer tolerates a small set of figures no
+    transcript need support, and the reason each one is tolerated lived in prose beside it, so the list could
+    not be checked: an exemption that had outlived its guard would have looked exactly like one that had not.
+    Each exemption is now re-derived from the shipped source every run, and a control replays the blinded
+    census to show the exemption is what holds the figure out.
+  - **RA-81 — a quotation of history assembled from a live constant.** Two rows restated a previous pass's
+    cover sentence, and one of them built the restatement out of a value that still moves, so the history
+    changed when the present did. The quotations are now frozen against the artefacts that carry them.
+  - **RA-82 — a count frozen in a sentence beside the transcript that prints it.** A row enumerated the
+    outcomes of its own control and opened with how many there were, while reading the tree from the
+    transcript every build; one half was live and the other was a remembered number.
+  - **RA-83 — a precondition that could only be met by destroying the evidence it judged.** Every control
+    transcript must name the gated tip or a documentation-only descendant, and restamping a transcript to
+    satisfy that rule rewrites the bytes that were the proof. The restamp path is now measured rather than
+    trusted: it re-derives the tree through the batch's own writer and refuses a run whose specimen capture is
+    still on disk.
+  - **RA-84 — a guard that could not tell a quoted specimen from a pointer.** The rule that stops a sentence
+    sending a reviewer to a numbered sheet could not see the difference between naming a cell as the thing
+    under test and citing it as a location, and the deliverable was stopped by its own description of the
+    stop.
+  - **RA-85 — an oracle that passed only while the defect it guarded against was still present.** The tally
+    tolerates exactly one figure that nothing need support, the pipeline's own success marker; the exemption
+    was written so that it held the figure out even after the figure acquired real evidence, which is the
+    state in which the check stops meaning anything. The exemption is now asserted against the writer's
+    source and measured by blinding it.
+  - **RA-86 — a certifying corpus that could not distinguish an instrument's output from a capture of a
+    screen.** Same-stem grouping handed a hand-made text file the standing of an instrument's current run, and
+    the live instance was in a product row rather than a tooling one: RA-12 recited a docker build exit as the
+    proof a gate had run and failed, while every artefact that prints that figure prints the successful rebuild
+    — the value had come from the operator's terminal. Standing is now a property of the artefact: the sweep
+    reads every campaign script and treats a file no script names as a capture that may certify only a figure
+    the reciting entry also names it in.
+- **The fourteenth re-audit pass read the instruments that measure the deliverable, and four of them could not
+  see their own subjects.** RA-72..RA-79, all in the campaign's tooling, found by replaying each shipped
+  predicate and its repaired form over the same bytes.
+  - **RA-72 — anchored patterns without the flag that makes them anchored.** Four transcript parsers in the
+    register restamper were written `/^…$/` against files that are not one line, so a read either matched
+    nothing or matched a whole transcript. Widened with `m`, and the sweep that checks the class reads every
+    call site of both writers rather than the fraction the first census claimed.
+  - **RA-73 — a needle pinned to a remembered key order.** GitHub's run record was parsed positionally out of
+    a capture whose objects serialise alphabetically; the same data with keys reordered reads as nothing, while
+    `JSON.parse` reads both identically. The replacement is anchored to key names.
+  - **RA-74 — two predicates in the wrong shape.** A lower-case needle on a transcript printed as `Largest
+    chunk` counts zero and would have raised a stale-figure finding against a correct row, and a residual
+    denylist carried a bare control label that fires on the *correct* restamped path while the full-path form
+    does not — a guard refusing the repair it exists to certify.
+  - **RA-75 — instruments that had never been read back.** The axe census, the provenance-header capture and
+    the mismatch needle were each weaker than their greens looked; the census that certified RA-72 had scanned
+    a fraction of the call sites it declared closed, and is corrected in place against the transcript that
+    still prints the widened figure.
+  - **RA-76 — mutations anchored to the bytes of the day.** Two controls prove a guard fires by mutating a
+    copy of an artefact; both anchored to a literal string that later moved, so the proof had quietly become a
+    no-op. The anchors are now derived from the artefact each run.
+  - **RA-77 — a precondition that could only be met by the repair it gated.** The writer may quote a red
+    attribution run only where every blamed row is one this run rewrites, and the hand-listed set did not
+    contain the rows the repair had to perform, so the writer could not do the thing its own allowance
+    required. The rule was widened to a predicate over regenerated rows and measured against the census it
+    excuses, refuses and must never blanket-pass.
+  - **RA-78 — an oracle measuring a different quantity from the claim it judged.** A provenance clause says a
+    transcript records a measurement taken at a tree; the shipped test asked whether the file contains the sha,
+    which a transcript satisfies by quoting it — including by printing the very accusation against itself. Two
+    runs of the same verifier over the same bytes used to disagree about which row was stale; the recorded-tree
+    oracle refuses a quote, accepts a header and a CI run record, and the two runs now agree.
+  - **RA-79 — the deliverable recites figures and nothing read them back.** Every register entry and gate row
+    quotes counts an instrument printed, and no instrument asked whether a transcript on disk still prints the
+    pair. The register tally is that check, and its first green run was against a census that could not see
+    two-thirds of the class — which is why the sixteenth pass went back to it.
 - **The thirteenth re-audit pass went back to the instruments that measure the deliverable, and two of
   them were reporting something other than what they measured.** Five findings, all in the campaign's own
   tooling and none in the product — but the first changed a number a reviewer would read. The register
