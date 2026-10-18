@@ -25,7 +25,7 @@ format. Versioning follows SemVer.
     line. Neither half would have surfaced from a run whose subject was the deliverable; both surfaced because
     the control was asked to prove it can say no (`ctrl29-unprinted-recitals.txt`).
   - **RA-88 — a recital whose label no instrument prints.** The tally looked figures up under labels it had
-    been told to expect, so a row citing `VERIFY_RC=0` where the transcript says `wb-ctrl-placeholders_RC`, or
+    been told to expect, so a row citing `VERIFY_RC` where the transcript says `wb-ctrl-placeholders_RC`, or
     `CONTROLS_RC` where the batch echoes `ctrl3_noexit_RC`, was skipped as out of scope — the blind spot in a
     check whose whole job is to detect. The campaign's own prose shorthand was the source, and it had shipped
     in eleven places: a fresh-database migration exit, the workbook verifier's refusals, a coverage step, a

@@ -120,3 +120,30 @@
 - [ ] `docker build` success; run with sqlite AND postgres (smoke: health, login, task flow)
 - [ ] Coolify compatibility note (container-name DNS, no hardcoded names)
 - [ ] Regenerate `audit-report/` workbook with statuses → re-audit loop until clean
+
+---
+
+## Delivery status — 2026-10-18
+
+Every wave above and the final gate completed on `chore/audit-remediation-2026-10`. The unchecked
+boxes are this plan as written on 2026-10-07, kept for the record; this section is what actually
+ships. Statuses for the original findings and for every item the re-audit loop filed against the
+campaign itself are carried in the generated workbook, which the build writes into the repository's
+`audit-report/` directory (that directory is not committed, so the workbook is read from the pull
+request, not from a clone).
+
+Four tasks named a file the tree never got. Each was delivered as a different path, recorded here so
+the plan stops citing files it does not contain:
+
+- AR-01 planned `src/lib/report-render.ts`; delivered as `src/lib/export-html.ts`, with its styles in
+  `src/lib/export-html-styles.ts`, called from `src/app/api/export/route.ts`.
+- AR-02 planned `scripts/check-schema-drift.mjs`; delivered as `scripts/check-schema-parity.mjs`
+  (`npm run db:parity`) and `scripts/check-migration-parity.mjs` (`npm run db:parity:migrations`),
+  both wired into CI.
+- MF-06 planned `scripts/backup.mjs`; delivered as `scripts/backup.ts` and `scripts/restore.ts`,
+  wrapping the sqlite online-backup API (with a `VACUUM INTO` fallback) and `pg_dump`.
+- AI-01 planned `scripts/check-openapi.mjs`; delivered as `scripts/generate-openapi.ts`, with the CI
+  freshness step `npm run docs:openapi:check` comparing against `docs/openapi.yaml`.
+
+The dual-provider gate ran on both database types in Docker, and the Coolify naming compatibility was
+verified by running the containers under the random-suffixed names Coolify assigns.
