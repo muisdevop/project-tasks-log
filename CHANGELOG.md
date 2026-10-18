@@ -4,8 +4,91 @@ Notable changes to GID Task Flow, kept by hand in [Keep a Changelog](https://kee
 format. Versioning follows SemVer.
 
 ## [Unreleased]
-- **The register now carries the 93 original findings plus 101 rows this campaign has filed against itself;
-  the shipped workbook's re-audit sheet holds all 194 of them, every one Fixed.**
+- **The register and the shipped workbook are generated, not counted by hand.** `status.json` and
+  `status-reaudit.json` are the only sources of the finding rows, `C:/tmp/build-workbook.cjs` emits the sheets
+  from them, and `C:/tmp/verify-workbook.cjs` and `C:/tmp/verify-finding-statuses.cjs` refuse a copy whose rows
+  or statuses do not match those files; the pipeline records each outcome in `gate-pass13-build.txt`,
+  `gate-pass13-verifywb.txt` and `gate-pass13-verify-finding-statuses.txt`. This line used to state the row
+  counts itself. RA-94 registers why a sentence that quotes a census of a growing corpus is a defect in a
+  document whose whole claim is that its sentences hold.
+- **The seventeenth re-audit pass turned the campaign's measurement rules on its own prose, then on what the
+  first half of that pass had just built.** The findings split cleanly: RA-89..RA-92 are the repository's
+  markdown, which no instrument had ever read, and RA-93..RA-98 are the instruments and one-shot writers the
+  same pass added or depended on — each found by asking an instrument whether it could have said no, or by an
+  artefact disagreeing with a file, rather than by reading prose again.
+  - **RA-89 — the documents a reviewer actually opens were outside every subject set.** The two sweeps that
+    police figure recitals read the registers, so the changelog, the plan documents, the README and the MCP
+    guide were never checked for the defects the campaign had just learned to look for — and `audit-report/`
+    is ignored, so that markdown is the only campaign prose a clone shows. Repaired by measurement:
+    `C:/tmp/ctrl30-doc-recitals.cjs` applies the deliverable's own grammars to every tracked markdown file,
+    reads the committed bytes rather than the working copy, and refuses the shapes its fixtures specify
+    (`ctrl30-doc-recitals.txt`).
+  - **RA-90 — the changelog entry that registers an unprinted label recited an unprinted label.** RA-88's
+    narrative explains that the campaign's prose shorthand invented upper-case labels for outcomes the shell
+    scripts echo under other names, and the sentence giving the example did exactly that, in two shapes: a
+    value under a truncated label, and a second shorthand quoted bare. The corpus sits one keystroke away from
+    satisfying the first, which is what makes it dangerous. Repaired by dropping the invented values so the
+    sentence names the mismatch instead of asserting a reading, and the sweep's refusal is proved on a corpus
+    label truncated at run time (`ctrl30-doc-recitals.txt`).
+  - **RA-91 — the plan document that drove the campaign names files the tree never got, under boxes still
+    empty for work that shipped.** Four findings are recorded Fixed at different paths than the plan predicted.
+    Repaired by mapping rather than deleting: a dated delivery-status section gives each planned path the
+    deliverable that actually landed, and the sweep requires the mapped-to path to exist. What the mapping
+    describes correctly remains a claim about prose, and the row says so.
+  - **RA-92 — a new instrument re-implemented a defect the campaign had already closed, twice in one line.**
+    RA-51 settled that a commit citation must be something git resolves, and the first version of the
+    document sweep read decimal constants as commit ids anyway; its second version added a fourth phantom,
+    because seven consecutive letters inside an ordinary English word are hexadecimal. Repaired in the
+    instrument, and held by probes built for the purpose — a real prefix is accepted, a lettered ghost and a
+    digit-only ghost are refused only when a clause calls them commits — so the rule is not passing because
+    the shipped documents happen to be quiet (`ctrl30-doc-recitals.txt`).
+  - **RA-93 — a register writer reported rows it had not written.** The pass's own script built four row
+    objects, printed a report naming every id, restated the register's total and the workbook's sheet count,
+    and closed by claiming three corpus sweeps had run against the register it was about to change. It never
+    wrote the file; the ids were absent from `status-reaudit.json`, so the deliverable's re-audit sheet and the
+    gate rows citing it described a register that did not contain them. Two secondary faults were of the same
+    kind: the post-append sweeps had only run pre-append, and a sweep column in the report was a literal zero
+    rather than the value the control printed. Repaired in the shipped script — write, re-read from disk, parse,
+    require every new id in the parsed object, then run the sweeps against the register as it now stands — and
+    outcomes are carried as status markers, never as copied censuses (`register-pass17b.txt`).
+  - **RA-94 — a gate row recites a census of the capture set that row exists to certify.** The tooling row
+    quotes the count of labels the corpus prints, a number that is a property of a corpus this campaign keeps
+    adding instruments to, so it is accurate only until the next capture. The writer recomputes that row from
+    the transcripts on every build and the tally refuses any recital whose named artefact prints the label at a
+    different value — which is how the stale instance surfaced instead of shipping. What this pass adds is
+    ordering: the register script runs the tally, the recital sweep and the document sweep after its append, so
+    a row a new capture just invalidated is caught while the pass is still working
+    (`ctrl28-register-tally.txt`, `patch-deliverable-13.cjs`).
+  - **RA-95 — the gated tip is a fact about the repository, and six instruments held it as a string.** A
+    re-gate turned each into a different instrument: the CI provenance fetch re-downloaded an ancestor's logs
+    and stamped a transcript that contradicted itself, the parsers control filtered its subject set down to
+    nothing, and the falsifier measured its own pin. Repaired by deriving the tip from one place —
+    `C:/tmp/gated-tip.cjs` reads the metrics file and requires both commit forms to agree — so the fetch now
+    resolves HEAD's own runs and job ids from the API and refuses a record naming another tree, and a frozen
+    historical refusal is judged by the relationship between the ids it prints rather than by the tip it names.
+    The class instrument is `C:/tmp/ctrl31-tip-literals.cjs`: it sweeps every campaign script, strips comments
+    so history stays prose, keeps only tokens git resolves, and refuses any instrument that pins the current tip
+    in code or names a commit without deriving it (`ctrl31-tip-literals.txt`).
+  - **RA-96 — a reader died on a capture shape and named neither the file nor the contract.** The metrics
+    generator discards two header lines from the CI capture and parses the rest as JSON; re-gating taught the
+    fetch to print the run ids it had just resolved, and the generator failed with a JSON parse error about an
+    unnamed file. Repaired so the reader states the shape it requires and the falsification of that refusal is
+    a counted leg of the shipped control (`ctrl22-metrics-falsify.txt`).
+  - **RA-97 — a control replayed a shipped line whose only file source resolves against the caller.** The
+    hygiene control re-evaluates a step that reads `git ls-files`; run from anywhere but the repository it
+    measured a different directory, and the same git complaint that proves the bug also reads as a tracked-tree
+    hit. Repaired: the control prints the directory it entered, refuses before measuring when that is not the
+    campaign repository, pins the replay to it, and treats git's fatal line as a refusal rather than data. The
+    counterfactual runs the shipped control from the scratch directory and requires the refusal — the register
+    script executes it rather than describing it (`ctrl24-hygiene.txt`, `register-pass17b.txt`).
+  - **RA-98 — an assertion that only holds while its subject is never re-run.** One control certified that the
+    evidence for a repaired defect had been kept by requiring the refreshed transcript to be byte-identical to
+    the pre-repair snapshot. That predicate certifies staleness as preservation, so the legitimate refresh that
+    RA-95 forced made the control red while its own subject was green. Repaired into the two claims it was
+    standing in for — the pre-repair census line is gone from the transcript and the refreshed run still
+    declares green — plus a self-replay: the control reads its own predicate out of its source and requires it
+    to refuse a frozen pair and accept a refreshed one, so the guard cannot quietly become the bug
+    (`ctrl25-instrument-parsers.txt`).
 - **The sixteenth re-audit pass read the deliverable's own figures back against the artefacts and refused the
   ones nothing prints.** Two findings, both inside the instruments filed at the previous pass to police the
   register — and the second moved rows a reviewer would read, because eleven of them cited exit codes under
