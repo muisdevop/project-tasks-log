@@ -12,10 +12,13 @@ format. Versioning follows SemVer.
   counts itself. RA-94 registers why a sentence that quotes a census of a growing corpus is a defect in a
   document whose whole claim is that its sentences hold.
 - **The seventeenth re-audit pass turned the campaign's measurement rules on its own prose, then on what the
-  first half of that pass had just built.** The findings split cleanly: RA-89..RA-92 are the repository's
-  markdown, which no instrument had ever read, and RA-93..RA-98 are the instruments and one-shot writers the
-  same pass added or depended on — each found by asking an instrument whether it could have said no, or by an
-  artefact disagreeing with a file, rather than by reading prose again.
+  first half of that pass had just built, and finally on the machinery that was doing the measuring.** The
+  findings split cleanly: RA-89..RA-92 are the repository's markdown, which no instrument had ever read;
+  RA-93..RA-98 are the instruments and one-shot writers the same pass added or depended on; and RA-99..RA-111
+  are the custody, scoping and reader rules those instruments share, found by re-running each control after the
+  build it certifies had shipped and by feeding each parser a shape built for it rather than one borrowed from
+  the log — every finding reached by asking an instrument whether it could have said no, or by an artefact
+  disagreeing with a file, rather than by reading prose again.
   - **RA-89 — the documents a reviewer actually opens were outside every subject set.** The two sweeps that
     police figure recitals read the registers, so the changelog, the plan documents, the README and the MCP
     guide were never checked for the defects the campaign had just learned to look for — and `audit-report/`
@@ -89,6 +92,153 @@ format. Versioning follows SemVer.
     declares green — plus a self-replay: the control reads its own predicate out of its source and requires it
     to refuse a frozen pair and accept a refreshed one, so the guard cannot quietly become the bug
     (`ctrl25-instrument-parsers.txt`).
+  - **RA-99 — half of the campaign's evidence files had no author.** A transcript that exists because an
+    operator redirected one run is a record of that run and nothing after it: the control it is named after
+    could be edited or start failing while the file a row quotes kept saying what the last redirect said.
+    `C:/tmp/ctrl32-capture-custody.cjs` turns custody into a sweep over every artefact the three registers
+    name, recognising the write shapes the campaign actually uses — a redirect of an assigned variable, of a
+    literal path or an interpolated family, a node write, a copy or move destination — and deciding liveness
+    by reachability from the gate rows, the control runner, the pipeline and each numbered family's newest
+    member. Four captures that a live instrument parsed and no instrument wrote now open their own
+    transcripts on every path, pass, refusal or throw; the Playwright falsification behind RS-01, which no
+    script had ever produced, gained `C:/tmp/gate-e2e-red-chromium.sh`, which refuses a dirty tree, stamps
+    the commit it measured, restores the utility on every exit path, and applies the consumer's predicate to
+    its own capture; and the dependency-advisory control now picks the tip-time or refusal file from the tree
+    it stands on, so a later off-tip run cannot overwrite the evidence a pinned row cites
+    (`ctrl32-capture-custody.txt`).
+  - **RA-100 — five register entries restated a live instrument's census, so each was false the moment the
+    chain ran again.** The rows for the parser census, the restamp set, the clause oracle and the allowance
+    bound said, as fact, what a sweep prints now; every one of those instruments counts this log or the
+    writer that ships it, so the figures moved as the campaign grew and the rows did not move with them. The
+    unprinted-recital sweep found them the way it finds any stale value — no artefact printed the pair any
+    more — which made this RA-98's defect in the register rather than in a guard: a claim that stays true
+    only while nobody re-runs its subject. Repaired by the convention the campaign already used for history:
+    a row quotes a frozen generation only when it names the frozen artefact that prints it, and a row that
+    means what the instrument prints today cites the transcript instead of copying it.
+    `C:/tmp/register-refresh-recitals.cjs` rewrites exactly the clauses the sweep refused, requires each
+    replacement to cite a file that exists, and re-runs the sweep over its own output
+    (`register-refresh-recitals.txt`).
+  - **RA-101 — a sweep that printed the figure it refused manufactured the evidence that cleared it.** The
+    unprinted-recital control names every offender, because a census without names says how much was skipped
+    and nothing else — but naming them in machine position wrote `TOKEN=value` into a report the next run
+    harvests prints from, so the refusal was read as the artefact that printed the stale figure and the sweep
+    passed what it had refused. The repair is a form that is neither a recital nor a print: a label, the word
+    at, and its digits, which the print grammar cannot match. The rule is measured both ways on a subject
+    built for it — the same offender printed plainly is proved to be a print, printed masked proved not to
+    be — so a mask that masks nothing cannot pass. The register tally masks its offenders the same way, and
+    the tool that heals the refused clauses learned that an offender arrives masked rather than bare
+    (`ctrl29-unprinted-recitals.txt`, `register-refresh-recitals.txt`).
+  - **RA-102 — two comparisons decided a verdict from the wording of a line rather than the fact it records.**
+    The unprinted-recital control's counterfactual re-injects a stale figure and requires a refusal, then
+    looked for the offender without the space after the colon, so nothing matched, the counterfactual
+    reported zero holds, and a guard whose self-test could only ever say the same thing was certified —
+    RA-75's empty predicate inside the instrument written to prove the guard bites. It now compares the
+    offender's exact string and requires the count to be one in both shapes the sweep knows. The second is
+    the deliverable writer's reader of the parsers control, which pinned the whole per-file line including
+    the trailing list of call shapes, so the writer would have failed on the next improvement to the
+    instrument it reads. The fixed columns are matched by position and the shapes as a set, with a closure
+    the writer insists on: the per-kind counts must sum to the number of patterns read
+    (`ctrl25-instrument-parsers.txt`, `patch-deliverable-13.cjs`).
+  - **RA-103 — the instrument that reads the campaign's readers was itself unread.** The parsers control
+    recognised a transcript parser by one agreed name; the healing tool this pass wrote called its reader
+    something else, so four transcripts fell outside every census and two of those readers mis-parsed the
+    very offender lines they existed to place — the measuring instrument blind in exactly the way its
+    subject was blind. The repair is not a rename, which would have hidden the next new reader for the same
+    reason: the control derives the helper names from the campaign scripts' own bytes and prints how many it
+    found beyond the pair it already knew, so a name that arrives by convention is one the sweep is proved to
+    have found rather than one its author typed. The deliverable writer refuses to ship a row when the
+    derivation reports nothing (`ctrl25-instrument-parsers.txt`).
+  - **RA-104 — nothing in the chain ever asked whether the campaign's instruments parse.** Their bytes are
+    read as evidence by tools that certify them, so a duplicated declaration that survived an edit in a
+    quarter-megabyte script meant every measurement taken of those bytes described a file node refuses to
+    execute. The control that reads those bytes now parses every JavaScript file in the scratch directory
+    before it declares itself green, and its bite is built rather than asserted: a copy carrying a
+    duplicated declaration must fail and must name the duplicate, a valid script must pass, and both are
+    written where the corpus cannot harvest them, so the instrument that hunts self-certifying evidence does
+    not create any (`ctrl25-instrument-parsers.txt`).
+  - **RA-105 — two instruments began with their subject set typed into their own source.** The documentation
+    sweep read the repository's markdown from a list, so a file added later was never swept — RA-89's finding
+    about the documents, in the tool built to catch it — and the parsers control counted instruments,
+    helper callers and leftovers without requiring the three to be the same fact, so a swept set that was
+    not a subset of the class it measured printed a smaller green number. The sweep now takes every subject
+    from git on the tree it stamps and refuses a worktree carrying uncommitted markdown, because a sweep of
+    bytes a clone does not get certifies nothing; its header prints how many documents it read and how many
+    came from git, and the two closing is what makes the subject set a fact about the repository. The
+    parsers control splits its unswept helper callers into those whose shapes it places and those it cannot
+    read and requires the two to sum to the unswept count, with the writer refusing a census that does not
+    close (`ctrl30-doc-recitals.txt`, `ctrl25-instrument-parsers.txt`).
+  - **RA-106 — a control whose two legs were described as judging different subjects was judging one.** The
+    unprinted-recital sweep's register-only leg accepted a parameter it never used and read the gate rows
+    from an enclosing value, so it swept the whole log; the healing tool then demanded a zero total that only
+    a build which had already rewritten the row could satisfy — RA-77's deadlock one instrument later, in
+    the tool written to heal the rows RA-77 blamed. Sources are now passed rather than captured, so a leg
+    that says register reads the register; judgement is scoped by one shared rule rather than re-decided per
+    file, with the offenders this build regenerates excused because the same run rewrites them and those in
+    the register or in a row no writer touches reported as findings; and the sweep prints both its totals and
+    its unhealed counts and fails only on the unhealed ones. `C:/tmp/ctrl33-recital-scope.cjs` feeds every
+    branch of the rule a subject built for it (`ctrl29-unprinted-recitals.txt`, `ctrl33-recital-scope.txt`).
+  - **RA-107 — the repair that gave a control custody of its capture made that capture lie about the tree it
+    measured.** The dependency-advisory control re-reads two audit files frozen since the provenance batch
+    wrote them, so its subject is not the worktree; once it owned its transcript and stamped live HEAD, a
+    later commit re-labelled bytes the batch never measured there, and the writer correctly refused the gate
+    row citing them — the class RA-97 registers, inside the repair designed to remove the same dependence.
+    The one line is split into the three facts it stood for: the subject tree, derived from the batch
+    transcript that wrote the inputs; the control tree, the commit the control ran at; and hashes of the
+    inputs themselves. The writer accepts the row at the gated tip or a documentation-only descendant and
+    refuses a capture whose stamp is not its subject's, whose hashes do not match, or whose script has gone
+    back to stamping HEAD (`ctrl14-audit-needle.txt`).
+  - **RA-108 — four readers were written against the shape a line happened to have on the day it was first
+    read.** The deliverable writer required a file and line inside every ctrl22 refusal, but the fifth
+    refusal carries a count, so the writer counted four against a control that printed five and the one it
+    could not see was the leg that exists to catch a reader that cannot see a line. The same writer required
+    ctrl28's invention ledger to end at a field when the control had gained a seventh, read ctrl33's
+    seven-column phase-A line by position — the check held undefined and refused a green control — and
+    ctrl28's own census omitted the self-refusal column from the bucket list that feeds its total. The
+    reader that trusts a remembered list or position either drops an offender or refuses a better line, and
+    in both directions the census stops being falsifiable. The repair reads by name and cross-checks the
+    count: refusals are counted by the sentence the control prints and compared against every refusal line,
+    the invention and phase-A fields are pulled by label, and ctrl28 asserts its census closes against the
+    line it is about to print, falsified on a doctored copy. One ordering defect belongs to the family from
+    the other side: the writer's dry attribution run executed before the rehearsal whose capture its
+    candidate log cites, so the run that certifies the bytes now happens after the run that writes the
+    capture they name (`ctrl22-metrics-falsify.txt`, `ctrl28-register-tally.txt`,
+    `ctrl33-recital-scope.txt`).
+  - **RA-109 — the control that certifies which refusals a build heals could not be run after the build it
+    certified.** ctrl33's phase A required the row the build appends to be absent from the log, and its
+    phase-B closure required exactly one declared check to be missing; once the pass-17 row shipped, the
+    derivation correctly reported every check on disk, the control looked for a row after the last one,
+    found none, and refused the build's own output — RA-98's class in the instrument that decides which
+    refusals the build repairs, found by re-running it after the pass. The phase is now read from the
+    derivation's own absent-row count instead of assumed from the log's length: ctrl33 prints
+    `CTRL33_APPEND_STATE` with that count, feeds its healed fixtures from the row it would append or from
+    the last derived label, and still builds both a one-absent-row source and an all-present one on invented
+    bytes every run, so neither branch is tested only on the day it was live. The writer reads the same
+    field and refuses a capture from the other phase, so a stale capture fails rather than certifying the
+    wrong phase (`ctrl33-recital-scope.txt`).
+  - **RA-110 — the control that certifies the allowance rule had a branch reachable only after the repair it
+    certifies had shipped, and the branch did not work.** When the live attribution census is red, ctrl26
+    studies it; when the log is clean — the state the writer produces — it builds a red census by rewriting
+    every measured clause to a commit its proof file never recorded. The construction drew its candidates
+    from a pool that included the gated tip, which no restamp target can name, and blamed a row with no
+    provenance proof, which the writer does repair — so the clean-log branch refused on its first
+    legitimate run. The pool is now built both ways, the shipped one excluding the gated tip and the
+    pre-repair one not, with the capture printing whether each draws the tip and how many rows each censuses;
+    where the head equals the gated tip the control says the pools coincide instead of pretending the
+    counterfactual ran. The self-check row falls back to the transcript its clause already cites, bounded to
+    that row and that blamed file, while every other row still requires a provenance entry
+    (`ctrl26-restamp-allowance.txt`).
+  - **RA-111 — the shared scoping rule could not see the bucket the tally prints for a label it has never
+    met.** Tally and sweep both name an offender as a bucket word, a colon, then the row label and value; the
+    unknown-label bucket annotated itself `(masked)`, so the rule found no row label before the value,
+    refused to place the offender, and the candidate rehearsal died on the shape while the writer's own leg
+    would have dropped it. The repair lives in the one place the rule lives: recital-scope accepts an
+    optional parenthesised annotation between the bucket word and the colon, and the writer, the register
+    writer and ctrl33's phase-D filter all include the unknown-label bucket in the set they hand it, so the
+    reader and its consumers see the same set. It is measured in both directions: ctrl33 builds a masked
+    line from a label derived out of the writer's own declaration and requires exactly one placed item,
+    labelled with that row and healed, while replaying the old prefix rule on the same line and requiring it
+    to place nothing; the phase-D closure now counts the unknown-label column against the lines the tally
+    printed (`ctrl33-recital-scope.txt`).
 - **The sixteenth re-audit pass read the deliverable's own figures back against the artefacts and refused the
   ones nothing prints.** Two findings, both inside the instruments filed at the previous pass to police the
   register — and the second moved rows a reviewer would read, because eleven of them cited exit codes under
