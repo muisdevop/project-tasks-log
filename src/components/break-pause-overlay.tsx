@@ -1,56 +1,37 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { formatElapsed } from "@/lib/business-time";
-
-type ActiveBreak = {
-  id: number;
-  breakTypeId: number;
-  jobId: number;
-  startTime: string;
-  duration: number | null;
-  name: string;
-};
+import {
+  ACTIVE_BREAK_KEY,
+  logFinishedBreak,
+  parseActiveBreak,
+  type ActiveBreak,
+} from "@/lib/breaks";
 
 export function BreakPauseOverlay() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
 
   // Load active break from localStorage on mount
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const loadActiveBreak = () => {
-      const stored = localStorage.getItem("activeBreak");
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          setActiveBreak(parsed);
-        } catch (err) {
-          console.error("Failed to parse activeBreak from localStorage:", err);
-          setActiveBreak(null);
-        }
-      } else {
-        setActiveBreak(null);
-      }
+      setActiveBreak(parseActiveBreak(localStorage.getItem(ACTIVE_BREAK_KEY)));
     };
 
     loadActiveBreak();
 
     // Listen for storage changes from other components/tabs
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "activeBreak") {
-        if (e.newValue) {
-          try {
-            setActiveBreak(JSON.parse(e.newValue));
-          } catch (err) {
-            console.error("Failed to parse activeBreak:", err);
-            setActiveBreak(null);
-          }
-        } else {
-          setActiveBreak(null);
-        }
+      if (e.key === ACTIVE_BREAK_KEY) {
+        setActiveBreak(parseActiveBreak(e.newValue));
       }
     };
 
@@ -100,80 +81,30 @@ export function BreakPauseOverlay() {
     if (!activeBreak || isLoading) return;
 
     setIsLoading(true);
+    setEndError(null);
 
-    try {
-      // Calculate actual break duration
-      const actualDuration = Math.floor(
-        (new Date().getTime() - new Date(activeBreak.startTime).getTime()) / 1000
-      );
+    // Single atomic server write; on failure the overlay stays open so the
+    // break is neither lost nor half-logged (UX-03).
+    const result = await logFinishedBreak(activeBreak, pathname);
 
-      // Create a break task in the current project
-      const projectMatch = window.location.pathname.match(/\/projects\/(\d+)\/tasks/);
-      let projectId: number | null = projectMatch ? parseInt(projectMatch[1]) : null;
-
-      // If no project from URL, try to find one for this job
-      if (!projectId && activeBreak.jobId) {
-        try {
-          const projectsRes = await fetch("/api/projects");
-          if (projectsRes.ok) {
-            const data = await projectsRes.json();
-            const firstProject = (data.projects || []).find(
-              (project: { id: number; jobId: number }) => project.jobId === activeBreak.jobId
-            );
-            projectId = firstProject?.id ?? null;
-          }
-        } catch (err) {
-          console.error("Failed to resolve project for break logging:", err);
-        }
-      }
-
-      if (projectId) {
-        try {
-          const response = await fetch("/api/tasks", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              projectId,
-              title: `${activeBreak.name} Break`,
-              description: `Break duration: ${formatElapsed(actualDuration)}`,
-              startedAt: activeBreak.startTime,
-            }),
-          });
-
-          if (response.ok) {
-            const taskData = await response.json();
-            await fetch("/api/tasks", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                taskId: taskData.task.id,
-                action: "complete",
-                details: `Break completed. Duration: ${formatElapsed(actualDuration)}`,
-                elapsedSeconds: actualDuration,
-              }),
-            });
-          }
-        } catch (err) {
-          console.error("Failed to log break:", err);
-        }
-      }
-
-      // Clear active break
-      localStorage.removeItem("activeBreak");
-      setActiveBreak(null);
-      setElapsedSeconds(0);
-
-      // Dispatch event to notify global-break-widget
-      window.dispatchEvent(new CustomEvent("breakEnded"));
-
-      // Refresh the page to update task list
-      window.location.reload();
-    } catch (err) {
-      console.error("Failed to end break:", err);
-    } finally {
+    if (!result.ok) {
+      setEndError(result.error);
       setIsLoading(false);
+      return;
     }
-  }, [activeBreak, isLoading]);
+
+    // Clear active break
+    localStorage.removeItem(ACTIVE_BREAK_KEY);
+    setActiveBreak(null);
+    setElapsedSeconds(0);
+
+    // Dispatch event to notify global-break-widget
+    window.dispatchEvent(new CustomEvent("breakEnded"));
+
+    setIsLoading(false);
+    // Revalidate server components instead of a hard reload.
+    router.refresh();
+  }, [activeBreak, isLoading, pathname, router]);
 
   if (!activeBreak) return null;
 
@@ -262,6 +193,16 @@ export function BreakPauseOverlay() {
             </>
           )}
         </button>
+
+        {/* Error Message */}
+        {endError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-2xl border border-white/30 bg-white/20 p-3 text-center text-sm font-medium text-white"
+          >
+            {endError}
+          </div>
+        )}
 
         {/* Status Message */}
         <div className="text-center p-4 rounded-2xl bg-white/10 border border-white/20">

@@ -1,0 +1,256 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ACTIVE_BREAK_KEY,
+  PROJECT_JOB_MISMATCH_ERROR,
+  breakIdempotencyKey,
+  logFinishedBreak,
+  parseActiveBreak,
+  type ActiveBreak,
+} from "@/lib/breaks";
+
+const activeBreak: ActiveBreak = {
+  id: 1,
+  breakTypeId: 2,
+  jobId: 10,
+  startTime: "2026-03-30T10:00:00.000Z",
+  duration: 15,
+  name: "Coffee",
+};
+
+describe("ACTIVE_BREAK_KEY", () => {
+  it("is the documented localStorage key", () => {
+    expect(ACTIVE_BREAK_KEY).toBe("activeBreak");
+  });
+});
+
+describe("parseActiveBreak", () => {
+  it("tolerates absent input", () => {
+    expect(parseActiveBreak(null)).toBeNull();
+    expect(parseActiveBreak(undefined)).toBeNull();
+    expect(parseActiveBreak("")).toBeNull();
+  });
+
+  it("tolerates corrupt payloads", () => {
+    expect(parseActiveBreak("not json")).toBeNull();
+    expect(parseActiveBreak("{")).toBeNull();
+    expect(parseActiveBreak("[]")).toBeNull();
+    expect(parseActiveBreak("{}")).toBeNull();
+    expect(parseActiveBreak("null")).toBeNull();
+  });
+
+  it("requires a name and a parseable startTime", () => {
+    expect(parseActiveBreak(JSON.stringify({ name: "x" }))).toBeNull();
+    expect(parseActiveBreak(JSON.stringify({ startTime: "2026-03-30T10:00:00Z" }))).toBeNull();
+    expect(
+      parseActiveBreak(JSON.stringify({ name: "x", startTime: "definitely-not-a-date" })),
+    ).toBeNull();
+  });
+
+  it("returns the typed object for a valid payload", () => {
+    const parsed = parseActiveBreak(JSON.stringify(activeBreak));
+    expect(parsed).toEqual(activeBreak);
+    expect(parsed?.startTime).toBe("2026-03-30T10:00:00.000Z");
+  });
+
+  it("accepts a minimal valid payload without numeric fields", () => {
+    const parsed = parseActiveBreak(
+      JSON.stringify({ startTime: "2026-03-30T10:00:00Z", name: "Lunch", duration: null }),
+    );
+    expect(parsed?.name).toBe("Lunch");
+    expect(parsed?.duration).toBeNull();
+  });
+});
+
+describe("logFinishedBreak", () => {
+  type FakeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
+  type FetchInit = {
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+    cache?: string;
+  };
+  type FetchStub = (url: string, init?: FetchInit) => Promise<FakeResponse>;
+
+  function stubFetch(impl: (url: string, init?: FetchInit) => Promise<FakeResponse>) {
+    const fetchMock = vi.fn<FetchStub>(impl);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the break log and succeeds, resolving projectId from the pathname", async () => {
+    const fetchMock = stubFetch(async () => ({ ok: true, status: 201, json: async () => ({}) }));
+
+    const result = await logFinishedBreak(activeBreak, "/projects/8/tasks");
+
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/breaks/log");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      jobId: 10,
+      projectId: 8,
+      name: "Coffee",
+      startedAt: "2026-03-30T10:00:00.000Z",
+    });
+  });
+
+  it("omits projectId when not on a project page", async () => {
+    const fetchMock = stubFetch(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+
+    await logFinishedBreak(activeBreak, "/dashboard");
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).not.toHaveProperty("projectId");
+  });
+
+  describe("Idempotency-Key (FL-01)", () => {
+    it("sends the header on every break POST", async () => {
+      const fetchMock = stubFetch(async () => ({ ok: true, status: 201, json: async () => ({}) }));
+
+      await logFinishedBreak(activeBreak, "/projects/8/tasks");
+
+      const headers = fetchMock.mock.calls[0][1]?.headers;
+      expect(headers?.["Idempotency-Key"]).toBe(breakIdempotencyKey(activeBreak, 8));
+      expect(headers?.["Idempotency-Key"]).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
+    });
+
+    it("is the same key for a second tab ending the same stored break", async () => {
+      const fetchMock = stubFetch(async () => ({ ok: true, status: 201, json: async () => ({}) }));
+      // Two tabs read the identical localStorage record and both hit "End Break".
+      await logFinishedBreak({ ...activeBreak }, "/projects/8/tasks");
+      await logFinishedBreak({ ...activeBreak }, "/projects/8/tasks");
+
+      const [first, second] = fetchMock.mock.calls.map((call) => call[1]?.headers?.["Idempotency-Key"]);
+      expect(first).toBe(second);
+      expect(first).toBeDefined();
+    });
+
+    it("changes the key for the project-less mismatch retry, so it is not a 409", async () => {
+      const fetchMock = stubFetch(async (_url, init) => {
+        const hasProject = JSON.parse(String(init?.body)).projectId !== undefined;
+        return hasProject
+          ? { ok: false, status: 400, json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }) }
+          : { ok: true, status: 201, json: async () => ({}) };
+      });
+
+      await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({ ok: true });
+
+      const keys = fetchMock.mock.calls.map((call) => call[1]?.headers?.["Idempotency-Key"]);
+      expect(new Set(keys).size).toBe(2);
+      expect(keys[1]).toBe(breakIdempotencyKey(activeBreak, null));
+    });
+
+    it("changes the key for a different logical break", () => {
+      expect(breakIdempotencyKey(activeBreak, 8)).not.toBe(
+        breakIdempotencyKey({ ...activeBreak, startTime: "2026-03-30T11:00:00.000Z" }, 8),
+      );
+      expect(breakIdempotencyKey(activeBreak, 8)).not.toBe(
+        breakIdempotencyKey({ ...activeBreak, breakTypeId: 3 }, 8),
+      );
+    });
+  });
+
+  it("surfaces the server error message on a failed response", async () => {
+    stubFetch(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "Job not found" }),
+    }));
+
+    await expect(logFinishedBreak(activeBreak, null)).resolves.toEqual({
+      ok: false,
+      error: "Job not found",
+    });
+  });
+
+  it("falls back to a generic message when the error body is unusable", async () => {
+    stubFetch(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new SyntaxError("bad json");
+      },
+    }));
+
+    await expect(logFinishedBreak(activeBreak, undefined)).resolves.toEqual({
+      ok: false,
+      error: "Failed to log this break. Try again.",
+    });
+  });
+
+  it("reports a network error when fetch rejects", async () => {
+    stubFetch(async () => {
+      throw new TypeError("offline");
+    });
+
+    await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({
+      ok: false,
+      error: "Network error while logging this break. Try again.",
+    });
+  });
+
+  it("retries without a projectId when the server reports a job mismatch", async () => {
+    const fetchMock = stubFetch(async (_url, init) => {
+      const hasProject = JSON.parse(String(init?.body)).projectId !== undefined;
+      if (hasProject) {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }),
+        };
+      }
+      return { ok: true, status: 201, json: async () => ({}) };
+    });
+
+    await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      jobId: 10,
+      projectId: 8,
+      name: "Coffee",
+      startedAt: "2026-03-30T10:00:00.000Z",
+    });
+    // The retry logs against the break's own job, never the foreign project.
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      jobId: 10,
+      name: "Coffee",
+      startedAt: "2026-03-30T10:00:00.000Z",
+    });
+  });
+
+  it("does not loop when the project-less retry reports the same mismatch", async () => {
+    const fetchMock = stubFetch(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }),
+    }));
+
+    await expect(logFinishedBreak(activeBreak, "/projects/8/tasks")).resolves.toEqual({
+      ok: false,
+      error: "Failed to log this break. Try again.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes a mismatch through when no project was resolved", async () => {
+    const fetchMock = stubFetch(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: PROJECT_JOB_MISMATCH_ERROR }),
+    }));
+
+    await expect(logFinishedBreak(activeBreak, "/dashboard")).resolves.toEqual({
+      ok: false,
+      error: "Failed to log this break. Try again.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

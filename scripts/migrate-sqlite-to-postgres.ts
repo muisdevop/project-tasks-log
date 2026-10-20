@@ -4,6 +4,12 @@ import { Client } from "pg";
 type UserSettingsRow = {
   id: number;
   passwordHash: string | null;
+  fullName: string | null;
+  email: string | null;
+  title: string | null;
+  bio: string | null;
+  reportTitleOptions: string | null;
+  defaultReportTitle: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -77,6 +83,17 @@ type TaskEventRow = {
   meta: string | null;
 };
 
+type JobAttendanceRow = {
+  id: number;
+  jobId: number;
+  checkInTime: string;
+  checkOutTime: string | null;
+  totalWorkSeconds: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 function resolveSqlitePath(url: string): string {
   if (!url.startsWith("file:")) {
     throw new Error("DATABASE_URL_SQLITE must use file: URL format.");
@@ -108,6 +125,7 @@ async function main() {
     '"SubTask"',
     '"Task"',
     '"BreakType"',
+    '"JobAttendance"',
     '"Project"',
     '"Job"',
     '"UserSettings"',
@@ -118,12 +136,29 @@ async function main() {
     await pg.query(`TRUNCATE ${tables.join(", ")} RESTART IDENTITY CASCADE`);
 
     const userSettings = sqlite
-      .prepare("SELECT id, passwordHash, createdAt, updatedAt FROM UserSettings")
+      .prepare(
+        "SELECT id, passwordHash, fullName, email, title, bio, reportTitleOptions, defaultReportTitle, createdAt, updatedAt FROM UserSettings",
+      )
       .all() as UserSettingsRow[];
     for (const row of userSettings) {
       await pg.query(
-        'INSERT INTO "UserSettings" (id, "passwordHash", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4)',
-        [row.id, row.passwordHash, row.createdAt, row.updatedAt],
+        'INSERT INTO "UserSettings" (id, "passwordHash", "fullName", email, title, bio, "reportTitleOptions", "defaultReportTitle", "createdAt", "updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10)',
+        [
+          row.id,
+          row.passwordHash,
+          row.fullName,
+          row.email,
+          row.title,
+          row.bio,
+          row.reportTitleOptions
+            ? (typeof row.reportTitleOptions === "string"
+                ? row.reportTitleOptions
+                : JSON.stringify(row.reportTitleOptions))
+            : null,
+          row.defaultReportTitle,
+          row.createdAt,
+          row.updatedAt,
+        ],
       );
     }
 
@@ -239,6 +274,27 @@ async function main() {
       );
     }
 
+    const attendance = sqlite
+      .prepare(
+        "SELECT id, jobId, checkInTime, checkOutTime, totalWorkSeconds, notes, createdAt, updatedAt FROM JobAttendance",
+      )
+      .all() as JobAttendanceRow[];
+    for (const row of attendance) {
+      await pg.query(
+        'INSERT INTO "JobAttendance" (id, "jobId", "checkInTime", "checkOutTime", "totalWorkSeconds", notes, "createdAt", "updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [
+          row.id,
+          row.jobId,
+          row.checkInTime,
+          row.checkOutTime,
+          row.totalWorkSeconds,
+          row.notes,
+          row.createdAt,
+          row.updatedAt,
+        ],
+      );
+    }
+
     await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"UserSettings\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"UserSettings\"), 1), true)");
     await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"Job\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"Job\"), 1), true)");
     await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"Project\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"Project\"), 1), true)");
@@ -246,6 +302,7 @@ async function main() {
     await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"Task\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"Task\"), 1), true)");
     await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"SubTask\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"SubTask\"), 1), true)");
     await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"TaskEvent\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"TaskEvent\"), 1), true)");
+    await pg.query('SELECT setval(pg_get_serial_sequence(' + "'\"JobAttendance\"'" + ", 'id'), COALESCE((SELECT MAX(id) FROM \"JobAttendance\"), 1), true)");
 
     await pg.query("COMMIT");
 

@@ -1,0 +1,2 @@
+# Prisma requires this file so a migrations folder is only ever used with one provider.
+provider = "postgresql"
